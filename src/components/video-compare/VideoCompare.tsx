@@ -153,7 +153,6 @@ export function VideoCompare({
       return;
     }
     clock.current = { time: clock.current.time, at: performance.now(), rate };
-    startRef.current();
     const timer = window.setInterval(() => {
       const now = performance.now();
       const current = clock.current.time + (now - clock.current.at) / 1000 * clock.current.rate;
@@ -212,6 +211,8 @@ export function VideoCompare({
       clock.current = { time: current, at: performance.now(), rate };
       syncRef.current(current, true);
       setTime(current);
+      // Browser media activation must happen in the user's click handler.
+      startRef.current();
       setPlaying(true);
     }
   };
