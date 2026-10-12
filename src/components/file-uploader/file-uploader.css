@@ -1,0 +1,40 @@
+.darl-uploader { width: 100%; min-width: 0; background: var(--darl-background); font-size: 14px; }
+.darl-visually-hidden { position: absolute!important; width: 1px!important; height: 1px!important; padding: 0!important; margin: -1px!important; overflow: hidden!important; clip: rect(0,0,0,0)!important; white-space: nowrap!important; border: 0!important; }
+.darl-dropzone { position: relative; border: 1.5px dashed var(--darl-border); background: var(--darl-surface); border-radius: var(--darl-radius); display: flex; flex-direction: column; align-items: center; text-align: center; padding: 38px 18px 32px; transition: border .15s, background .15s; outline: none; }
+.darl-dropzone:focus-visible { outline: 2px solid var(--darl-primary); outline-offset: 3px; }
+.darl-dropzone--dragging { border-color: var(--darl-primary); background: color-mix(in srgb, var(--darl-primary) 7%, var(--darl-background)); }
+.darl-dropzone--disabled { opacity: .6; cursor: not-allowed; }
+.darl-upload-emblem { color: var(--darl-primary); background: color-mix(in srgb, var(--darl-primary) 11%, var(--darl-background)); border-radius: 14px; padding: 13px; display: flex; margin-bottom: 15px; }
+.darl-dropzone h3 { font-size: 15px; margin: 0 0 7px; line-height: 1.3; font-weight: 650; color: var(--darl-text); }
+.darl-dropzone p { margin: 0 0 20px; font-size: 12px; color: var(--darl-muted); line-height: 1.4; }
+.darl-upload-hint { margin-top: 14px; color: var(--darl-muted); font-size: 11px; }
+.darl-rejections { display: flex; align-items: flex-start; gap: 9px; padding: 10px 12px; margin-top: 12px; border-radius: 9px; color: var(--darl-danger); background: color-mix(in srgb, var(--darl-danger) 9%, var(--darl-background)); font-size: 12px; line-height: 1.7; }
+.darl-rejections > div { flex: 1; }
+.darl-file-list { margin-top: 20px; }
+.darl-file-list-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 11px; }
+.darl-file-list-header strong { font-size: 13px; font-weight: 650; }
+.darl-file-summary { margin-left: 12px; color: var(--darl-muted); font-size: 11px; }
+.darl-file-actions { display: flex; align-items: center; gap: 4px; }
+.darl-upload-items { display: flex; flex-direction: column; gap: 0; padding: 0; margin: 0; list-style: none; border: 1px solid var(--darl-border); border-radius: var(--darl-radius); overflow: hidden; }
+.darl-upload-item { min-width: 0; display: flex; gap: 12px; align-items: center; padding: 11px 13px; background: var(--darl-background); }
+.darl-upload-item + .darl-upload-item { border-top: 1px solid var(--darl-border); }
+.darl-file-thumbnail { flex: 0 0 39px; height: 39px; display: grid; place-items: center; color: var(--darl-muted); border-radius: 9px; background: var(--darl-surface); overflow: hidden; }
+.darl-file-thumbnail img { width: 100%; height: 100%; object-fit: cover; }
+.darl-file-content { flex: 1; min-width: 0; }
+.darl-file-title { font-size: 12px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.darl-file-meta { font-size: 11px; color: var(--darl-muted); margin-top: 4px; display: flex; align-items: center; gap: 11px; }
+.darl-status--success { color: var(--darl-success); }
+.darl-status--error { color: var(--darl-danger); }
+.darl-status--uploading { color: var(--darl-primary); }
+.darl-file-error { margin-top: 5px; color: var(--darl-danger); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.darl-upload-item-actions { display: flex; align-items: center; gap: 2px; }
+.darl-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; color: var(--darl-muted); background: transparent; cursor: pointer; }
+.darl-icon-button:hover:not(:disabled) { color: var(--darl-text); background: var(--darl-surface); }
+.darl-icon-button:focus-visible { outline: 2px solid var(--darl-primary); }
+.darl-icon-button:disabled { opacity: .5; cursor: not-allowed; }
+.darl-upload-check { display: flex; color: var(--darl-success); margin-right: 4px; }
+.darl-progress { overflow: hidden; height: 4px; background: var(--darl-border); border-radius: 99px; margin-top: 9px; }
+.darl-progress > div { height: 100%; background: var(--darl-primary); transition: width .15s linear; border-radius: 99px; }
+.darl-progress--unknown > div { animation: darl-indeterminate 1.2s ease-in-out infinite; }
+@keyframes darl-indeterminate { 0% { transform: translateX(-110%); } 100% { transform: translateX(320%); } }
+@media (max-width: 480px) { .darl-dropzone { padding: 27px 13px; } .darl-file-list-header { align-items: flex-start; flex-direction: column; } .darl-upload-item { padding: 10px 8px; gap: 8px; } .darl-file-thumbnail { flex-basis: 34px; height: 34px; } .darl-file-summary { display: block; margin: 4px 0 0; } }

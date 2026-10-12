@@ -1,0 +1,39 @@
+.darl-ui-root, .darl-uploader--standalone {
+  --darl-primary: #2563eb;
+  --darl-primary-foreground: #fff;
+  --darl-radius: 12px;
+  --darl-background: #fff;
+  --darl-surface: #f8fafc;
+  --darl-text: #0f172a;
+  --darl-muted: #64748b;
+  --darl-border: #e2e8f0;
+  --darl-danger: #dc2626;
+  --darl-success: #15803d;
+  color: var(--darl-text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.darl-ui-root[data-darl-theme="dark"], .darl-ui-root[data-darl-theme="dark"] .darl-uploader {
+  --darl-background: #111827;
+  --darl-surface: #192234;
+  --darl-text: #f1f5f9;
+  --darl-muted: #94a3b8;
+  --darl-border: #344155;
+  --darl-danger: #fb7185;
+  --darl-success: #4ade80;
+}
+.darl-ui-root { background: var(--darl-background); color: var(--darl-text); }
+.darl-uploader { color: var(--darl-text); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.darl-ui-root *, .darl-uploader *, .darl-ui-root *::before, .darl-uploader *::before { box-sizing: border-box; }
+.darl-button { appearance: none; font: inherit; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid transparent; border-radius: calc(var(--darl-radius) - 4px); font-size: 13px; font-weight: 550; line-height: 1.2; cursor: pointer; transition: background .15s, opacity .15s, border-color .15s; white-space: nowrap; }
+.darl-button:focus-visible { outline: 2px solid var(--darl-primary); outline-offset: 3px; }
+.darl-button:disabled { cursor: not-allowed; opacity: .5; }
+.darl-button--default { background: var(--darl-primary); color: var(--darl-primary-foreground); }
+.darl-button--default:hover:not(:disabled) { filter: brightness(.94); }
+.darl-button--outline { background: transparent; border-color: var(--darl-border); color: var(--darl-text); }
+.darl-button--outline:hover:not(:disabled), .darl-button--ghost:hover:not(:disabled) { background: var(--darl-surface); }
+.darl-button--secondary { background: var(--darl-surface); color: var(--darl-text); }
+.darl-button--ghost { background: transparent; color: var(--darl-muted); }
+.darl-button--destructive { background: var(--darl-danger); color: white; }
+.darl-button-size--default { min-height: 36px; padding: 0 15px; }
+.darl-button-size--sm { min-height: 30px; padding: 0 10px; font-size: 12px; }
+.darl-button-size--icon { min-width: 30px; height: 30px; padding: 0; }
