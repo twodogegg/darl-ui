@@ -74,7 +74,7 @@ export function VideoCompare({
   const total = Math.max(0, ...items.map((item) => metadata[item.id]?.src === item.src ? metadata[item.id].duration : 0));
   const firstMeta = items[0] ? metadata[items[0].id] : undefined;
   const resolvedLayout: 'vertical' | 'horizontal' | 'pending' = layout === 'auto'
-    ? firstMeta?.src === items[0]?.src ? (firstMeta.width >= firstMeta.height ? 'vertical' : 'horizontal') : 'pending'
+    ? firstMeta && firstMeta.src === items[0]?.src ? (firstMeta.width >= firstMeta.height ? 'vertical' : 'horizontal') : 'pending'
     : layout;
   const available = items.length >= 2 && readyCount > 0 && resolvedCount === items.length && total > 0;
   const sourcesSignature = signature;
