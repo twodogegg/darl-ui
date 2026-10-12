@@ -1,2 +1,4 @@
 @import './components/ui/button.css';
 @import './components/file-uploader/file-uploader.css';
+
+@import './components/video-compare/video-compare.css';

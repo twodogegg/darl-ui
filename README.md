@@ -141,3 +141,23 @@ function MyUpload() {
 ## 发布说明
 
 `package.json` 使用 `"private": true`，防止误发布。确认包名和私有发布目标后才修改此项。源代码托管于 https://github.com/twodogegg/darl-ui 。
+
+## VideoCompare｜视频对比
+
+第二个高级组件：最多 3 个本地或远程视频同屏对比。横屏（16:9）自动上下排列，竖屏（9:16）自动左右排列；混合画幅以第一个视频判断方向，也可用 `layout` 覆盖。支持统一播放/暂停/进度/倍速/循环、单一路视频声音（或全部静音）、最佳版本单选与取消。
+
+```tsx
+import { VideoCompare } from '@darl/ui';
+import '@darl/ui/styles.css';
+
+const [bestId, setBestId] = useState<string | null>(null);
+const videos = [
+  { id: 'v1', name: '生成版本 A', src: '/output-a.mp4' },
+  { id: 'v2', name: '生成版本 B', src: '/output-b.mp4' },
+];
+<VideoCompare videos={videos} bestVideoId={bestId} onBestChange={setBestId} />
+```
+
+`VideoCompare` 支持 `videos`（2–3 项、至少 2 项可比较）、`layout: 'auto' | 'vertical' | 'horizontal'`、`audioSourceId/defaultAudioSourceId/onAudioSourceChange`、`bestVideoId/defaultBestVideoId/onBestChange`、`onRemove`、`onError`、`loop`、`accentColor` 与 `className`。
+
+**边界**：所有视频从各自 0 秒同步；全局时长取最长视频，短视频停留末帧，切换声音不重置时间轴，选为最佳不修改音源。播放依赖浏览器解码能力，并做适度时间轴纠偏，不承诺专业软件级逐帧锁定。不会合成视频、管理资产或保存最佳记录；业务网站可通过 `onBestChange(id)` 持久化选择。组件不会上传视频，演示页面中的本地文件仅通过浏览器 Blob URL 使用。
