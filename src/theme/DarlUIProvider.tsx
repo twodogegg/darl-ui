@@ -24,7 +24,7 @@ export function DarlUIProvider({ theme = {}, children, className = '' }: DarlUIP
     mq.addEventListener('change', update);
     return () => mq.removeEventListener('change', update);
   }, []);
-  const resolvedMode = theme.mode === 'dark' || (theme.mode !== 'light' && systemDark) ? 'dark' : 'light';
+  const resolvedMode: 'light' | 'dark' = theme.mode === 'dark' || (theme.mode !== 'light' && systemDark) ? 'dark' : 'light';
   const styles = {
     ...(theme.primaryColor ? { '--darl-primary': theme.primaryColor, '--darl-primary-foreground': readableForeground(theme.primaryColor) } : {}),
     ...(theme.radius !== undefined ? { '--darl-radius': `${theme.radius}px` } : {})
