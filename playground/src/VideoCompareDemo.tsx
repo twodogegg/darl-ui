@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Film, Info, Plus, Trash2 } from 'lucide-react';
+import { Info, Plus, Trash2 } from 'lucide-react';
 import { DarlUIProvider, VideoCompare, type CompareVideo, type VideoCompareLayout } from '../../src';
 
 interface Props { mode: 'light' | 'dark'; color: string }
