@@ -1,8 +1,11 @@
 import { AgentComposerInput, ReferenceText, referenceIds } from './AgentComposerInput';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertCircle, ArrowLeft, Bot, Check, ChevronDown, Clipboard, Copy, History, LoaderCircle, Paperclip, Pencil, Plus, RefreshCw, Search, Send, Sparkles, Square, Upload, Wrench, X } from 'lucide-react';
+import { AlertCircle, ArrowDown, ArrowLeft, ArrowUp, Bot, Check, ChevronDown, Clipboard, Copy, History, LoaderCircle, Maximize2, Minimize2, Paperclip, Pencil, Plus, RefreshCw, Search, Send, Sparkles, Square, Upload, Wrench, X } from 'lucide-react';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import rehypeSanitize from 'rehype-sanitize';
+import remarkGfm from 'remark-gfm';
 import { Button } from '../ui/Button';
-import type { AgentApplication, AgentSidebarProps, AgentSkill, AgentToolCall } from './types';
+import type { AgentApplication, AgentSession, AgentSidebarProps, AgentSkill, AgentToolCall } from './types';
 import { SkillManager } from './SkillManager';
 import { importSkillPackage } from './skill-package';
 
@@ -14,69 +17,22 @@ function formatToolValue(value: unknown): string {
   try { return JSON.stringify(value, null, 2); } catch { return String(value); }
 }
 
-function InlineMarkdown({ text }: { text: string }) {
-  const tokens = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^\s)]+\))/g).filter(Boolean);
-  return <>{tokens.map((token, index) => {
-    const strong = token.match(/^\*\*(.+)\*\*$/);
-    if (strong) return <strong key={index}>{strong[1]}</strong>;
-    const code = token.match(/^`(.+)`$/);
-    if (code) return <code key={index} className="darl-agent-inline-code">{code[1]}</code>;
-    const link = token.match(/^\[([^\]]+)\]\(([^\s)]+)\)$/);
-    if (link && /^(https?:|#|\/)/.test(link[2])) return <a key={index} href={link[2]} target={link[2].startsWith('http') ? '_blank' : undefined} rel={link[2].startsWith('http') ? 'noreferrer' : undefined}>{link[1]}</a>;
-    return <span key={index}>{token}</span>;
-  })}</>;
-}
-
-function Markdown({ content, onCopyCode }: { content: string; onCopyCode: (code: string) => void }) {
-  const lines = content.split('\n');
-  const blocks: ReactNode[] = [];
-  let code: string[] | null = null;
-  let language = '';
-  let paragraph: string[] = [];
-  let listItems: string[] = [];
-  const flushParagraph = () => {
-    if (!paragraph.length) return;
-    blocks.push(<p key={`p-${blocks.length}`}><InlineMarkdown text={paragraph.join(' ')} /></p>);
-    paragraph = [];
-  };
-  const flushList = () => {
-    if (!listItems.length) return;
-    blocks.push(<ul key={`ul-${blocks.length}`}>{listItems.map((item, itemIndex) => <li key={itemIndex}><InlineMarkdown text={item} /></li>)}</ul>);
-    listItems = [];
-  };
-  lines.forEach((line, index) => {
-    const fence = line.match(/^```(.*)$/);
-    if (fence) {
-      if (code) {
-        const source = code.join('\n');
-        blocks.push(<div className="darl-agent-code" key={`code-${index}`}><div className="darl-agent-code-head"><span>{language || 'code'}</span><button type="button" onClick={() => onCopyCode(source)}><Copy size={13} />复制代码</button></div><pre><code>{source}</code></pre></div>);
-        code = null;
-        language = '';
-      } else {
-        flushParagraph(); flushList();
-        code = [];
-        language = fence[1].trim();
+function Markdown({ content, onCopyCode, depth = 0 }: { content: string; onCopyCode: (code: string) => void; depth?: number }) {
+  const components: Components = {
+    a: ({ href, children }) => <a href={href} target={href?.startsWith('http') ? '_blank' : undefined} rel={href?.startsWith('http') ? 'noreferrer' : undefined}>{children}</a>,
+    code: ({ className, children, ...props }) => {
+      const language = /language-([\w-]+)/.exec(className || '')?.[1]?.toLowerCase() || '';
+      const source = String(children).replace(/\n$/, '');
+      const node = (props as { node?: { type?: string } }).node;
+      const isInline = node?.type === 'inlineCode';
+      if (isInline) return <code className="darl-agent-inline-code" {...props}>{children}</code>;
+      if (depth < 2 && ['md', 'markdown', 'mdx'].includes(language)) {
+        return <div className="darl-agent-code darl-agent-rendered-markdown"><div className="darl-agent-code-head"><span>Markdown</span><button type="button" onClick={() => onCopyCode(source)}><Copy size={13} />复制 Markdown</button></div><Markdown content={source} onCopyCode={onCopyCode} depth={depth + 1} /></div>;
       }
-      return;
-    }
-    if (code) { code.push(line); return; }
-    if (!line.trim()) { flushParagraph(); flushList(); return; }
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) { flushParagraph(); flushList(); const Tag = `h${heading[1].length}` as 'h1' | 'h2' | 'h3'; blocks.push(<Tag key={`h-${index}`}><InlineMarkdown text={heading[2]} /></Tag>); return; }
-    const bullet = line.match(/^[-*]\s+(.+)$/);
-    if (bullet) {
-      flushParagraph(); listItems.push(bullet[1]);
-      return;
-    }
-    flushList();
-    paragraph.push(line);
-  });
-  if (code !== null) {
-    const source = (code as string[]).join('\n');
-    blocks.push(<div className="darl-agent-code" key="code-end"><div className="darl-agent-code-head"><span>{language || 'code'}</span><button type="button" onClick={() => onCopyCode(source)}><Copy size={13} />复制代码</button></div><pre><code>{source}</code></pre></div>);
-  }
-  flushParagraph(); flushList();
-  return <div className="darl-agent-markdown">{blocks}</div>;
+      return <div className="darl-agent-code"><div className="darl-agent-code-head"><span>{language || 'code'}</span><button type="button" onClick={() => onCopyCode(source)}><Copy size={13} />复制代码</button></div><pre><code>{source}</code></pre></div>;
+    },
+  };
+  return <div className="darl-agent-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={components}>{content}</ReactMarkdown></div>;
 }
 
 function ToolCallCard({ call }: { call: AgentToolCall }) {
@@ -105,14 +61,17 @@ function statusText(status: AgentApplication['status']): string {
   return status === 'connected' ? '已连接' : status === 'needs-auth' ? '需要授权' : '未连接';
 }
 
-export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, onSessionChange, onNewSession, onSend, onRegenerate, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onSkillSave, onSkillDelete, onSkillFavoriteChange, onFileUpload, models = [], onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
+export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, onSessionChange, onSessionRename, onNewSession, onSend, onRegenerate, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onSkillSave, onSkillDelete, onSkillFavoriteChange, onFileUpload, models = [], onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
   const [view, setView] = useState<'chat' | 'history'>('chat');
+  const [expanded, setExpanded] = useState(false);
   const [picker, setPicker] = useState<'add' | 'apps' | 'skills' | 'models' | 'effort' | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const submitting = useRef(false);
   const [historyQuery, setHistoryQuery] = useState('');
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
   const [copyState, setCopyState] = useState('');
   const [insertion, setInsertion] = useState<{ token: string; key: number } | null>(null);
   const [skillManagerOpen, setSkillManagerOpen] = useState(false);
@@ -184,15 +143,26 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const toggleApplication = (id: string) => { const app = applications.find((item) => item.id === id); if (app) insertReference('app', id, app.name); };
   const toggleSkill = (id: string) => { const skill = availableSkills.find((item) => item.id === id); if (skill) insertReference('skill', id, skill.name); };
   const closePicker = () => setPicker(null);
+  const beginRename = (session: AgentSession) => { setRenamingId(session.id); setRenameDraft(session.title); };
+  const saveRename = async (sessionId: string) => {
+    const title = renameDraft.trim();
+    if (!title) return;
+    try { await onSessionRename?.(sessionId, title); setRenamingId(null); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : '重命名失败，请重试'); }
+  };
+  const scrollMessages = (direction: 'top' | 'bottom') => {
+    messagesRef.current?.scrollTo({ top: direction === 'top' ? 0 : messagesRef.current.scrollHeight, behavior: 'smooth' });
+  };
   const activeMessages = activeSession?.messages ?? [];
 
-  return <aside className={`darl-agent-sidebar ${className}`} aria-label="Agent 辅助侧栏" onKeyDown={(event) => { if (event.key === 'Escape') setPicker(null); }}>
+  return <><div className={`darl-agent-expanded-backdrop${expanded ? ' is-visible' : ''}`} aria-hidden="true" onClick={() => setExpanded(false)} /><aside className={`darl-agent-sidebar${expanded ? ' darl-agent-sidebar--expanded' : ''} ${className}`} role={expanded ? 'dialog' : 'complementary'} aria-modal={expanded ? 'true' : undefined} aria-label="Agent 辅助侧栏" onKeyDown={(event) => { if (event.key === 'Escape') { setPicker(null); setExpanded(false); } }}>
     <header className="darl-agent-header">
       {view === 'history' ? <Button variant="ghost" size="icon" aria-label="返回当前对话" onClick={() => setView('chat')}><ArrowLeft size={17} /></Button> : <span className="darl-agent-brand-mark"><Bot size={17} /></span>}
       <div className="darl-agent-heading"><strong>{view === 'history' ? '历史记录' : '网站助手'}</strong>{view === 'chat' && <span><i />辅助 Agent</span>}</div>
       <div className="darl-agent-header-actions">
         {view === 'chat' && <Button variant="ghost" size="icon" aria-label="新开对话" title="新开对话" onClick={createSession}><Plus size={17} /></Button>}
         {view === 'chat' && <Button variant="ghost" size="icon" aria-label="查看历史记录" title="历史记录" onClick={() => setView('history')}><History size={17} /></Button>}
+        {view === 'chat' && <Button variant="ghost" size="icon" aria-label={expanded ? '收起对话' : '展开对话'} title={expanded ? '收起对话' : '展开对话'} onClick={() => setExpanded((value) => !value)}>{expanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</Button>}
         {view === 'history' && <Button variant="ghost" size="sm" onClick={createSession}><Plus size={14} />新对话</Button>}
         <Button variant="ghost" size="icon" aria-label="关闭 Agent 侧栏" title="关闭" onClick={() => onOpenChange(false)}><X size={17} /></Button>
       </div>
@@ -200,7 +170,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
 
     {view === 'history' ? <section className="darl-agent-history" aria-label="对话历史">
       <label className="darl-agent-search"><Search size={15} /><input value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="搜索对话" aria-label="搜索对话" /></label>
-      {filteredSessions.map((session) => <button key={session.id} type="button" className="darl-agent-history-row" aria-current={session.id === activeSession?.id ? 'page' : undefined} onClick={() => { onSessionChange?.(session.id); setView('chat'); }}><span><strong>{session.title}</strong><small>{session.messages.at(-1)?.content || '暂无消息'}</small></span><time>{session.updatedAt || ''}</time></button>)}
+      {filteredSessions.map((session) => renamingId === session.id ? <form key={session.id} className="darl-agent-history-row darl-agent-history-row--editing" onSubmit={(event) => { event.preventDefault(); void saveRename(session.id); }}><input aria-label="会话名称" autoFocus value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setRenamingId(null); }} /><Button size="sm" type="submit">保存</Button><Button variant="ghost" size="sm" type="button" onClick={() => setRenamingId(null)}>取消</Button></form> : <div key={session.id} className={`darl-agent-history-row${session.id === activeSession?.id ? ' is-active' : ''}`} aria-current={session.id === activeSession?.id ? 'page' : undefined}><button type="button" className="darl-agent-history-select" onClick={() => { onSessionChange?.(session.id); setView('chat'); }}><span><strong>{session.title}</strong><small>{session.messages.at(-1)?.content || '暂无消息'}</small></span><time>{session.updatedAt || ''}</time></button>{onSessionRename && <Button variant="ghost" size="icon" aria-label={`重命名 ${session.title}`} title="重命名" onClick={() => beginRename(session)}><Pencil size={14} /></Button>}</div>)}
       {!filteredSessions.length && <p className="darl-agent-empty">没有匹配的对话</p>}
     </section> : <>
       <section ref={messagesRef} className="darl-agent-messages" aria-live="polite" onScroll={(event) => { const element = event.currentTarget; followOutput.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>
@@ -210,6 +180,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
           <div className="darl-agent-message-body">{message.streaming && !message.content && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{message.attachments?.map((name, index) => <span className="darl-agent-chip" key={index}><Paperclip size={12} />{name}</span>)}{message.toolCalls?.map((call) => <ToolCallCard key={call.id} call={call} />)}</div>
           {message.role === 'assistant' && !message.streaming && <div className="darl-agent-message-actions"><Button variant="ghost" size="sm" onClick={() => void copy(message.content, message.id)}><Clipboard size={13} />{copyState === message.id ? '已复制' : '复制'}</Button>{onRegenerate && <Button variant="ghost" size="sm" disabled={isGenerating} onClick={() => onRegenerate(message.id)}><RefreshCw size={13} />重新生成</Button>}</div>}
         </article>)}
+        <div className="darl-agent-scroll-controls" aria-label="消息导航"><Button variant="ghost" size="icon" aria-label="滚动到顶部" title="滚动到顶部" onClick={() => scrollMessages('top')}><ArrowUp size={15} /></Button><Button variant="ghost" size="icon" aria-label="滚动到底部" title="滚动到底部" onClick={() => scrollMessages('bottom')}><ArrowDown size={15} /></Button></div>
       </section>
       <footer className="darl-agent-composer-shell">
 
@@ -227,7 +198,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
     {picker === 'effort' && selectedModel && <Picker title="思考强度" onClose={closePicker}><div className="darl-agent-effort-list">{supportedEfforts.map((value) => <button type="button" key={value} data-selected={value === effort} onClick={() => { setEffort(value); setPicker(null); }}><strong>{value}</strong><small>{value === '低' ? '更快响应' : value === '高' ? '更深入分析' : '平衡速度和质量'}</small>{value === effort && <Check size={15} />}</button>)}</div></Picker>}
     <input ref={fileInput} aria-label="选择上传文件" type="file" hidden multiple={uploadKind === 'file'} onChange={(event) => { const files = Array.from(event.target.files ?? []); const first = files[0]; if (uploadKind === 'skill' && files.length) void Promise.resolve().then(async () => { const imported = await importSkillPackage(files); await onSkillImport?.(imported); if (first) await onSkillUpload?.(first); setLocalSkills((current) => [...current.filter((item) => item.id !== imported.id), imported]); }).catch((reason) => setError(reason instanceof Error ? reason.message : '导入失败')); if (uploadKind === 'file' && files.length) { setAttachments((current) => ({ ...current, [draftKey]: [...(current[draftKey] ?? []), ...files] })); if (onFileUpload) void Promise.resolve().then(() => onFileUpload(files)).catch(() => setError('附件处理失败')); } setPicker(null); event.currentTarget.value = ''; }} accept={uploadKind === 'skill' ? '.md,.zip,text/markdown,application/zip' : undefined} />
     <SkillManager open={skillManagerOpen} skills={availableSkills} onClose={() => setSkillManagerOpen(false)} onUse={(skill) => { insertReference('skill', skill.id, skill.name); setSkillManagerOpen(false); }} onImport={async (skill) => { await onSkillImport?.(skill); setLocalSkills((current) => [...current.filter((item) => item.id !== skill.id), skill]); }} onSave={async (skill) => { await onSkillSave?.(skill); setLocalSkills((current) => [...current.filter((item) => item.id !== skill.id), skill]); }} onDelete={async (skillId) => { await onSkillDelete?.(skillId); setLocalSkills((current) => current.filter((skill) => skill.id !== skillId)); }} onFavoriteChange={async (skillId, favorite) => { await onSkillFavoriteChange?.(skillId, favorite); setLocalSkills((current) => current.map((skill) => skill.id === skillId ? { ...skill, favorite } : skill)); }} />
-  </aside>;
+  </aside></>;
 }
 
 export type { AgentApplication, AgentMessage, AgentModel, AgentSession, AgentSkill, AgentTool, AgentToolCall } from './types';

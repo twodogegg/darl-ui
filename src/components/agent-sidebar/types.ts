@@ -103,6 +103,7 @@ export interface AgentSidebarProps {
   sessions: AgentSession[];
   activeSessionId?: string;
   onSessionChange?: (sessionId: string) => void;
+  onSessionRename?: (sessionId: string, title: string) => void | Promise<void>;
   onNewSession?: () => void;
   onSend?: (request: AgentSendRequest) => void | Promise<void>;
   isGenerating?: boolean;

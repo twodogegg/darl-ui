@@ -52,6 +52,17 @@ describe('AgentSidebar', () => {
     expect(writeText).toHaveBeenNthCalledWith(2, 'const answer = true');
   });
 
+  it('把 markdown 代码块渲染为内容，同时复制原始 Markdown', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const rendered: AgentSession = { id: 'markdown', title: 'Markdown', messages: [{ id: 'md', role: 'assistant', content: '```markdown\n# 片段标题\n\n- 第一项\n- **第二项**\n```' }] };
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[rendered]} activeSessionId="markdown" />);
+    expect(screen.getByRole('heading', { name: '片段标题' })).toBeInTheDocument();
+    expect(screen.getByText('第一项')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '复制 Markdown' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('# 片段标题\n\n- 第一项\n- **第二项**'));
+  });
+
   it('支持打开历史记录和创建新对话', () => {
     const onNewSession = vi.fn();
     const onSessionChange = vi.fn();
@@ -62,6 +73,23 @@ describe('AgentSidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看历史记录' }));
     fireEvent.click(screen.getByRole('button', { name: '新对话' }));
     expect(onNewSession).toHaveBeenCalled();
+  });
+
+  it('可以在历史记录中重命名会话，并展开为居中对话窗口', async () => {
+    const onSessionRename = vi.fn().mockResolvedValue(undefined);
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" onSessionRename={onSessionRename} />);
+    fireEvent.click(screen.getByRole('button', { name: '查看历史记录' }));
+    fireEvent.click(screen.getByRole('button', { name: '重命名 已有对话' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '会话名称' }), { target: { value: '提示词对话' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(onSessionRename).toHaveBeenCalledWith('one', '提示词对话'));
+    fireEvent.click(screen.getByRole('button', { name: '返回当前对话' }));
+    fireEvent.click(screen.getByRole('button', { name: '展开对话' }));
+    expect(screen.getByRole('dialog', { name: 'Agent 辅助侧栏' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '滚动到顶部' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '滚动到底部' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '收起对话' }));
+    expect(screen.getByRole('complementary', { name: 'Agent 辅助侧栏' })).toBeInTheDocument();
   });
   it('失败保留草稿，切换会话隔离草稿，输入法回车不提交', async () => {
     const onSend = vi.fn().mockRejectedValue(new Error('服务不可用'));

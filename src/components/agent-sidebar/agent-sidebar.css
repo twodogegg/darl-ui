@@ -44,6 +44,30 @@
 @media(max-width: 600px) { .darl-agent-sidebar { width: 100vw; border-left: 0; } .darl-agent-picker { bottom: 112px; } }
 @media(prefers-reduced-motion: reduce) { .darl-agent-spin { animation: none; } }
 
+.darl-agent-expanded-backdrop { position: fixed; z-index: 39; inset: 0; display: none; background: rgb(2 6 23 / 58%); backdrop-filter: blur(3px); }
+.darl-agent-expanded-backdrop.is-visible { display: block; }
+.darl-agent-sidebar--expanded { inset: 4vh auto 4vh 50%; width: min(1100px, 90vw); height: 92vh; border: 1px solid var(--darl-agent-border); border-radius: 18px; box-shadow: 0 24px 80px rgb(2 6 23 / 45%); transform: translateX(-50%); }
+.darl-agent-sidebar--expanded .darl-agent-header { border-radius: 18px 18px 0 0; }
+.darl-agent-sidebar--expanded .darl-agent-messages { padding-left: clamp(20px, 4vw, 52px); padding-right: clamp(20px, 4vw, 52px); }
+.darl-agent-sidebar--expanded .darl-agent-message-body { max-width: min(900px, 96%); }
+.darl-agent-messages { position: relative; }
+.darl-agent-scroll-controls { position: sticky; z-index: 2; bottom: 10px; display: flex; justify-content: flex-end; gap: 4px; height: 0; pointer-events: none; }
+.darl-agent-scroll-controls .darl-button { width: 30px; min-width: 30px; height: 30px; min-height: 30px; border: 1px solid var(--darl-agent-border); border-radius: 50%; background: color-mix(in srgb, var(--darl-agent-surface) 90%, transparent); color: var(--darl-agent-muted); box-shadow: 0 5px 18px rgb(2 6 23 / 22%); pointer-events: auto; }
+.darl-agent-scroll-controls .darl-button:hover { color: var(--darl-agent-text); }
+.darl-agent-history-row { cursor: default; }
+.darl-agent-history-row:hover, .darl-agent-history-row.is-active { border-color: var(--darl-agent-border); background: var(--darl-agent-surface); }
+.darl-agent-history-select { display: flex; align-items: flex-start; min-width: 0; flex: 1; gap: 8px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.darl-agent-history-select > span { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.darl-agent-history-select time { flex: none; color: var(--darl-agent-muted); font-size: 9px; }
+.darl-agent-history-row > .darl-button { min-width: 28px; min-height: 28px; padding: 0; color: var(--darl-agent-muted); }
+.darl-agent-history-row--editing { align-items: center; }
+.darl-agent-history-row--editing input { min-width: 0; flex: 1; height: 31px; padding: 0 8px; border: 1px solid var(--darl-agent-border); border-radius: 7px; outline: 0; background: var(--darl-agent-bg); color: var(--darl-agent-text); }
+.darl-agent-history-row--editing .darl-button { min-height: 31px; }
+.darl-agent-rendered-markdown { background: var(--darl-agent-surface); }
+.darl-agent-rendered-markdown > .darl-agent-markdown { padding: 10px 11px; }
+.darl-agent-rendered-markdown .darl-agent-markdown > p:last-child { margin-bottom: 0; }
+@media(max-width: 600px) { .darl-agent-sidebar--expanded { inset: 8px; width: auto; height: calc(100dvh - 16px); border-radius: 14px; transform: none; } .darl-agent-sidebar--expanded .darl-agent-header { border-radius: 14px 14px 0 0; } }
+
 .darl-agent-sidebar { --darl-radius: 12px; --darl-primary: #2563eb; --darl-primary-foreground: #fff; --darl-border: #e2e8f0; --darl-text: #0f172a; --darl-muted: #64748b; --darl-surface: #f8fafc; }
 .darl-ui-root .darl-agent-sidebar { --darl-primary: inherit; --darl-primary-foreground: inherit; --darl-border: inherit; --darl-text: inherit; --darl-muted: inherit; --darl-surface: inherit; }
 .darl-agent-picker-row:disabled { opacity: .5; cursor: not-allowed; }

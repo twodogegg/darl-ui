@@ -30,6 +30,7 @@ npm run dev
 复制 `.env.example` 为 `.env.local`，配置服务端 `AGENT_CHAT_API_KEY`；默认地址 `https://api.darl.cn/v1`，默认模型 `deepseek-v4.1-flash`。也可直接在示例的「设置 → 模型」中管理提供方、API 协议、模型类型和推理强度。推理强度填写模型实际支持的值，如 `low, medium, high`；留空则不发送此参数。
 
 - 支持 OpenAI Chat Completions / Responses 流式文本协议、多轮对话、停止、重新生成、新对话和历史搜索。
+- Markdown 使用开源的 `react-markdown`、`remark-gfm` 和 `rehype-sanitize` 渲染；回复中的 `md` / `markdown` 代码块会显示为编译后的内容，复制按钮仍复制原始 Markdown。
 - 对话和 Skills 保存在当前浏览器的 localStorage；Skill 指令通过 `/` 引用后发送给模型，资源脚本不会执行。
 - 提供方和 Key 保存到 Git 忽略的 `.local/agent-chat/providers.json`，前端只获取是否已配置 Key。环境变量只用于首次初始化；后续以已保存设置为准。连接测试会实际调用已启用的文本模型。
 - 获取模型目录后需确认模型类型、启用状态并保存；新发现的模型默认禁用，接口返回的 ID 无法证明其媒体或推理能力。
@@ -214,7 +215,7 @@ import '@darl/ui/styles.css';
 
 ## AgentSidebar｜网站辅助 Agent 侧栏
 
-演示入口：`http://localhost:5188/#agent-sidebar`。右侧会话面板包含新对话、历史搜索与切换、消息发送、应用 / Skill 选择、模型及其推理强度选择。回复操作只有复制和重新生成；整条复制保留原始 Markdown，代码块单独复制代码。当前轻量 Markdown 渲染支持标题、段落、无序列表、加粗、行内代码、链接和围栏代码块，不支持完整 GFM 表格及嵌套语法。
+演示入口：`http://localhost:5188/#agent-sidebar`。右侧会话面板包含新对话、历史搜索与切换、会话重命名、消息发送、应用 / Skill 选择、模型及其推理强度选择；消息较长时可直接跳到顶部或底部，也可以展开为居中的大对话窗口。回复操作只有复制和重新生成；整条复制保留原始 Markdown，代码块单独复制代码。Markdown 使用 GFM 渲染，并支持将 `md` / `markdown` 围栏内容渲染为可读内容。
 
 ```tsx
 import { AgentSidebar } from '@darl/ui';
@@ -226,6 +227,7 @@ import '@darl/ui/styles.css';
   sessions={sessions}
   activeSessionId={activeSessionId}
   onSessionChange={setActiveSessionId}
+  onSessionRename={renameSession}
   onNewSession={createSession}
   onSend={sendMessage}
   onRegenerate={regenerateMessage}

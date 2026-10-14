@@ -125,6 +125,9 @@ export function App() {
     setSkills(next);
   };
   const showSettings = () => { setOpen(false); setSettings(true); };
+  const renameSession = (sessionId: string, title: string) => {
+    setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, title, updatedAt: new Date().toLocaleString() } : session));
+  };
   const buttonClass = 'darl-button darl-button--outline darl-button-size--default';
 
   return <DarlUIProvider theme={{ mode: 'dark', primaryColor: '#8ba4c5' }} className="chat-example">
@@ -138,7 +141,7 @@ export function App() {
         onFetchModels={(provider) => api<AgentModelConfig[]>(`providers/${provider.id}/models`, {})}
       /></SettingsPage></main> : <main className="example-home"><span className="example-eyebrow">AGENT CHAT EXAMPLE</span><h1>让网站助手<br />真正开始工作。</h1><p>使用现有聊天 UI，连接真实模型。对话、历史和 Skills 保存在当前浏览器。</p><div className="example-actions"><button className="darl-button darl-button--default darl-button-size--default" onClick={() => setOpen(true)}><MessageSquare size={16} />打开助手</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />模型设置</button></div><div className="example-info"><div><span>模型</span><strong>{models.find((model) => model.id === availableModelId)?.name || '尚未配置'}</strong></div><div><span>会话</span><strong>{sessions.length}</strong></div><div><span>Skills</span><strong>{skills.length}</strong></div></div><small>本期支持文本对话；MCP 和多媒体调用尚未接入。Skill 的指令会发送给模型，附带脚本不会在本机执行。</small></main>}
     </div>
-    <AgentSidebar open={open} onOpenChange={setOpen} sessions={sessions} activeSessionId={activeId} onSessionChange={setActiveId}
+    <AgentSidebar open={open} onOpenChange={setOpen} sessions={sessions} activeSessionId={activeId} onSessionChange={setActiveId} onSessionRename={renameSession}
       onNewSession={() => { const session = newSession(); setSessions((current) => [session, ...current]); setActiveId(session.id); }}
       onSend={run} onStop={() => running.current?.abort()} isGenerating={generating} onRegenerate={regenerate}
       models={models} selectedModelId={availableModelId} onSelectedModelIdChange={setModelId} selectedReasoningEffort={effort} onSelectedReasoningEffortChange={setEffort}
