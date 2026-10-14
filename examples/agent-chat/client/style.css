@@ -1,0 +1,22 @@
+body { margin: 0; background: #101113; }
+.chat-example[data-darl-theme="dark"] { --darl-background: #101113; --darl-surface: #191b1f; --darl-border: #2d3036; --darl-text: #e7e8eb; --darl-muted: #999da6; --darl-primary-foreground: #101113; min-height: 100dvh; color-scheme: dark; }
+.example-page { min-height: 100dvh; }
+.example-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--darl-border); }
+.example-header a { color: var(--darl-text); text-decoration: none; font-size: 14px; font-weight: 600; }
+.example-header a span { color: var(--darl-muted); font-weight: 400; }
+.example-header > div, .example-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.example-home { max-width: 780px; margin: auto; padding: 70px 24px; }
+.example-eyebrow { color: var(--darl-muted); font-size: 11px; letter-spacing: .14em; }
+.example-home h1 { margin: 24px 0; font-size: clamp(32px, 4.2vw, 54px); line-height: 1.2; font-weight: 550; letter-spacing: -.04em; }
+.example-home p { max-width: 420px; color: var(--darl-muted); font-size: 15px; line-height: 1.8; }
+.example-actions { margin: 32px 0 48px; }
+.example-info { display: grid; gap: 18px; padding: 24px 0; border-top: 1px solid var(--darl-border); border-bottom: 1px solid var(--darl-border); }
+.example-info div { display: grid; gap: 8px; min-width: 0; }
+.example-info span, .example-home small { color: var(--darl-muted); font-size: 12px; }
+.example-info strong { font-size: 14px; overflow-wrap: anywhere; font-weight: 500; }
+.example-home small { display: block; margin-top: 20px; line-height: 1.8; }
+.example-settings { padding: 24px 16px; }
+.example-settings > .darl-button { margin-bottom: 20px; }
+.example-error { margin: 16px 24px; color: var(--darl-danger); overflow-wrap: anywhere; }
+@media (min-width: 750px) { .with-agent { margin-right: 450px; } .example-info { grid-template-columns: 2fr 1fr 1fr; } .example-settings { padding: 32px; } }
+@media (max-width: 749px) { .with-agent { visibility: hidden; } .chat-example .darl-agent-sidebar { width: 100%; } }

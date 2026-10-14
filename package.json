@@ -24,14 +24,17 @@
     "README.md"
   ],
   "scripts": {
-    "dev": "vite --config vite.playground.config.ts",
-    "build": "npm run build:lib && npm run build:demo",
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build:lib && npm run build:demo && npm run build:agent-chat",
     "build:lib": "vite build --config vite.lib.config.ts && tsc --project tsconfig.build.json",
     "build:demo": "vite build --config vite.playground.config.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "pack:local": "npm run build:lib && npm pack"
+    "pack:local": "npm run build:lib && npm pack",
+    "dev:playground": "vite --config vite.playground.config.ts",
+    "dev:agent-chat": "vite --config vite.agent-chat.config.ts",
+    "build:agent-chat": "vite build --config vite.agent-chat.config.ts"
   },
   "peerDependencies": {
     "react": ">=18.2.0 <20",

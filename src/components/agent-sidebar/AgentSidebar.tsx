@@ -6,6 +6,8 @@ import type { AgentApplication, AgentSidebarProps, AgentSkill, AgentToolCall } f
 import { SkillManager } from './SkillManager';
 import { importSkillPackage } from './skill-package';
 
+const emptySkills: AgentSkill[] = [];
+
 function formatToolValue(value: unknown): string {
   if (value === undefined) return '';
   if (typeof value === 'string') return value;
@@ -103,7 +105,7 @@ function statusText(status: AgentApplication['status']): string {
   return status === 'connected' ? '已连接' : status === 'needs-auth' ? '需要授权' : '未连接';
 }
 
-export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, onSessionChange, onNewSession, onSend, onRegenerate, isGenerating = false, onStop, applications = [], skills = [], onSkillUpload, onSkillImport, onSkillSave, onSkillDelete, onSkillFavoriteChange, onFileUpload, models = [], onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
+export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, onSessionChange, onNewSession, onSend, onRegenerate, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onSkillSave, onSkillDelete, onSkillFavoriteChange, onFileUpload, models = [], onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
   const [view, setView] = useState<'chat' | 'history'>('chat');
   const [picker, setPicker] = useState<'add' | 'apps' | 'skills' | 'models' | 'effort' | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -122,10 +124,12 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const [attachments, setAttachments] = useState<Record<string, File[]>>({});
   const [uploadKind, setUploadKind] = useState<'file' | 'skill'>('skill');
   const fileInput = useRef<HTMLInputElement>(null);
+  const messagesRef = useRef<HTMLElement>(null);
+  const followOutput = useRef(true);
   const copyTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(copyTimer.current), []);
   useEffect(() => {
-    const changed = skillsPropRef.current.length !== skills.length || skillsPropRef.current.some((skill, index) => skill.id !== skills[index]?.id || skill.version !== skills[index]?.version);
+    const changed = skillsPropRef.current !== skills;
     if (changed) {
       skillsPropRef.current = skills;
       setLocalSkills(skills);
@@ -146,6 +150,17 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const setDraft = (value: string) => { setDrafts((current) => ({ ...current, [draftKey]: value })); onSelectedApplicationIdsChange?.(referenceIds(value, 'app')); onSelectedSkillIdsChange?.(referenceIds(value, 'skill')); };
   const filteredSessions = useMemo(() => sessions.filter((session) => `${session.title} ${session.messages.at(-1)?.content ?? ''}`.toLowerCase().includes(historyQuery.toLowerCase())), [historyQuery, sessions]);
   useEffect(() => { setError(''); setPicker(null); }, [activeSession?.id]);
+
+  const lastMessage = activeSession?.messages.at(-1);
+  useEffect(() => {
+    followOutput.current = true;
+    const element = messagesRef.current;
+    if (element) element.scrollTop = element.scrollHeight;
+  }, [activeSession?.id, open, view]);
+  useEffect(() => {
+    const element = messagesRef.current;
+    if (element && followOutput.current) element.scrollTop = element.scrollHeight;
+  }, [lastMessage?.id, lastMessage?.content]);
 
   if (!open) return null;
   const setModelId = (id: string) => { setLocalModelId(id); onSelectedModelIdChange?.(id); };
@@ -188,12 +203,12 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
       {filteredSessions.map((session) => <button key={session.id} type="button" className="darl-agent-history-row" aria-current={session.id === activeSession?.id ? 'page' : undefined} onClick={() => { onSessionChange?.(session.id); setView('chat'); }}><span><strong>{session.title}</strong><small>{session.messages.at(-1)?.content || '暂无消息'}</small></span><time>{session.updatedAt || ''}</time></button>)}
       {!filteredSessions.length && <p className="darl-agent-empty">没有匹配的对话</p>}
     </section> : <>
-      <section className="darl-agent-messages" aria-live="polite">
+      <section ref={messagesRef} className="darl-agent-messages" aria-live="polite" onScroll={(event) => { const element = event.currentTarget; followOutput.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>
         {!activeMessages.length && <div className="darl-agent-empty-state"><span className="darl-agent-empty-icon"><Sparkles size={22} /></span><h2>需要我帮你做什么？</h2><p>选择应用和 Skill，把它们插入消息中。</p></div>}
         {activeMessages.map((message) => <article key={message.id} className={`darl-agent-message darl-agent-message--${message.role}`}>
           <div className="darl-agent-message-label">{message.role === 'user' ? '你' : 'Agent'}</div>
-          <div className="darl-agent-message-body">{message.role === 'assistant' ? <Markdown content={message.content} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{message.attachments?.map((name, index) => <span className="darl-agent-chip" key={index}><Paperclip size={12} />{name}</span>)}{message.toolCalls?.map((call) => <ToolCallCard key={call.id} call={call} />)}</div>
-          {message.role === 'assistant' && <div className="darl-agent-message-actions"><Button variant="ghost" size="sm" onClick={() => void copy(message.content, message.id)}><Clipboard size={13} />{copyState === message.id ? '已复制' : '复制'}</Button>{onRegenerate && <Button variant="ghost" size="sm" onClick={() => onRegenerate(message.id)}><RefreshCw size={13} />重新生成</Button>}</div>}
+          <div className="darl-agent-message-body">{message.streaming && !message.content && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{message.attachments?.map((name, index) => <span className="darl-agent-chip" key={index}><Paperclip size={12} />{name}</span>)}{message.toolCalls?.map((call) => <ToolCallCard key={call.id} call={call} />)}</div>
+          {message.role === 'assistant' && !message.streaming && <div className="darl-agent-message-actions"><Button variant="ghost" size="sm" onClick={() => void copy(message.content, message.id)}><Clipboard size={13} />{copyState === message.id ? '已复制' : '复制'}</Button>{onRegenerate && <Button variant="ghost" size="sm" disabled={isGenerating} onClick={() => onRegenerate(message.id)}><RefreshCw size={13} />重新生成</Button>}</div>}
         </article>)}
       </section>
       <footer className="darl-agent-composer-shell">
@@ -210,8 +225,8 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
     {picker === 'skills' && <Picker title="选择 Skill" onClose={closePicker}><div className="darl-agent-picker-toolbar"><span>已安装的 Skill</span><span className="darl-agent-picker-toolbar-actions"><button type="button" onClick={() => { setPicker(null); setSkillManagerOpen(true); }}><Pencil size={14} />管理 Skill</button><button type="button" onClick={() => { setUploadKind('skill'); fileInput.current?.click(); }}><Upload size={14} />上传</button></span></div><div className="darl-agent-picker-list">{availableSkills.filter((skill) => skill.enabled !== false).map((skill) => <button key={skill.id} type="button" className="darl-agent-picker-row" aria-pressed={skillIds.includes(skill.id)} onClick={() => toggleSkill(skill.id)}><span className="darl-agent-picker-icon darl-agent-picker-icon--skill"><Sparkles size={15} /></span><span className="darl-agent-picker-copy"><strong>{skill.name}</strong><small>{skill.description || '可复用的 Agent 工作流程'}{skill.version ? ` · v${skill.version}` : ''}</small></span>{skillIds.includes(skill.id) && <Check size={16} />}</button>)}{!availableSkills.length && <p className="darl-agent-empty">暂无 Skill</p>}</div></Picker>}
     {picker === 'models' && <Picker title="选择模型" onClose={closePicker}><div className="darl-agent-picker-list">{models.map((model) => <button key={model.id} type="button" className="darl-agent-picker-row" onClick={() => { setModelId(model.id); setPicker(null); }}><span className="darl-agent-picker-icon"><Bot size={15} /></span><span className="darl-agent-picker-copy"><strong>{model.name}</strong><small>{model.description || '对话模型'}</small></span>{model.id === modelId && <Check size={16} />}</button>)}</div></Picker>}
     {picker === 'effort' && selectedModel && <Picker title="思考强度" onClose={closePicker}><div className="darl-agent-effort-list">{supportedEfforts.map((value) => <button type="button" key={value} data-selected={value === effort} onClick={() => { setEffort(value); setPicker(null); }}><strong>{value}</strong><small>{value === '低' ? '更快响应' : value === '高' ? '更深入分析' : '平衡速度和质量'}</small>{value === effort && <Check size={15} />}</button>)}</div></Picker>}
-    <input ref={fileInput} aria-label="选择上传文件" type="file" hidden multiple={uploadKind === 'file'} onChange={(event) => { const files = Array.from(event.target.files ?? []); const first = files[0]; if (uploadKind === 'skill' && files.length) void Promise.resolve().then(async () => { const imported = await importSkillPackage(files); setLocalSkills((current) => [...current.filter((item) => item.id !== imported.id), imported]); await onSkillImport?.(imported); if (first) await onSkillUpload?.(first); }).catch((reason) => setError(reason instanceof Error ? reason.message : '导入失败')); if (uploadKind === 'file' && files.length) { setAttachments((current) => ({ ...current, [draftKey]: [...(current[draftKey] ?? []), ...files] })); if (onFileUpload) void Promise.resolve().then(() => onFileUpload(files)).catch(() => setError('附件处理失败')); } setPicker(null); event.currentTarget.value = ''; }} accept={uploadKind === 'skill' ? '.md,.zip,text/markdown,application/zip' : undefined} />
-    <SkillManager open={skillManagerOpen} skills={availableSkills} onClose={() => setSkillManagerOpen(false)} onUse={(skill) => { insertReference('skill', skill.id, skill.name); setSkillManagerOpen(false); }} onImport={async (skill) => { setLocalSkills((current) => [...current.filter((item) => item.id !== skill.id), skill]); await onSkillImport?.(skill); }} onSave={async (skill) => { setLocalSkills((current) => [...current.filter((item) => item.id !== skill.id), skill]); await onSkillSave?.(skill); }} onDelete={async (skillId) => { setLocalSkills((current) => current.filter((skill) => skill.id !== skillId)); await onSkillDelete?.(skillId); }} onFavoriteChange={async (skillId, favorite) => { setLocalSkills((current) => current.map((skill) => skill.id === skillId ? { ...skill, favorite } : skill)); await onSkillFavoriteChange?.(skillId, favorite); }} />
+    <input ref={fileInput} aria-label="选择上传文件" type="file" hidden multiple={uploadKind === 'file'} onChange={(event) => { const files = Array.from(event.target.files ?? []); const first = files[0]; if (uploadKind === 'skill' && files.length) void Promise.resolve().then(async () => { const imported = await importSkillPackage(files); await onSkillImport?.(imported); if (first) await onSkillUpload?.(first); setLocalSkills((current) => [...current.filter((item) => item.id !== imported.id), imported]); }).catch((reason) => setError(reason instanceof Error ? reason.message : '导入失败')); if (uploadKind === 'file' && files.length) { setAttachments((current) => ({ ...current, [draftKey]: [...(current[draftKey] ?? []), ...files] })); if (onFileUpload) void Promise.resolve().then(() => onFileUpload(files)).catch(() => setError('附件处理失败')); } setPicker(null); event.currentTarget.value = ''; }} accept={uploadKind === 'skill' ? '.md,.zip,text/markdown,application/zip' : undefined} />
+    <SkillManager open={skillManagerOpen} skills={availableSkills} onClose={() => setSkillManagerOpen(false)} onUse={(skill) => { insertReference('skill', skill.id, skill.name); setSkillManagerOpen(false); }} onImport={async (skill) => { await onSkillImport?.(skill); setLocalSkills((current) => [...current.filter((item) => item.id !== skill.id), skill]); }} onSave={async (skill) => { await onSkillSave?.(skill); setLocalSkills((current) => [...current.filter((item) => item.id !== skill.id), skill]); }} onDelete={async (skillId) => { await onSkillDelete?.(skillId); setLocalSkills((current) => current.filter((skill) => skill.id !== skillId)); }} onFavoriteChange={async (skillId, favorite) => { await onSkillFavoriteChange?.(skillId, favorite); setLocalSkills((current) => current.map((skill) => skill.id === skillId ? { ...skill, favorite } : skill)); }} />
   </aside>;
 }
 

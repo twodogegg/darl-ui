@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "baseUrl": ".",
-    "paths": { "@/*": ["./playground/src/*"] },
+    "paths": { "@/*": ["./playground/src/*"], "@darl/ui": ["./src/index.ts"] },
     "target": "ES2022",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
@@ -18,5 +18,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["src", "playground", "tests", "vite.*.config.ts"]
+  "include": ["src", "playground", "examples", "tests", "vite.*.config.ts"]
 }

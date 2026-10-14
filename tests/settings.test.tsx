@@ -30,4 +30,32 @@ describe('SettingsPage and ModelSettingsCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
     expect(onSectionChange).toHaveBeenCalledWith('skills');
   });
+  it('keeps the catalog unchanged after a failed model save and permits retry', async () => {
+    const onProviderSave = vi.fn().mockRejectedValue(new Error('网络连接失败'));
+    render(<ModelSettingsCard providers={providers} onProviderSave={onProviderSave} />);
+    fireEvent.change(screen.getAllByRole('textbox', { name: '显示名称' })[1], { target: { value: 'Renamed Chat' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存模型' }));
+    await screen.findByText('网络连接失败');
+    expect(screen.getByRole('button', { name: /Chat chat · 文本/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Renamed Chat chat · 文本/ })).toBeNull();
+    onProviderSave.mockResolvedValue(undefined);
+    fireEvent.click(screen.getByRole('button', { name: '保存模型' }));
+    await screen.findByText('模型已保存。');
+    expect(screen.getByRole('button', { name: /Renamed Chat chat · 文本/ })).toBeInTheDocument();
+  });
+
+  it('renames an existing model without duplicating it and preserves comma input', async () => {
+    const onProviderSave = vi.fn().mockResolvedValue(undefined);
+    render(<ModelSettingsCard providers={providers} onProviderSave={onProviderSave} />);
+    fireEvent.change(screen.getByRole('textbox', { name: '模型 ID' }), { target: { value: 'renamed' } });
+    const input = screen.getByRole('textbox', { name: '推理强度' });
+    fireEvent.change(input, { target: { value: 'low,' } });
+    expect(input).toHaveValue('low,');
+    fireEvent.change(input, { target: { value: 'low, high' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存模型' }));
+    await screen.findByText('模型已保存。');
+    expect(onProviderSave.mock.calls[0][0].models).toHaveLength(2);
+    expect(onProviderSave.mock.calls[0][0].models[0]).toMatchObject({ id: 'renamed', reasoningEfforts: ['low', 'high'] });
+  });
+
 });

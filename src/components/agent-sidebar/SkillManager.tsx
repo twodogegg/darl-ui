@@ -150,7 +150,7 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
 
   return <DialogPrimitive.Root open={open} onOpenChange={(nextOpen) => { if (!nextOpen) close(); }}>
       <DialogPrimitive.Overlay className="darl-agent-skill-manager" />
-      <DialogPrimitive.Content className="darl-agent-skill-manager-card" aria-describedby="darl-agent-skill-manager-description">
+      <DialogPrimitive.Content className="darl-agent-skill-manager-card" aria-labelledby="darl-agent-skill-manager-title" aria-describedby="darl-agent-skill-manager-description">
       <header className="darl-agent-skill-manager-header">
         <div className="darl-agent-manager-title-wrap"><span className="darl-agent-manager-title-icon"><Sparkles /></span><div><span className="darl-agent-manager-eyebrow">SKILL LIBRARY</span><DialogPrimitive.Title asChild><h2 id="darl-agent-skill-manager-title">管理 Skill</h2></DialogPrimitive.Title><DialogPrimitive.Description asChild><p id="darl-agent-skill-manager-description">导入、编辑和选择可复用的 Agent 工作流程。</p></DialogPrimitive.Description></div></div>
         <Button variant="ghost" size="icon" aria-label="关闭 Skill 管理" onClick={close}><X /></Button>

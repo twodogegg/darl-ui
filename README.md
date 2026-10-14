@@ -21,7 +21,21 @@ npm install
 npm run dev
 ```
 
-浏览器打开 `http://localhost:5188`。
+`npm run dev` 同时启动组件演示站 `http://localhost:5188` 和真实模型示例 `http://127.0.0.1:5197`，端口被占用时直接报错。
+
+### 真实模型示例
+
+`examples/agent-chat` 是独立的宿主网站示例，包含客户端和本地服务端。通过 Vite alias 直接引用 `@darl/ui` 的 `src/index.ts` 和样式，组件修改会热更新，无需复制 UI 或重新打包组件库。`playground` 仍用于本地模拟交互。
+
+复制 `.env.example` 为 `.env.local`，配置服务端 `AGENT_CHAT_API_KEY`；默认地址 `https://api.darl.cn/v1`，默认模型 `deepseek-v4.1-flash`。也可直接在示例的「设置 → 模型」中管理提供方、API 协议、模型类型和推理强度。推理强度填写模型实际支持的值，如 `low, medium, high`；留空则不发送此参数。
+
+- 支持 OpenAI Chat Completions / Responses 流式文本协议、多轮对话、停止、重新生成、新对话和历史搜索。
+- 对话和 Skills 保存在当前浏览器的 localStorage；Skill 指令通过 `/` 引用后发送给模型，资源脚本不会执行。
+- 提供方和 Key 保存到 Git 忽略的 `.local/agent-chat/providers.json`，前端只获取是否已配置 Key。环境变量只用于首次初始化；后续以已保存设置为准。连接测试会实际调用已启用的文本模型。
+- 获取模型目录后需确认模型类型、启用状态并保存；新发现的模型默认禁用，接口返回的 ID 无法证明其媒体或推理能力。
+- 本期未接入 MCP、附件识别和图片 / 视频 / 音频生成；模型目录仍可设置这四种类型，聊天仅列出启用的文本模型。
+
+单独启动：`npm run dev:agent-chat`；仅启动组件站：`npm run dev:playground`。示例服务仅监听本机，用于开发验证。`npm run build:agent-chat` 只构建前端到 `dist/agent-chat`，生产部署需由宿主提供 API、鉴权和存储。
 
 构建完整项目：
 

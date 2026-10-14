@@ -90,4 +90,19 @@ describe('AgentSidebar', () => {
     expect(screen.queryByRole('button', { name: /思考：/ })).toBeNull();
   });
 
+  it('Skill 保存失败保留原列表并显示错误', async () => {
+    const onSkillSave = vi.fn().mockRejectedValue(new Error('存储不可用'));
+    const existing = { ...skills[0], instructions: '原有指令', version: '1.0' };
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} skills={[existing]} onSkillSave={onSkillSave} />);
+    fireEvent.click(screen.getByRole('button', { name: '添加材料或能力' }));
+    fireEvent.click(screen.getByRole('button', { name: /选择 Skill/ }));
+    fireEvent.click(screen.getByRole('button', { name: '管理 Skill' }));
+    expect(screen.getByRole('dialog', { name: '管理 Skill' })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: '名称' }), { target: { value: '失败的更改' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
+    await screen.findByText('存储不可用');
+    expect(screen.getByRole('button', { name: /客户摘要 整理客户信息/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /失败的更改 整理客户信息/ })).toBeNull();
+  });
+
 });
