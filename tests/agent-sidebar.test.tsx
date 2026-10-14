@@ -50,6 +50,7 @@ describe('AgentSidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: '复制代码' }));
     await waitFor(() => expect(writeText).toHaveBeenNthCalledWith(1, '## 标题\n\n**加粗**\n\n```ts\nconst answer = true\n```'));
     expect(writeText).toHaveBeenNthCalledWith(2, 'const answer = true');
+    expect(screen.getByRole('status')).toHaveTextContent('已复制');
   });
 
   it('把 markdown 代码块渲染为内容，同时复制原始 Markdown', async () => {
@@ -61,6 +62,38 @@ describe('AgentSidebar', () => {
     expect(screen.getByText('第一项')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '复制 Markdown' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('# 片段标题\n\n- 第一项\n- **第二项**'));
+  });
+
+  it.each([false, true])('行内代码留在段落和列表内，Markdown 预览没有 pre 包裹（围栏：%s）', async (fenced) => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const source = '# MiniMax H3 Prompt Writing\n\n**频道说明**：若当前为 `MiniMax-H3-Local`，本模式为唯一可选模式。\n\n### subject_definitions\n\n- `<Picture 1>`：成年男性，约 28 岁，短发。\n- `<Video 1>`：夜间城市天桥的场景参考。';
+    const content = fenced ? `\`\`\`markdown\n${source}\n\`\`\`` : source;
+    const { container } = render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[{ id: 'h3', title: 'H3', messages: [{ id: 'h3-md', role: 'assistant', content }] }]} />);
+    expect(screen.getByText('MiniMax-H3-Local').tagName).toBe('CODE');
+    expect(screen.getByText('MiniMax-H3-Local').parentElement?.tagName).toBe('P');
+    expect(screen.getByText('<Picture 1>').parentElement?.tagName).toBe('LI');
+    expect(screen.getByText('<Video 1>').parentElement?.tagName).toBe('LI');
+    expect(container.querySelectorAll('pre, p div, li .darl-agent-code')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: '复制代码' })).toBeNull();
+    if (fenced) {
+      fireEvent.click(screen.getByRole('button', { name: '复制 Markdown' }));
+      await waitFor(() => expect(writeText).toHaveBeenLastCalledWith(source));
+    }
+    fireEvent.click(screen.getByRole('button', { name: '复制' }));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith(content));
+  });
+
+  it('有语言、无语言和缩进代码块只各渲染一个 pre，原始代码不会再次解析', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const content = '行内 `value` 保持同行。\n\n```ts\nconst value = `<Picture 1>`;\n```\n\n```\n# 这里是代码\n```\n\n    # 缩进代码';
+    const { container } = render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[{ id: 'code', title: '代码', messages: [{ id: 'blocks', role: 'assistant', content }] }]} />);
+    expect(container.querySelectorAll('pre')).toHaveLength(3);
+    expect(container.querySelector('pre pre, pre div, p div')).toBeNull();
+    expect(screen.queryByRole('heading', { name: '这里是代码' })).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: '复制代码' })[0]);
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('const value = `<Picture 1>`;'));
   });
 
   it('支持打开历史记录和创建新对话', () => {

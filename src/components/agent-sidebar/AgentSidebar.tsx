@@ -10,6 +10,17 @@ import { SkillManager } from './SkillManager';
 import { importSkillPackage } from './skill-package';
 
 const emptySkills: AgentSkill[] = [];
+type MarkdownNode = { type?: string; lang?: string; children?: MarkdownNode[] };
+
+function markCodeBlocks() {
+  return (tree: MarkdownNode) => {
+    const visit = (node: MarkdownNode) => {
+      if (node.type === 'code' && !node.lang) node.lang = 'plain';
+      node.children?.forEach(visit);
+    };
+    visit(tree);
+  };
+}
 
 function formatToolValue(value: unknown): string {
   if (value === undefined) return '';
@@ -20,11 +31,11 @@ function formatToolValue(value: unknown): string {
 function Markdown({ content, onCopyCode, depth = 0 }: { content: string; onCopyCode: (code: string) => void; depth?: number }) {
   const components: Components = {
     a: ({ href, children }) => <a href={href} target={href?.startsWith('http') ? '_blank' : undefined} rel={href?.startsWith('http') ? 'noreferrer' : undefined}>{children}</a>,
+    pre: ({ children }) => <>{children}</>,
     code: ({ className, children, ...props }) => {
       const language = /language-([\w-]+)/.exec(className || '')?.[1]?.toLowerCase() || '';
       const source = String(children).replace(/\n$/, '');
-      const node = (props as { node?: { type?: string } }).node;
-      const isInline = node?.type === 'inlineCode';
+      const isInline = !className;
       if (isInline) return <code className="darl-agent-inline-code" {...props}>{children}</code>;
       if (depth < 2 && ['md', 'markdown', 'mdx'].includes(language)) {
         return <div className="darl-agent-code darl-agent-rendered-markdown"><div className="darl-agent-code-head"><span>Markdown</span><button type="button" onClick={() => onCopyCode(source)}><Copy size={13} />复制 Markdown</button></div><Markdown content={source} onCopyCode={onCopyCode} depth={depth + 1} /></div>;
@@ -32,7 +43,7 @@ function Markdown({ content, onCopyCode, depth = 0 }: { content: string; onCopyC
       return <div className="darl-agent-code"><div className="darl-agent-code-head"><span>{language || 'code'}</span><button type="button" onClick={() => onCopyCode(source)}><Copy size={13} />复制代码</button></div><pre><code>{source}</code></pre></div>;
     },
   };
-  return <div className="darl-agent-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={components}>{content}</ReactMarkdown></div>;
+  return <div className="darl-agent-markdown"><ReactMarkdown remarkPlugins={[remarkGfm, markCodeBlocks]} rehypePlugins={[rehypeSanitize]} components={components}>{content}</ReactMarkdown></div>;
 }
 
 function ToolCallCard({ call }: { call: AgentToolCall }) {
@@ -73,6 +84,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [copyState, setCopyState] = useState('');
+  const [copyNotice, setCopyNotice] = useState('');
   const [insertion, setInsertion] = useState<{ token: string; key: number } | null>(null);
   const [skillManagerOpen, setSkillManagerOpen] = useState(false);
   const [localSkills, setLocalSkills] = useState<AgentSkill[]>(skills);
@@ -124,7 +136,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   if (!open) return null;
   const setModelId = (id: string) => { setLocalModelId(id); onSelectedModelIdChange?.(id); };
   const setEffort = (value: string) => { setLocalEffort(value); onSelectedReasoningEffortChange?.(value); };
-  const copy = async (value: string, id: string) => { try { await navigator.clipboard.writeText(value); setCopyState(id); window.clearTimeout(copyTimer.current); copyTimer.current = window.setTimeout(() => setCopyState((current) => current === id ? '' : current), 1200); } catch { setError('复制失败，请手动选择文本复制'); } };
+  const copy = async (value: string, id: string) => { try { await navigator.clipboard.writeText(value); setCopyState(id); setCopyNotice('已复制'); window.clearTimeout(copyTimer.current); copyTimer.current = window.setTimeout(() => { setCopyState((current) => current === id ? '' : current); setCopyNotice(''); }, 1200); } catch { setError('复制失败，请手动选择文本复制'); } };
   const submit = async () => {
     const content = draft.trim();
     if (!content || !activeSession || !onSend || isGenerating || submitting.current) return;
@@ -189,6 +201,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
         </div>
         {error && <p role="alert">{error}</p>}<small className="darl-agent-composer-note">@ 应用 · / Skill · Enter 发送</small>
       </footer>
+      {copyNotice && <div className="darl-agent-copy-toast" role="status" aria-live="polite">{copyNotice}</div>}
     </>}
 
     {picker === 'add' && <Picker title="添加" onClose={closePicker}><div className="darl-agent-add-list"><button type="button" onClick={() => { setUploadKind('file'); fileInput.current?.click(); }}><Paperclip size={16} /><span><strong>上传文件</strong><small>添加图片、文档或其他材料</small></span></button><button type="button" onClick={() => setPicker('apps')}><Wrench size={16} /><span><strong>选择应用</strong><small>启用网站的 MCP 工具</small></span></button><button type="button" onClick={() => setPicker('skills')}><Sparkles size={16} /><span><strong>选择 Skill</strong><small>选择可复用的工作流程</small></span></button></div></Picker>}

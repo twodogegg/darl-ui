@@ -66,6 +66,7 @@
 .darl-agent-rendered-markdown { background: var(--darl-agent-surface); }
 .darl-agent-rendered-markdown > .darl-agent-markdown { padding: 10px 11px; }
 .darl-agent-rendered-markdown .darl-agent-markdown > p:last-child { margin-bottom: 0; }
+.darl-agent-copy-toast { position: absolute; z-index: 12; right: 50%; bottom: 91px; padding: 7px 11px; border: 1px solid var(--darl-agent-border); border-radius: 8px; background: var(--darl-agent-surface); color: var(--darl-agent-text); box-shadow: 0 8px 24px rgb(2 6 23 / 24%); font-size: 11px; pointer-events: none; transform: translateX(50%); }
 @media(max-width: 600px) { .darl-agent-sidebar--expanded { inset: 8px; width: auto; height: calc(100dvh - 16px); border-radius: 14px; transform: none; } .darl-agent-sidebar--expanded .darl-agent-header { border-radius: 14px 14px 0 0; } }
 
 .darl-agent-sidebar { --darl-radius: 12px; --darl-primary: #2563eb; --darl-primary-foreground: #fff; --darl-border: #e2e8f0; --darl-text: #0f172a; --darl-muted: #64748b; --darl-surface: #f8fafc; }
