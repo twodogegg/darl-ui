@@ -157,6 +157,24 @@
 .demo-media-capabilities { display: grid; grid-template-columns: 1fr auto; gap: 10px 8px; font-size: 12px; }
 .demo-media-capabilities dt { color: var(--muted-foreground); }
 .demo-media-capabilities dd { text-align: right; }
+.demo-agent-page { max-width: 1180px; margin: 0 auto; }
+.demo-agent-card { overflow: hidden; }
+.demo-agent-frame { position: relative; min-height: 680px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--muted); }
+.demo-agent-host { min-height: 680px; background: var(--card); color: var(--card-foreground); }
+.demo-agent-host-nav { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 58px; padding: 0 20px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.demo-agent-host-nav > span { flex: 1; color: var(--muted-foreground); font-size: 12px; }
+.demo-agent-host-body { max-width: 760px; margin: 0 auto; padding: 70px 28px; }
+.demo-agent-host-body h2 { margin: 0; font-size: clamp(30px, 5vw, 52px); line-height: 1; letter-spacing: -2px; }
+.demo-agent-host-body > div:first-child > p:last-child { max-width: 510px; margin-top: 16px; color: var(--muted-foreground); line-height: 1.8; }
+.demo-agent-info-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 42px; }
+.demo-agent-info-grid > div { display: grid; gap: 6px; padding: 15px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--background); }
+.demo-agent-info-grid span { color: var(--muted-foreground); font-size: 11px; }.demo-agent-info-grid strong { font-size: 13px; }
+.demo-agent-callout { display: flex; align-items: flex-start; gap: 9px; margin-top: 18px; padding: 13px 15px; border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted-foreground); font-size: 12px; line-height: 1.7; }
+.demo-agent-callout svg { flex: none; margin-top: 2px; color: var(--primary); }
+.demo-agent-frame .demo-agent-embedded { position: absolute; inset: 0 0 0 auto; width: min(430px, 100%); box-shadow: -18px 0 55px #0f172a26; }
+.demo-agent-open { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 9px; color: var(--muted-foreground); font-size: 13px; }
+.demo-agent-open svg { width: 28px; height: 28px; color: var(--primary); }
+@media (max-width: 700px) { .demo-agent-host-nav > span { display: none; }.demo-agent-host-body { padding: 44px 18px; }.demo-agent-info-grid { grid-template-columns: 1fr; }.demo-agent-frame, .demo-agent-host { min-height: 650px; } }
 
 /* Bridge the existing library's isolated tokens into the site's shadcn theme. */
 .demo-shell .darl-ui-root,
@@ -196,3 +214,6 @@
 @media (pointer: coarse) {
   .demo-shell [data-slot='button'], .demo-navigation [data-slot='button'], .demo-shell [data-slot='toggle-group-item'] { min-height: 44px; }
 }
+
+.demo-shell .darl-agent-sidebar { --darl-background: var(--background); --darl-surface: var(--muted); --darl-text: var(--foreground); --darl-muted: var(--muted-foreground); --darl-border: var(--border); --darl-primary: var(--primary); --darl-primary-foreground: var(--primary-foreground); }
+@media (max-width: 600px) { .demo-agent-frame .demo-agent-embedded { position: fixed; inset: 0; width: 100%; height: 100dvh; } }

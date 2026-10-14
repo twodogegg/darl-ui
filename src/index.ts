@@ -7,3 +7,5 @@ export { VideoCompare } from './components/video-compare/VideoCompare';
 export type { CompareVideo, VideoCompareLayout, VideoCompareProps } from './components/video-compare/VideoCompare';
 export { MediaWorkspace } from './components/media-workspace/MediaWorkspace';
 export type { BaseCapabilities, BaseDefaults, ImageModel, VideoModel, MediaModel, MediaInput, MediaReferences, GenerateRequest, MediaResult, MediaBatch, MediaTask, MediaWorkspaceProps } from './components/media-workspace/types';
+export { AgentSidebar } from './components/agent-sidebar/AgentSidebar';
+export type { AgentSidebarProps, AgentApplication, AgentMessage, AgentModel, AgentSession, AgentSkill, AgentTool, AgentToolCall, AgentSendRequest, AgentMessageRole, AgentToolStatus } from './components/agent-sidebar/types';

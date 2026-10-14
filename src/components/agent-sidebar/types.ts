@@ -1,0 +1,99 @@
+export type AgentMessageRole = 'user' | 'assistant';
+export type AgentToolStatus = 'pending' | 'running' | 'success' | 'error' | 'confirmation';
+
+export interface AgentTool {
+  name: string;
+  title?: string;
+  description?: string;
+  risk?: 'read' | 'write' | 'dangerous';
+}
+
+export interface AgentApplication {
+  id: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  status?: 'connected' | 'disconnected' | 'needs-auth';
+  tools?: AgentTool[];
+}
+
+export interface AgentSkill {
+  id: string;
+  name: string;
+  description?: string;
+  version?: string;
+}
+
+export interface AgentModel {
+  id: string;
+  name: string;
+  description?: string;
+  reasoningEfforts?: string[];
+}
+
+export interface AgentToolCall {
+  id: string;
+  appId: string;
+  appName: string;
+  toolName: string;
+  toolTitle?: string;
+  input?: unknown;
+  output?: unknown;
+  error?: string;
+  status: AgentToolStatus;
+}
+
+export interface AgentMessage {
+  id: string;
+  role: AgentMessageRole;
+  content: string;
+  createdAt?: string;
+  streaming?: boolean;
+  attachments?: string[];
+  toolCalls?: AgentToolCall[];
+}
+
+export interface AgentSession {
+  id: string;
+  title: string;
+  updatedAt?: string;
+  messages: AgentMessage[];
+}
+
+export interface AgentSendRequest {
+  files?: File[];
+  sessionId: string;
+  content: string;
+  applicationIds: string[];
+  skillIds: string[];
+  modelId?: string;
+  reasoningEffort?: string;
+}
+
+export interface AgentSidebarProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  sessions: AgentSession[];
+  activeSessionId?: string;
+  onSessionChange?: (sessionId: string) => void;
+  onNewSession?: () => void;
+  onSend?: (request: AgentSendRequest) => void | Promise<void>;
+  isGenerating?: boolean;
+  onStop?: () => void;
+  onRegenerate?: (messageId: string) => void;
+  applications?: AgentApplication[];
+  skills?: AgentSkill[];
+  onSkillUpload?: (file: File) => void | Promise<void>;
+  onFileUpload?: (files: File[]) => void | Promise<void>;
+  models?: AgentModel[];
+  selectedApplicationIds?: string[];
+  onSelectedApplicationIdsChange?: (ids: string[]) => void;
+  selectedSkillIds?: string[];
+  onSelectedSkillIdsChange?: (ids: string[]) => void;
+  selectedModelId?: string;
+  onSelectedModelIdChange?: (id: string) => void;
+  selectedReasoningEffort?: string;
+  onSelectedReasoningEffortChange?: (effort: string) => void;
+  pageContext?: string;
+  className?: string;
+}

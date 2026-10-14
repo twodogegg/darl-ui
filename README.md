@@ -196,3 +196,34 @@ import '@darl/ui/styles.css';
 模型、任务、批次和异步状态由宿主传入；组件不调用真实生成 API，不上传文件，不自行保存任务。切换模型保留素材，超限阻止生成；不支持的参数与素材不进入请求。
 
 演示入口：`http://localhost:5188/#media-workspace`。包含「创作工作室」与「品牌宣传」两种宿主配置、深浅主题及本地异步模拟。示例媒体为本地示意素材。完整模型类型、API、接入示例和边界见 [MediaWorkspace 文档](docs/media-workspace.md)。
+
+
+## AgentSidebar｜网站辅助 Agent 侧栏
+
+演示入口：`http://localhost:5188/#agent-sidebar`。右侧会话面板包含新对话、历史搜索与切换、消息发送、应用 / Skill 选择、模型及其推理强度选择。回复操作只有复制和重新生成；整条复制保留原始 Markdown，代码块单独复制代码。当前轻量 Markdown 渲染支持标题、段落、无序列表、加粗、行内代码、链接和围栏代码块，不支持完整 GFM 表格及嵌套语法。
+
+```tsx
+import { AgentSidebar } from '@darl/ui';
+import '@darl/ui/styles.css';
+
+<AgentSidebar
+  open={open}
+  onOpenChange={setOpen}
+  sessions={sessions}
+  activeSessionId={activeSessionId}
+  onSessionChange={setActiveSessionId}
+  onNewSession={createSession}
+  onSend={sendMessage}
+  onRegenerate={regenerateMessage}
+  applications={applications}
+  skills={skills}
+  onSkillUpload={importSkill}
+  models={models}
+/>
+```
+
+`sessions` 包含会话 ID、标题和消息；`applications`、`skills`、`models` 全部由宿主提供。工具记录通过消息的 `toolCalls` 传入，参数和结果支持任意 JSON，不绑定具体 MCP。`onSend` 收到会话 ID、正文、应用 / Skill ID、有效模型及推理强度、可选本地附件 `files`；失败保留草稿并显示错误。模型不提供 `reasoningEfforts` 时隐藏推理选择。`isGenerating/onStop` 可连接宿主生成状态。完整类型从 `@darl/ui` 导出。
+
+组件保留各会话的本地草稿和待发送附件，支持 DarlUIProvider 主题。桌面固定在右侧，手机端全屏。演示中的历史保存在当前浏览器 localStorage；Skill 支持本地 `.md` 导入，限制 1 MB，仅读取名称和简介，刷新后需重新导入。示例回复和工具记录均为本地演示，附件不上传。真实模型、MCP 执行、账号鉴权、服务端历史及 Skill 包安装留给宿主接入。
+
+应用和 Skill 从选择面板插入输入光标处，作为正文内引用，不显示输入框上方标签，也不自动传入当前页面。引用编码为 `[显示名称](app:ID)` / `[显示名称](skill:ID)`，发送时从正文派生应用和 Skill ID；删除引用即取消本次使用。
