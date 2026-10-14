@@ -128,7 +128,9 @@ function MyUpload() {
 
 ## 演示网站
 
-`playground` 包含：介绍页、主题色配置、FileUploader 参数调试、模拟成功和失败、实时 JSX 代码、事件日志。演示站和组件库在同一个仓库中，但分别构建。
+`playground` 包含：介绍页、主题色配置、FileUploader 参数调试、模拟成功和失败、实时 JSX 代码、事件日志。演示站使用 [shadcn/ui](https://ui.shadcn.com) 官方 CLI 安装的 Radix Nova 基础组件和默认 Neutral 配色，支持白天 / 黑夜切换；首次打开跟随系统外观，手动选择后保存在浏览器中。手机端通过导航菜单访问所有演示页面。
+
+演示站和组件库分别构建。Tailwind 与官方基础组件仅用于演示站，组件库仍以独立 CSS 分发；演示站内通过 CSS 变量将现有高级组件映射到网站主题。CLI 配置位于 `components.json`，基础组件源码位于 `playground/src/components/ui/`。
 
 ## 后续再考虑
 

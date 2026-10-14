@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Info, Plus, Trash2 } from 'lucide-react';
 import { DarlUIProvider, VideoCompare, type CompareVideo, type VideoCompareLayout } from '../../src';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { ComponentHeading } from './DemoUI';
 
 interface Props { mode: 'light' | 'dark'; color: string }
 
@@ -44,20 +50,20 @@ export function VideoCompareDemo({ mode, color }: Props) {
   const reset = () => { videos.forEach((item) => { URL.revokeObjectURL(item.src); objects.current.delete(item.src); }); setVideos([]); setBest(null); setSound(undefined); setMessage(''); };
   const code = `import { VideoCompare } from '@darl/ui';\nimport '@darl/ui/styles.css';\n\n<VideoCompare\n  videos={[\n    { id: 'a', name: '版本 A', src: '/video-a.mp4' },\n    { id: 'b', name: '版本 B', src: '/video-b.mp4' },\n  ]}\n  layout="auto"\n  bestVideoId={bestId}\n  onBestChange={setBestId}\n  onAudioSourceChange={(id) => console.log(id)}\n/>`;
   return <div className="demo-video-page">
-    <div className="demo-heading"><div><div className="demo-eyebrow"><span className="demo-eyebrow-dot"/> MEDIA COMPONENTS</div><h1>VideoCompare <span className="demo-beta">v0.1</span></h1><p>最多 3 个视频，一条时间轴同步对比；横屏上下，竖屏左右，并且可以选定最佳版本。</p></div></div>
+    <ComponentHeading title="VideoCompare" category="媒体组件" description="最多 3 个视频，一条时间轴同步对比；横屏上下，竖屏左右，并且可以选定最佳版本。" />
     <div className="demo-video-toolbar">
       <input ref={input} type="file" accept="video/*,.m4v,.mov" multiple hidden aria-label="选择本地对比视频" onChange={(event) => add(event.target.files)}/>
-      <button className="demo-primary-action demo-video-add" disabled={videos.length >= 3} onClick={() => input.current?.click()}><Plus size={16}/> 添加本地视频（{videos.length}/3）</button>
-      <label className="demo-video-layout">排列方式 <select aria-label="排列方式" value={layout} onChange={(event) => setLayout(event.target.value as VideoCompareLayout)}><option value="auto">自动按画幅</option><option value="vertical">上下排列</option><option value="horizontal">左右排列</option></select></label>
-      <button className="demo-reset" onClick={reset} disabled={!videos.length}><Trash2 size={15}/> 清空</button>
+      <Button disabled={videos.length >= 3} onClick={() => input.current?.click()}><Plus data-icon="inline-start" />添加本地视频（{videos.length}/3）</Button>
+      <FieldGroup className="w-56"><Field orientation="horizontal"><FieldLabel htmlFor="video-layout">排列方式</FieldLabel><NativeSelect id="video-layout" value={layout} onChange={(event) => setLayout(event.target.value as VideoCompareLayout)}><NativeSelectOption value="auto">自动按画幅</NativeSelectOption><NativeSelectOption value="vertical">上下排列</NativeSelectOption><NativeSelectOption value="horizontal">左右排列</NativeSelectOption></NativeSelect></Field></FieldGroup>
+      <Button variant="outline" onClick={reset} disabled={!videos.length}><Trash2 data-icon="inline-start" />清空</Button>
     </div>
-    {message && <p className="demo-video-alert" role="alert">{message}</p>}
-    <div className="demo-video-surface">
-      <DarlUIProvider theme={{ mode, primaryColor: color, radius: 10 }}>
+    {message && <Alert variant="destructive" className="mb-4"><AlertDescription>{message}</AlertDescription></Alert>}
+    <Card><CardHeader><CardTitle>视频对比</CardTitle><CardDescription>选择 2–3 个本地视频，体验同步播放与最佳版本选择。</CardDescription></CardHeader><CardContent>
+      <DarlUIProvider theme={{ mode, primaryColor: color || undefined, radius: 10 }}>
         <VideoCompare videos={videos} layout={layout} bestVideoId={best} onBestChange={setBest} audioSourceId={sound} onAudioSourceChange={setSound} onRemove={remove} onError={(id, error) => setMessage(`视频 ${id.slice(0, 6)}：${error.message}`)}/>
       </DarlUIProvider>
       <div className="demo-video-status"><Info size={15}/> 全部使用浏览器本地文件 URL，无需服务器；最佳版本：<b>{videos.find((item) => item.id === best)?.name ?? '未选择'}</b></div>
-    </div>
-    <div className="demo-video-docs"><h2>React 使用示例</h2><p>对比器只负责播放器交互。业务系统通过 <code>onBestChange</code> 获取最佳版本 ID，自行决定是否保存到数据库。</p><pre><code>{code}</code></pre></div>
+    </CardContent></Card>
+    <section className="demo-docs"><h2>React 使用示例</h2><p>业务系统通过 <code>onBestChange</code> 获取最佳版本 ID，自行保存选择。</p><pre className="demo-code"><code>{code}</code></pre></section>
   </div>;
 }
