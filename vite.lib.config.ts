@@ -13,6 +13,6 @@ export default defineConfig({
       fileName: (format) => format === 'es' ? 'index.js' : 'index.cjs',
       cssFileName: 'darl-ui'
     },
-    rollupOptions: { external: ['react', 'react-dom', 'react/jsx-runtime'] }
+    rollupOptions: { external: ['react', 'react-dom', 'react/jsx-runtime', '@radix-ui/react-dialog', '@radix-ui/react-popover'] }
   }
 });

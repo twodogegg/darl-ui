@@ -7,5 +7,5 @@ export default defineConfig({
   plugins: [react()],
   root: resolve(__dirname, 'playground'),
   build: { outDir: resolve(__dirname, 'dist/demo'), emptyOutDir: true },
-  server: { host: '0.0.0.0', port: 5173 }
+  server: { host: '0.0.0.0', port: 5188 }
 });

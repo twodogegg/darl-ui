@@ -130,3 +130,28 @@ button { cursor: pointer; }
 .demo-video-docs p { color:var(--demo-muted); font-size:13px; line-height:1.8; }
 .demo-video-docs pre { padding:20px; overflow:auto; border-radius:10px; background:#101723; color:#dbeafe; font-size:12px; line-height:1.7; }
 @media(max-width:720px) { .demo-video-surface { padding:10px; } }
+/* MediaWorkspace demonstration page */
+.demo-media-shell .demo-media-entry { border: 1px solid var(--demo-border); background: var(--demo-surface); color: var(--demo-text); border-radius: 6px; padding: 6px 9px; font-size: 10px; cursor: pointer; }
+.demo-media-workspace-card { grid-template-columns: minmax(0, 1fr) 284px; min-height: 730px; }
+.demo-media-preview-body { display: flex; flex: 1; min-width: 0; flex-direction: column; background: var(--demo-surface); }
+.demo-media-preview-body .darl-media-workspace { height: 700px; min-height: 580px; border: 0; border-radius: 0; flex: 1; }
+.demo-media-preview-body .darl-mw-content { padding-top: 23px; }
+.demo-media-preview-body .darl-mw-composer-shell { padding-bottom: 10px; }
+.demo-media-notice { min-height: 0; padding: 0 18px; color: var(--demo-brand); font-size: 10px; }
+.demo-media-notice:empty { display: none; }
+.demo-media-request { margin: 8px 15px 11px; padding: 9px 11px; border-top: 1px solid var(--demo-border); color: var(--demo-muted); font-size: 10px; }
+.demo-media-request summary { cursor: pointer; }
+.demo-media-request pre { max-height: 180px; overflow: auto; margin: 8px 0 0; color: var(--demo-text); font: 10px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.demo-media-capabilities { display: grid; grid-template-columns: 1fr auto; gap: 10px 8px; color: var(--demo-muted); font-size: 11px; }
+.demo-media-capabilities b { color: var(--demo-text); font-weight: 550; text-align: right; }
+.demo-media-docs { margin-top: 27px; }
+.demo-media-docs .demo-doc-note { display: flex; gap: 7px; align-items: center; }
+.demo-media-shell .demo-code-panel { min-height: 640px; }
+@media (max-width: 1200px) { .demo-media-workspace-card { grid-template-columns: minmax(0,1fr) 254px; } }
+@media (max-width: 950px) { .demo-media-workspace-card { grid-template-columns: minmax(0,1fr) 245px; } }
+@media (max-width: 720px) {
+  .demo-media-workspace-card { display: flex; flex-direction: column; min-height: 0; }
+  .demo-media-preview-body .darl-media-workspace { height: 760px; min-height: 600px; }
+  .demo-media-shell .demo-code-panel { min-height: 460px; }
+  .demo-media-request { margin-left: 10px; margin-right: 10px; }
+}

@@ -1,12 +1,12 @@
 # darl-ui v0.1
 
-**跨 React 项目复用的轻量级高级功能组件库**。第一版包含 `FileUploader`、`DarlUIProvider` 和完整的演示网站。
+**跨 React 项目复用的轻量级高级功能组件库**。包含 `FileUploader`、`VideoCompare`、`MediaWorkspace`、`DarlUIProvider` 和完整的演示网站。
 
 ## 原则
 
 - 以 **shadcn/ui 的 Button 与 CSS 变量设计**为基础（内置的 Button 是为了组件库独立分发而做的轻量移植）。
 - 没有引入 Uppy、react-dropzone 或任何额外的 UI 组件库。
-- 除了 `react` / `react-dom` 两个 peer dependency，组件库打包产物不要求使用方配置 Tailwind。
+- `react` / `react-dom` 为 peer dependency，组件库打包产物不要求使用方配置 Tailwind；MediaWorkspace 使用 Radix 弹出面板和对话框原语。
 - 上传由业务项目提供，组件自身不管理远程存储、鉴权或业务数据。
 - 演示站使用模拟上传，不会发送用户选择的文件至服务器。
 
@@ -21,7 +21,7 @@ npm install
 npm run dev
 ```
 
-浏览器打开 `http://localhost:5173`。
+浏览器打开 `http://localhost:5188`。
 
 构建完整项目：
 
@@ -161,3 +161,30 @@ const videos = [
 `VideoCompare` 支持 `videos`（2–3 项、至少 2 项可比较）、`layout: 'auto' | 'vertical' | 'horizontal'`、`audioSourceId/defaultAudioSourceId/onAudioSourceChange`、`bestVideoId/defaultBestVideoId/onBestChange`、`onRemove`、`onError`、`loop`、`accentColor` 与 `className`。
 
 **边界**：所有视频从各自 0 秒同步；全局时长取最长视频，短视频停留末帧，切换声音不重置时间轴，选为最佳不修改音源。播放依赖浏览器解码能力，并做适度时间轴纠偏，不承诺专业软件级逐帧锁定。不会合成视频、管理资产或保存最佳记录；业务网站可通过 `onBestChange(id)` 持久化选择。组件不会上传视频，演示页面中的本地文件仅通过浏览器 Blob URL 使用。
+
+## MediaWorkspace｜图片 / 视频生成工作台
+
+一个可复用的统一工作台：左侧任务列表、按批次展示结果、底部提示词与紧凑参数面板。输入区顶部先选择生成类型（图片 / 视频，默认图片），模型列表只显示当前类型的模型；支持模型能力驱动的参考图片 / 视频 / 音频、首尾帧、参数默认值、历史复用、重新生成、收藏、重试和取消。
+
+```tsx
+import { MediaWorkspace, type MediaModel, type MediaTask } from '@darl/ui';
+import '@darl/ui/styles.css';
+
+<MediaWorkspace
+  models={models}
+  tasks={tasks}
+  activeTaskId={activeTaskId}
+  onTaskChange={setActiveTaskId}
+  onCreateTask={handleCreateTask}
+  onRenameTask={handleRenameTask}
+  onGenerate={handleGenerate}
+  onRetry={handleRetry}
+  onCancel={handleCancel}
+  onRegenerate={handleRegenerate}
+  onFavoriteChange={handleFavoriteChange}
+/>
+```
+
+模型、任务、批次和异步状态由宿主传入；组件不调用真实生成 API，不上传文件，不自行保存任务。切换模型保留素材，超限阻止生成；不支持的参数与素材不进入请求。
+
+演示入口：`http://localhost:5188/#media-workspace`。包含「创作工作室」与「品牌宣传」两种宿主配置、深浅主题及本地异步模拟。示例媒体为本地示意素材。完整模型类型、API、接入示例和边界见 [MediaWorkspace 文档](docs/media-workspace.md)。
