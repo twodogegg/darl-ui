@@ -1,12 +1,12 @@
 import { useState, type ReactNode } from 'react';
-import { Bot, Component, FileImage, Github, Layers3, LayoutPanelTop, Menu, Moon, Palette, Play, Sun, Upload } from 'lucide-react';
+import { Bot, Component, FileImage, Github, Layers3, LayoutPanelTop, Menu, Moon, Palette, Play, Settings, Sun, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import type { Mode } from './usePlaygroundTheme';
 
-export type Page = 'intro' | 'theme' | 'uploader' | 'video' | 'media' | 'agent';
+export type Page = 'intro' | 'theme' | 'uploader' | 'video' | 'media' | 'agent' | 'settings';
 const pages = [
   { id: 'intro', label: '概览', title: 'Introduction', icon: LayoutPanelTop },
   { id: 'theme', label: '主题系统', title: 'Theme', icon: Palette },
@@ -14,6 +14,7 @@ const pages = [
   { id: 'video', label: 'VideoCompare', title: 'VideoCompare', icon: Play },
   { id: 'media', label: 'MediaWorkspace', title: 'MediaWorkspace', icon: FileImage },
   { id: 'agent', label: 'AgentSidebar', title: 'AgentSidebar', icon: Bot },
+  { id: 'settings', label: 'SettingsPage', title: 'SettingsPage', icon: Settings },
 ] as const;
 
 export function DemoLayout({ selected, onNavigate, mode, onModeChange, children }: {

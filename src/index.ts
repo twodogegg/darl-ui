@@ -11,3 +11,6 @@ export { AgentSidebar } from './components/agent-sidebar/AgentSidebar';
 export { SkillManager } from './components/agent-sidebar/SkillManager';
 export { importSkillPackage, parseSkillMarkdown, skillMarkdown, newSkillDraft } from './components/agent-sidebar/skill-package';
 export type { AgentSidebarProps, AgentApplication, AgentMessage, AgentModel, AgentSession, AgentSkill, AgentSkillDraft, AgentSkillResource, AgentTool, AgentToolCall, AgentSendRequest, AgentMessageRole, AgentToolStatus } from './components/agent-sidebar/types';
+export { SettingsPage } from './components/settings/SettingsPage';
+export { ModelSettingsCard } from './components/settings/ModelSettingsCard';
+export type { AgentModelCapabilities, AgentModelConfig, AgentModelType, ModelProvider, ModelProviderProtocol, ModelProviderStatus, ModelSettingsCardProps, SettingsPageProps, SettingsSection } from './components/settings/types';

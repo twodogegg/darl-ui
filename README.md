@@ -231,3 +231,21 @@ import '@darl/ui/styles.css';
 组件保留各会话的本地草稿和待发送附件，支持 DarlUIProvider 主题。桌面固定在右侧，手机端全屏。Skill 管理器支持新建、编辑、停用、删除，以及导入 `SKILL.md` 或包含 `references/`、`scripts/`、`assets/`、`agents/` 的 ZIP / 文件集合；导入会校验 frontmatter、资源路径和大小，不执行 Skill 内的脚本。Skill 版本在保存时递增，真实存储由宿主通过 `onSkillImport/onSkillSave/onSkillDelete` 接管。演示中的历史和 Skill 保存在当前页面内存中，示例回复和工具记录均为本地演示，附件不上传。真实模型、MCP 执行、账号鉴权和服务端历史留给宿主接入。
 
 应用和 Skill 从选择面板插入输入光标处，作为正文内引用，不显示输入框上方标签，也不自动传入当前页面。输入 `@` 引用应用，输入 `/` 引用 Skill；继续输入名称或简介关键词可以筛选，上下方向键选择，Enter / Tab 插入，Esc 关闭建议。应用引用为蓝色，Skill 引用为紫色，可用 `--darl-agent-app` / `--darl-agent-skill` 覆盖。引用编码为 `[显示名称](app:ID)` / `[显示名称](skill:ID)`，发送时从正文派生应用和 Skill ID；删除引用即取消本次使用。
+
+## SettingsPage｜整体设置中心
+
+`SettingsPage` 提供设置中心的导航外壳，`ModelSettingsCard` 负责模型提供方和模型目录。模型类型统一为 `text`、`image`、`video`、`audio`；模型的推理强度和能力标签由宿主提供，API Key 只通过宿主回调保存，组件不会自行持久化密钥。
+
+```tsx
+<SettingsPage activeSection="models" sections={sections}>
+  <ModelSettingsCard
+    providers={providers}
+    onProviderSave={saveProvider}
+    onProviderDelete={deleteProvider}
+    onTestConnection={testProvider}
+    onFetchModels={fetchProviderModels}
+  />
+</SettingsPage>
+```
+
+设置中心当前提供通用设置、模型、应用 / MCP、Skills、Agent 预设和桌面设置入口；除模型卡片外，其他页面内容由宿主通过 `children` 接入。模型配置完成后，将 `providers` 中启用的模型转换为 `AgentSidebar` 的 `models` 即可复用同一个聊天侧栏。

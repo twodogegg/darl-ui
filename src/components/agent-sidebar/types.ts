@@ -1,3 +1,5 @@
+import type { AgentModelCapabilities, AgentModelType } from '../settings/types';
+
 export type AgentMessageRole = 'user' | 'assistant';
 export type AgentToolStatus = 'pending' | 'running' | 'success' | 'error' | 'confirmation';
 
@@ -49,7 +51,11 @@ export interface AgentModel {
   id: string;
   name: string;
   description?: string;
+  providerId?: string;
+  type?: AgentModelType;
   reasoningEfforts?: string[];
+  capabilities?: AgentModelCapabilities;
+  enabled?: boolean;
 }
 
 export interface AgentToolCall {
