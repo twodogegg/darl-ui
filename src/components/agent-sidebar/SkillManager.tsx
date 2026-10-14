@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Check, FileText, FolderOpen, Pencil, Plus, Search, Sparkles, Star, Trash2, Upload, X } from 'lucide-react';
 import { Button } from '../ui/Button';
-import { useDarlTheme } from '../../theme/DarlUIProvider';
 import type { AgentSkill, AgentSkillResource } from './types';
 import { importSkillPackage, newSkillDraft, nextSkillVersion, validateSkill } from './skill-package';
 
@@ -18,7 +17,6 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
   onFavoriteChange: (skillId: string, favorite: boolean) => void | Promise<void>;
   onUse: (skill: AgentSkill) => void;
 }) {
-  const theme = useDarlTheme();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AgentSkill>(newSkillDraft());
   const [query, setQuery] = useState('');
@@ -151,9 +149,8 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
   };
 
   return <DialogPrimitive.Root open={open} onOpenChange={(nextOpen) => { if (!nextOpen) close(); }}>
-    <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="darl-agent-skill-manager darl-agent-skill-manager-backdrop" />
-      <DialogPrimitive.Content className={`darl-agent-skill-manager-card${theme?.resolvedMode === 'dark' ? ' darl-agent-skill-manager-dark' : ''}`} aria-describedby="darl-agent-skill-manager-description">
+      <DialogPrimitive.Overlay className="darl-agent-skill-manager" />
+      <DialogPrimitive.Content className="darl-agent-skill-manager-card" aria-describedby="darl-agent-skill-manager-description">
       <header className="darl-agent-skill-manager-header">
         <div className="darl-agent-manager-title-wrap"><span className="darl-agent-manager-title-icon"><Sparkles /></span><div><span className="darl-agent-manager-eyebrow">SKILL LIBRARY</span><DialogPrimitive.Title asChild><h2 id="darl-agent-skill-manager-title">管理 Skill</h2></DialogPrimitive.Title><DialogPrimitive.Description asChild><p id="darl-agent-skill-manager-description">导入、编辑和选择可复用的 Agent 工作流程。</p></DialogPrimitive.Description></div></div>
         <Button variant="ghost" size="icon" aria-label="关闭 Skill 管理" onClick={close}><X /></Button>
@@ -175,6 +172,5 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
         </section>
       </div>
       </DialogPrimitive.Content>
-    </DialogPrimitive.Portal>
   </DialogPrimitive.Root>;
 }
