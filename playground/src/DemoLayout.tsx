@@ -6,13 +6,14 @@ import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import type { Mode } from './usePlaygroundTheme';
 
-export type Page = 'intro' | 'theme' | 'uploader' | 'video' | 'media' | 'agent' | 'settings';
+export type Page = 'intro' | 'theme' | 'uploader' | 'video' | 'media' | 'styles' | 'agent' | 'settings';
 const pages = [
   { id: 'intro', label: '概览', title: 'Introduction', icon: LayoutPanelTop },
   { id: 'theme', label: '主题系统', title: 'Theme', icon: Palette },
   { id: 'uploader', label: 'FileUploader', title: 'FileUploader', icon: Upload },
   { id: 'video', label: 'VideoCompare', title: 'VideoCompare', icon: Play },
   { id: 'media', label: 'MediaWorkspace', title: 'MediaWorkspace', icon: FileImage },
+  { id: 'styles', label: 'StyleSelector', title: 'StyleSelector', icon: Palette },
   { id: 'agent', label: 'AgentSidebar', title: 'AgentSidebar', icon: Bot },
   { id: 'settings', label: 'SettingsPage', title: 'SettingsPage', icon: Settings },
 ] as const;

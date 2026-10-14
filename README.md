@@ -232,6 +232,24 @@ import '@darl/ui/styles.css';
 
 应用和 Skill 从选择面板插入输入光标处，作为正文内引用，不显示输入框上方标签，也不自动传入当前页面。输入 `@` 引用应用，输入 `/` 引用 Skill；继续输入名称或简介关键词可以筛选，上下方向键选择，Enter / Tab 插入，Esc 关闭建议。应用引用为蓝色，Skill 引用为紫色，可用 `--darl-agent-app` / `--darl-agent-skill` 覆盖。引用编码为 `[显示名称](app:ID)` / `[显示名称](skill:ID)`，发送时从正文派生应用和 Skill ID；删除引用即取消本次使用。
 
+## StyleSelector｜风格选择弹窗
+
+`StyleSelector` 提供风格广场弹窗，支持集合切换、分类筛选、搜索、选择、收藏和两步创建风格向导。宿主通过 `styles` 提供风格数据，通过 `onChange`、`onFavoriteChange` 和 `onCreate` 接收结果；`onCreate` 可以返回 Promise，失败时会保留表单并显示错误。
+
+```tsx
+<StyleSelector
+  open={open}
+  onOpenChange={setOpen}
+  styles={styles}
+  value={selectedStyleId}
+  onChange={(style) => setSelectedStyleId(style?.id ?? null)}
+  onFavoriteChange={saveFavorite}
+  onCreate={createStyle}
+/>
+```
+
+风格列表默认每页展示 20 个（`pageSize` 可调整），滚动接近底部自动加载下一页，内容不足一屏时继续补齐。已在本地的风格按页展示；需要远程分页时，传入 `hasMore` 和异步 `onLoadMore({ collection, category, query, signal })`，宿主负责请求下一页、按 ID 去重后追加到 `styles`，并在末页将 `hasMore` 设为 `false`。通过 `onFilterChange({ collection, category, query })` 重置宿主游标及 `hasMore`，即使前一个筛选已到末页，新的筛选仍可加载；“我的风格”不传分类。回调应遵守 `signal`，丢弃切换筛选或关闭弹窗后取消的请求结果。组件显示加载状态，失败保留已加载列表并提供重试；同一时刻只发起一个请求。`onChange` 仅在确认后应用待选风格。
+
 ## SettingsPage｜整体设置中心
 
 `SettingsPage` 提供设置中心的导航外壳，`ModelSettingsCard` 负责模型提供方和模型目录。模型类型统一为 `text`、`image`、`video`、`audio`；模型的推理强度和能力标签由宿主提供，API Key 只通过宿主回调保存，组件不会自行持久化密钥。

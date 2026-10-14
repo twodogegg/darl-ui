@@ -14,3 +14,5 @@ export type { AgentSidebarProps, AgentApplication, AgentMessage, AgentModel, Age
 export { SettingsPage } from './components/settings/SettingsPage';
 export { ModelSettingsCard } from './components/settings/ModelSettingsCard';
 export type { AgentModelCapabilities, AgentModelConfig, AgentModelType, ModelProvider, ModelProviderProtocol, ModelProviderStatus, ModelSettingsCardProps, SettingsPageProps, SettingsSection } from './components/settings/types';
+export { StyleSelector } from './components/style-selector/StyleSelector';
+export type { StyleCollection, StyleOption, StyleCreateRequest, StyleFilter, StyleLoadMoreRequest, StyleSelectorProps } from './components/style-selector/StyleSelector';

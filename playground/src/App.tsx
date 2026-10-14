@@ -18,6 +18,7 @@ import { MediaWorkspaceDemo } from './MediaWorkspaceDemo';
 import { VideoCompareDemo } from './VideoCompareDemo';
 import { AgentSidebarDemo } from './AgentSidebarDemo';
 import { SettingsDemo } from './SettingsDemo';
+import { StyleSelectorDemo } from './StyleSelectorDemo';
 
 type Format = 'all' | 'images' | 'videos' | 'mixed' | 'documents';
 type Log = { id: number; status: 'success' | 'error' | 'rejected'; message: string };
@@ -28,7 +29,7 @@ const formatOptions: Record<Format, { label: string; accept: string[] }> = {
   mixed: { label: '图片 + 视频', accept: ['image/*', 'video/*'] },
   documents: { label: '文档', accept: ['.pdf', '.docx', '.txt'] },
 };
-const hashes: Record<Page, string> = { intro: 'intro', theme: 'theme', uploader: '', video: 'video-compare', media: 'media-workspace', agent: 'agent-sidebar', settings: 'settings' };
+const hashes: Record<Page, string> = { intro: 'intro', theme: 'theme', uploader: '', video: 'video-compare', media: 'media-workspace', styles: 'styles', agent: 'agent-sidebar', settings: 'settings' };
 const currentPage = (): Page => (Object.keys(hashes) as Page[]).find((page) => hashes[page] === location.hash.slice(1)) ?? 'uploader';
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 function mockUpload(shouldFail: boolean): UploadFn<{ fileId: string; url: string }> {
@@ -85,6 +86,7 @@ export function App() {
       : selected === 'settings' ? <SettingsDemo />
       : selected === 'media' ? <MediaWorkspaceDemo mode={mode} color={color} onColorChange={setColor} />
       : selected === 'video' ? <VideoCompareDemo color={color} mode={mode} />
+      : selected === 'styles' ? <StyleSelectorDemo />
       : selected === 'intro' ? <div className="demo-intro">
         <Badge variant="outline">React 组件库</Badge>
         <h1>为你的项目而构建。<br />简单、可复用、可定制。</h1>
