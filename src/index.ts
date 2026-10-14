@@ -8,4 +8,6 @@ export type { CompareVideo, VideoCompareLayout, VideoCompareProps } from './comp
 export { MediaWorkspace } from './components/media-workspace/MediaWorkspace';
 export type { BaseCapabilities, BaseDefaults, ImageModel, VideoModel, MediaModel, MediaInput, MediaReferences, GenerateRequest, MediaResult, MediaBatch, MediaTask, MediaWorkspaceProps } from './components/media-workspace/types';
 export { AgentSidebar } from './components/agent-sidebar/AgentSidebar';
-export type { AgentSidebarProps, AgentApplication, AgentMessage, AgentModel, AgentSession, AgentSkill, AgentTool, AgentToolCall, AgentSendRequest, AgentMessageRole, AgentToolStatus } from './components/agent-sidebar/types';
+export { SkillManager } from './components/agent-sidebar/SkillManager';
+export { importSkillPackage, parseSkillMarkdown, skillMarkdown, newSkillDraft } from './components/agent-sidebar/skill-package';
+export type { AgentSidebarProps, AgentApplication, AgentMessage, AgentModel, AgentSession, AgentSkill, AgentSkillDraft, AgentSkillResource, AgentTool, AgentToolCall, AgentSendRequest, AgentMessageRole, AgentToolStatus } from './components/agent-sidebar/types';

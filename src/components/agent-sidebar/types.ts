@@ -22,7 +22,25 @@ export interface AgentSkill {
   name: string;
   description?: string;
   version?: string;
+  category?: string;
+  enabled?: boolean;
+  scope?: 'builtin' | 'custom';
+  favorite?: boolean;
+  instructions?: string;
+  resources?: AgentSkillResource[];
+  updatedAt?: string;
 }
+
+export interface AgentSkillResource {
+  path: string;
+  content: string;
+  encoding?: 'base64';
+}
+
+export type AgentSkillDraft = Omit<AgentSkill, 'id' | 'version' | 'updatedAt'> & {
+  id?: string;
+  version?: string;
+};
 
 export interface AgentModel {
   id: string;
@@ -84,6 +102,10 @@ export interface AgentSidebarProps {
   applications?: AgentApplication[];
   skills?: AgentSkill[];
   onSkillUpload?: (file: File) => void | Promise<void>;
+  onSkillImport?: (skill: AgentSkill) => void | Promise<void>;
+  onSkillSave?: (skill: AgentSkill) => void | Promise<void>;
+  onSkillDelete?: (skillId: string) => void | Promise<void>;
+  onSkillFavoriteChange?: (skillId: string, favorite: boolean) => void | Promise<void>;
   onFileUpload?: (files: File[]) => void | Promise<void>;
   models?: AgentModel[];
   selectedApplicationIds?: string[];

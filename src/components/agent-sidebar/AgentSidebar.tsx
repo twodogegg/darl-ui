@@ -1,8 +1,10 @@
 import { AgentComposerInput, ReferenceText, referenceIds } from './AgentComposerInput';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertCircle, ArrowLeft, Bot, Check, ChevronDown, Clipboard, Copy, History, LoaderCircle, Paperclip, Plus, RefreshCw, Search, Send, Sparkles, Square, Upload, Wrench, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Bot, Check, ChevronDown, Clipboard, Copy, History, LoaderCircle, Paperclip, Pencil, Plus, RefreshCw, Search, Send, Sparkles, Square, Upload, Wrench, X } from 'lucide-react';
 import { Button } from '../ui/Button';
-import type { AgentApplication, AgentSidebarProps, AgentToolCall } from './types';
+import type { AgentApplication, AgentSidebarProps, AgentSkill, AgentToolCall } from './types';
+import { SkillManager } from './SkillManager';
+import { importSkillPackage } from './skill-package';
 
 function formatToolValue(value: unknown): string {
   if (value === undefined) return '';
@@ -101,7 +103,7 @@ function statusText(status: AgentApplication['status']): string {
   return status === 'connected' ? '已连接' : status === 'needs-auth' ? '需要授权' : '未连接';
 }
 
-export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, onSessionChange, onNewSession, onSend, onRegenerate, isGenerating = false, onStop, applications = [], skills = [], onSkillUpload, onFileUpload, models = [], onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
+export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, onSessionChange, onNewSession, onSend, onRegenerate, isGenerating = false, onStop, applications = [], skills = [], onSkillUpload, onSkillImport, onSkillSave, onSkillDelete, onSkillFavoriteChange, onFileUpload, models = [], onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
   const [view, setView] = useState<'chat' | 'history'>('chat');
   const [picker, setPicker] = useState<'add' | 'apps' | 'skills' | 'models' | 'effort' | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -111,6 +113,9 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const [historyQuery, setHistoryQuery] = useState('');
   const [copyState, setCopyState] = useState('');
   const [insertion, setInsertion] = useState<{ token: string; key: number } | null>(null);
+  const [skillManagerOpen, setSkillManagerOpen] = useState(false);
+  const [localSkills, setLocalSkills] = useState<AgentSkill[]>(skills);
+  const skillsPropRef = useRef(skills);
 
   const [localModelId, setLocalModelId] = useState(models[0]?.id);
   const [localEffort, setLocalEffort] = useState(models[0]?.reasoningEfforts?.[0] || '中');
@@ -119,6 +124,14 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const fileInput = useRef<HTMLInputElement>(null);
   const copyTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(copyTimer.current), []);
+  useEffect(() => {
+    const changed = skillsPropRef.current.length !== skills.length || skillsPropRef.current.some((skill, index) => skill.id !== skills[index]?.id || skill.version !== skills[index]?.version);
+    if (changed) {
+      skillsPropRef.current = skills;
+      setLocalSkills(skills);
+    }
+  }, [skills]);
+  const availableSkills = localSkills;
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
   const modelId = controlledModelId ?? localModelId;
   const selectedModel = models.find((model) => model.id === modelId) ?? models[0];
@@ -154,7 +167,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
     setInsertion({ token: `[${name.replace(/[\[\]]/g, '')}](${kind}:${encodeURIComponent(id)})`, key: Date.now() }); setPicker(null);
   };
   const toggleApplication = (id: string) => { const app = applications.find((item) => item.id === id); if (app) insertReference('app', id, app.name); };
-  const toggleSkill = (id: string) => { const skill = skills.find((item) => item.id === id); if (skill) insertReference('skill', id, skill.name); };
+  const toggleSkill = (id: string) => { const skill = availableSkills.find((item) => item.id === id); if (skill) insertReference('skill', id, skill.name); };
   const closePicker = () => setPicker(null);
   const activeMessages = activeSession?.messages ?? [];
 
@@ -185,19 +198,20 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
       </section>
       <footer className="darl-agent-composer-shell">
 
-        <div className="darl-agent-contexts">{files.map((file, index) => <span className="darl-agent-chip" key={index}><Paperclip size={12} />{file.name}<button aria-label={`移除附件 ${file.name}`} onClick={() => setAttachments((current) => ({ ...current, [draftKey]: files.filter((_, i) => i !== index) }))}><X size={12} /></button></span>)}</div><div className="darl-agent-composer"><AgentComposerInput key={draftKey} value={draft} onChange={setDraft} onSubmit={() => void submit()} insertion={insertion} onInserted={() => setInsertion(null)} />
+        <div className="darl-agent-contexts">{files.map((file, index) => <span className="darl-agent-chip" key={index}><Paperclip size={12} />{file.name}<button aria-label={`移除附件 ${file.name}`} onClick={() => setAttachments((current) => ({ ...current, [draftKey]: files.filter((_, i) => i !== index) }))}><X size={12} /></button></span>)}</div><div className="darl-agent-composer"><AgentComposerInput applications={applications} skills={availableSkills} key={draftKey} value={draft} onChange={setDraft} onSubmit={() => void submit()} insertion={insertion} onInserted={() => setInsertion(null)} />
           <div className="darl-agent-composer-controls"><Button variant="ghost" size="icon" aria-label="添加材料或能力" aria-expanded={picker === 'add'} onClick={() => setPicker(picker === 'add' ? null : 'add')}><Plus size={17} /></Button><span className="darl-agent-composer-spacer" />{models.length > 0 && <Button variant="outline" size="sm" onClick={() => setPicker(picker === 'models' ? null : 'models')}><span>{selectedModel?.name || '选择模型'}</span><ChevronDown size={13} /></Button>}{supportedEfforts.length > 0 && <Button variant="outline" size="sm" onClick={() => setPicker(picker === 'effort' ? null : 'effort')}><span>思考：{effort}</span><ChevronDown size={13} /></Button>}{isGenerating ? <Button variant="outline" size="icon" aria-label="停止生成" onClick={onStop}><Square size={14} /></Button> : <Button variant="default" size="icon" aria-label="发送消息" disabled={!draft.trim() || !onSend || !activeSession || pending} onClick={submit}><Send size={16} /></Button>}</div>
         </div>
-        {error && <p role="alert">{error}</p>}<small className="darl-agent-composer-note">Enter 发送 · Shift + Enter 换行</small>
+        {error && <p role="alert">{error}</p>}<small className="darl-agent-composer-note">@ 应用 · / Skill · Enter 发送</small>
       </footer>
     </>}
 
     {picker === 'add' && <Picker title="添加" onClose={closePicker}><div className="darl-agent-add-list"><button type="button" onClick={() => { setUploadKind('file'); fileInput.current?.click(); }}><Paperclip size={16} /><span><strong>上传文件</strong><small>添加图片、文档或其他材料</small></span></button><button type="button" onClick={() => setPicker('apps')}><Wrench size={16} /><span><strong>选择应用</strong><small>启用网站的 MCP 工具</small></span></button><button type="button" onClick={() => setPicker('skills')}><Sparkles size={16} /><span><strong>选择 Skill</strong><small>选择可复用的工作流程</small></span></button></div></Picker>}
     {picker === 'apps' && <Picker title="选择应用" onClose={closePicker}><div className="darl-agent-picker-list">{applications.map((app) => <button key={app.id} type="button" className="darl-agent-picker-row" aria-pressed={applicationIds.includes(app.id)} disabled={app.status !== undefined && app.status !== 'connected'} onClick={() => toggleApplication(app.id)}><span className="darl-agent-picker-icon">{app.icon || <Wrench size={15} />}</span><span className="darl-agent-picker-copy"><strong>{app.name}</strong><small>{app.description || `${app.tools?.length || 0} 个工具`} · {statusText(app.status)}</small></span>{applicationIds.includes(app.id) && <Check size={16} />}</button>)}{!applications.length && <p className="darl-agent-empty">暂无可用应用</p>}</div></Picker>}
-    {picker === 'skills' && <Picker title="选择 Skill" onClose={closePicker}><div className="darl-agent-picker-toolbar"><span>已安装的 Skill</span><button type="button" disabled={!onSkillUpload} onClick={() => { setUploadKind('skill'); fileInput.current?.click(); }}><Upload size={14} />上传 Skill</button></div><div className="darl-agent-picker-list">{skills.map((skill) => <button key={skill.id} type="button" className="darl-agent-picker-row" aria-pressed={skillIds.includes(skill.id)} onClick={() => toggleSkill(skill.id)}><span className="darl-agent-picker-icon darl-agent-picker-icon--skill"><Sparkles size={15} /></span><span className="darl-agent-picker-copy"><strong>{skill.name}</strong><small>{skill.description || '可复用的 Agent 工作流程'}{skill.version ? ` · v${skill.version}` : ''}</small></span>{skillIds.includes(skill.id) && <Check size={16} />}</button>)}{!skills.length && <p className="darl-agent-empty">暂无 Skill</p>}</div></Picker>}
+    {picker === 'skills' && <Picker title="选择 Skill" onClose={closePicker}><div className="darl-agent-picker-toolbar"><span>已安装的 Skill</span><span className="darl-agent-picker-toolbar-actions"><button type="button" onClick={() => { setPicker(null); setSkillManagerOpen(true); }}><Pencil size={14} />管理 Skill</button><button type="button" onClick={() => { setUploadKind('skill'); fileInput.current?.click(); }}><Upload size={14} />上传</button></span></div><div className="darl-agent-picker-list">{availableSkills.filter((skill) => skill.enabled !== false).map((skill) => <button key={skill.id} type="button" className="darl-agent-picker-row" aria-pressed={skillIds.includes(skill.id)} onClick={() => toggleSkill(skill.id)}><span className="darl-agent-picker-icon darl-agent-picker-icon--skill"><Sparkles size={15} /></span><span className="darl-agent-picker-copy"><strong>{skill.name}</strong><small>{skill.description || '可复用的 Agent 工作流程'}{skill.version ? ` · v${skill.version}` : ''}</small></span>{skillIds.includes(skill.id) && <Check size={16} />}</button>)}{!availableSkills.length && <p className="darl-agent-empty">暂无 Skill</p>}</div></Picker>}
     {picker === 'models' && <Picker title="选择模型" onClose={closePicker}><div className="darl-agent-picker-list">{models.map((model) => <button key={model.id} type="button" className="darl-agent-picker-row" onClick={() => { setModelId(model.id); setPicker(null); }}><span className="darl-agent-picker-icon"><Bot size={15} /></span><span className="darl-agent-picker-copy"><strong>{model.name}</strong><small>{model.description || '对话模型'}</small></span>{model.id === modelId && <Check size={16} />}</button>)}</div></Picker>}
     {picker === 'effort' && selectedModel && <Picker title="思考强度" onClose={closePicker}><div className="darl-agent-effort-list">{supportedEfforts.map((value) => <button type="button" key={value} data-selected={value === effort} onClick={() => { setEffort(value); setPicker(null); }}><strong>{value}</strong><small>{value === '低' ? '更快响应' : value === '高' ? '更深入分析' : '平衡速度和质量'}</small>{value === effort && <Check size={15} />}</button>)}</div></Picker>}
-    <input ref={fileInput} aria-label="选择上传文件" type="file" hidden multiple={uploadKind === 'file'} onChange={(event) => { const files = Array.from(event.target.files ?? []); const first = files[0]; if (uploadKind === 'skill' && first && onSkillUpload) void Promise.resolve().then(() => onSkillUpload(first)).catch((reason) => setError(reason instanceof Error ? reason.message : '导入失败')); if (uploadKind === 'file' && files.length) { setAttachments((current) => ({ ...current, [draftKey]: [...(current[draftKey] ?? []), ...files] })); if (onFileUpload) void Promise.resolve().then(() => onFileUpload(files)).catch(() => setError('附件处理失败')); } setPicker(null); event.currentTarget.value = ''; }} accept={uploadKind === 'skill' ? '.md,text/markdown' : undefined} />
+    <input ref={fileInput} aria-label="选择上传文件" type="file" hidden multiple={uploadKind === 'file'} onChange={(event) => { const files = Array.from(event.target.files ?? []); const first = files[0]; if (uploadKind === 'skill' && files.length) void Promise.resolve().then(async () => { const imported = await importSkillPackage(files); setLocalSkills((current) => [...current.filter((item) => item.id !== imported.id), imported]); await onSkillImport?.(imported); if (first) await onSkillUpload?.(first); }).catch((reason) => setError(reason instanceof Error ? reason.message : '导入失败')); if (uploadKind === 'file' && files.length) { setAttachments((current) => ({ ...current, [draftKey]: [...(current[draftKey] ?? []), ...files] })); if (onFileUpload) void Promise.resolve().then(() => onFileUpload(files)).catch(() => setError('附件处理失败')); } setPicker(null); event.currentTarget.value = ''; }} accept={uploadKind === 'skill' ? '.md,.zip,text/markdown,application/zip' : undefined} />
+    <SkillManager open={skillManagerOpen} skills={availableSkills} onClose={() => setSkillManagerOpen(false)} onUse={(skill) => { insertReference('skill', skill.id, skill.name); setSkillManagerOpen(false); }} onImport={async (skill) => { setLocalSkills((current) => [...current.filter((item) => item.id !== skill.id), skill]); await onSkillImport?.(skill); }} onSave={async (skill) => { setLocalSkills((current) => [...current.filter((item) => item.id !== skill.id), skill]); await onSkillSave?.(skill); }} onDelete={async (skillId) => { setLocalSkills((current) => current.filter((skill) => skill.id !== skillId)); await onSkillDelete?.(skillId); }} onFavoriteChange={async (skillId, favorite) => { setLocalSkills((current) => current.map((skill) => skill.id === skillId ? { ...skill, favorite } : skill)); await onSkillFavoriteChange?.(skillId, favorite); }} />
   </aside>;
 }
 
