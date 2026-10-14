@@ -31,6 +31,12 @@ npm run test
 npm run build
 ```
 
+### 开发文档
+
+- [项目规则](AGENTS.md)
+- [开发流程](docs/development/workflow.md)
+- [文档治理](docs/development/documentation.md)
+
 - 组件库输出：`dist/lib`（ESM、CJS、`.d.ts` 和 CSS）
 - 演示网站输出：`dist/demo`（静态站点，可部署到 Cloudflare Pages / Vercel）
 
