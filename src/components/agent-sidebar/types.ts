@@ -22,6 +22,9 @@ export interface AgentSkill {
   name: string;
   description?: string;
   version?: string;
+  slug?: string;
+  /** Original YAML metadata, preserved when exporting SKILL.md. */
+  frontmatter?: string;
   category?: string;
   enabled?: boolean;
   scope?: 'builtin' | 'custom';

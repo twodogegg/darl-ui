@@ -71,9 +71,9 @@
 .darl-agent-composer { overflow: visible; }
 
 .darl-agent-picker-toolbar-actions { display: inline-flex; align-items: center; gap: 5px; }
-.darl-agent-skill-manager { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 18px; }
-.darl-agent-skill-manager-backdrop { position: absolute; inset: 0; background: #0f172a66; backdrop-filter: blur(2px); }
-.darl-agent-skill-manager-card { position: relative; display: flex; flex-direction: column; width: min(920px, 100%); height: min(720px, calc(100dvh - 36px)); overflow: hidden; border: 1px solid var(--darl-agent-border); border-radius: 16px; background: var(--darl-agent-bg); box-shadow: 0 24px 80px #0f172a38; }
+.darl-agent-skill-manager { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 18px; background: #0f172a66; backdrop-filter: blur(2px); }
+.darl-agent-skill-manager-card { --darl-agent-bg: #fff; --darl-agent-surface: #f8fafc; --darl-agent-text: #0f172a; --darl-agent-muted: #64748b; --darl-agent-border: #e2e8f0; --darl-agent-primary: #2563eb; --darl-agent-skill: #7846ad; position: relative; display: flex; flex-direction: column; width: min(920px, 100%); height: min(720px, calc(100dvh - 36px)); overflow: hidden; border: 1px solid var(--darl-agent-border); border-radius: 16px; background: var(--darl-agent-bg); color: var(--darl-agent-text); box-shadow: 0 24px 80px #0f172a38; }
+.darl-agent-skill-manager-card.darl-agent-skill-manager-dark { --darl-agent-bg: #111827; --darl-agent-surface: #192234; --darl-agent-text: #f1f5f9; --darl-agent-muted: #94a3b8; --darl-agent-border: #344155; --darl-agent-primary: #70afe0; --darl-agent-skill: #b894e8; }
 .darl-agent-skill-manager-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex: none; padding: 18px 20px 15px; border-bottom: 1px solid var(--darl-agent-border); }
 .darl-agent-manager-title-wrap { display: flex; align-items: flex-start; gap: 11px; }
 .darl-agent-manager-title-icon { display: grid; place-items: center; width: 34px; height: 34px; margin-top: 1px; border: 1px solid color-mix(in srgb, var(--darl-agent-skill) 30%, var(--darl-agent-border)); border-radius: 10px; background: color-mix(in srgb, var(--darl-agent-skill) 13%, var(--darl-agent-bg)); color: var(--darl-agent-skill); }
@@ -83,9 +83,15 @@
 .darl-agent-skill-manager-header p { margin: 3px 0 0; color: var(--darl-agent-muted); font-size: 11px; }
 .darl-agent-skill-manager-body { display: grid; grid-template-columns: 270px minmax(0, 1fr); min-height: 0; flex: 1; }
 .darl-agent-skill-list-pane { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border-right: 1px solid var(--darl-agent-border); background: var(--darl-agent-surface); }
-.darl-agent-manager-actions { display: flex; gap: 6px; padding: 12px 12px 8px; }
+.darl-agent-manager-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; padding: 12px 12px 8px; }
 .darl-agent-manager-actions .darl-button { flex: 1; }
 .darl-agent-manager-search { display: flex; align-items: center; gap: 6px; height: 32px; margin: 0 12px 8px; padding: 0 8px; border: 1px solid var(--darl-agent-border); border-radius: 7px; background: var(--darl-agent-bg); color: var(--darl-agent-muted); }
+.darl-agent-skill-import-preview { display: grid; gap: 3px; margin: 0 12px 8px; padding: 9px; border: 1px solid color-mix(in srgb, var(--darl-agent-skill) 30%, var(--darl-agent-border)); border-radius: 8px; background: color-mix(in srgb, var(--darl-agent-skill) 7%, var(--darl-agent-bg)); font-size: 10px; }
+.darl-agent-skill-import-preview strong { color: var(--darl-agent-skill); font-size: 9px; letter-spacing: .08em; }
+.darl-agent-skill-import-preview b { font-size: 11px; }
+.darl-agent-skill-import-preview span, .darl-agent-skill-import-preview small { color: var(--darl-agent-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.darl-agent-skill-import-preview > div { display: flex; gap: 5px; padding-top: 4px; }
+.darl-agent-skill-import-preview .darl-button { min-height: 26px; padding: 0 7px; font-size: 10px; }
 .darl-agent-manager-search svg { width: 14px; height: 14px; }
 .darl-agent-manager-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--darl-agent-text); font-size: 11px; }
 .darl-agent-manager-filters { display: flex; gap: 3px; padding: 0 12px 8px; overflow-x: auto; }

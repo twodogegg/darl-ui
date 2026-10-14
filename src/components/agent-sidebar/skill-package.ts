@@ -1,137 +1,150 @@
 import { unzipSync } from 'fflate';
+import { parseDocument, stringify } from 'yaml';
 import type { AgentSkill, AgentSkillResource } from './types';
 
-const MAX_PACKAGE_BYTES = 10 * 1024 * 1024;
-const MAX_EXPANDED_BYTES = 20 * 1024 * 1024;
-const MAX_RESOURCES = 100;
-const MAX_RESOURCE_BYTES = 2 * 1024 * 1024;
-const RESOURCE_ROOTS = ['references/', 'scripts/', 'assets/', 'agents/'];
+const MAX_EXPANDED = 20 * 1024 * 1024;
+const MAX_FILE = 2 * 1024 * 1024;
+const ignored = (path: string) => path.split('/').some((part) => part === '__MACOSX' || part === '.skillhub' || part === '.DS_Store');
+const newId = () => crypto.randomUUID();
 
-function makeId() {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-  return `skill-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+export function skillPathValid(path: string) {
+  return !!path && !/[\\:\u0000-\u001f]/.test(path) && path.split('/').every((part) => !!part && !part.startsWith('.'));
 }
-
-function decodeText(bytes: Uint8Array, label: string) {
+function assertPath(path: string) {
+  if (!skillPathValid(path)) throw new Error(`请使用安全的相对路径：${path}`);
+}
+function text(bytes: Uint8Array, label: string) {
   try {
     const value = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    if (value.includes('\u0000')) throw new Error('binary content');
+    if (value.includes('\u0000')) throw new Error();
     return value;
-  } catch {
-    throw new Error(`${label} 不是有效的 UTF-8 文本`);
-  }
+  } catch { throw new Error(`${label} 不是有效的 UTF-8 文本`); }
 }
-
-function encodeBase64(bytes: Uint8Array) {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
+function yaml(source: string) {
+  const doc = parseDocument(source, { uniqueKeys: true });
+  if (doc.errors.length) throw new Error(`YAML 格式错误：${doc.errors[0].message}`);
+  const value: unknown = doc.toJS({ maxAliasCount: 0 });
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('SKILL.md 元信息必须是对象');
+  return doc;
 }
-
-function safePath(path: string) {
-  const normalized = path.replaceAll('\\', '/').replace(/^\.\//, '');
-  if (!normalized || normalized.startsWith('/') || normalized.includes('\\') || normalized.split('/').some((part) => !part || part === '.' || part === '..' || part.startsWith('.'))) {
-    throw new Error(`技能包包含不安全的路径：${path}`);
-  }
-  return normalized;
-}
-
-function parseScalar(value: string) {
-  const trimmed = value.trim();
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) return trimmed.slice(1, -1);
-  return trimmed;
-}
-
-export function parseSkillMarkdown(markdown: string, fallbackName = '未命名 Skill') {
-  const match = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/.exec(markdown);
+export function parseSkillMarkdown(markdown: string, _fallbackName?: string) {
+  const match = /^\uFEFF?---[^\S\r\n]*\r?\n([\s\S]*?)\r?\n---[^\S\r\n]*(?:\r?\n|$)/.exec(markdown);
   if (!match) throw new Error('SKILL.md 缺少 YAML frontmatter');
-  const fields = new Map<string, string>();
-  for (const line of match[1].split(/\r?\n/)) {
-    const field = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/.exec(line);
-    if (field) fields.set(field[1], parseScalar(field[2]));
-  }
-  const name = fields.get('name')?.trim() || fallbackName.trim();
-  const description = fields.get('description')?.trim() || '';
+  const doc = yaml(match[1]);
+  const name: unknown = doc.get('name');
+  const description: unknown = doc.get('description');
   const instructions = markdown.slice(match[0].length).trim();
-  if (!name) throw new Error('Skill 名称不能为空');
-  if (!description) throw new Error('SKILL.md 的 description 不能为空');
+  if (typeof name !== 'string' || !name.trim()) throw new Error('SKILL.md 的 name 不能为空');
+  if (typeof description !== 'string' || !description.trim()) throw new Error('SKILL.md 的 description 不能为空');
   if (!instructions) throw new Error('SKILL.md frontmatter 后缺少指令正文');
-  return { name, description, instructions };
+  return { name: name.trim(), description: description.trim(), instructions };
+}
+export function validateSkill(skill: AgentSkill) {
+  if (!skill.name.trim() || !skill.description?.trim() || !skill.instructions?.trim()) throw new Error('请填写名称、描述和指令正文');
+  if (skill.name.length > 100) throw new Error('名称不能超过 100 个字符');
+  const paths = new Set<string>();
+  let total = new TextEncoder().encode(skill.instructions).byteLength;
+  if (total > MAX_FILE) throw new Error('指令正文不能超过 2 MB');
+  if ((skill.resources?.length || 0) > 100) throw new Error('最多允许 100 个资源文件');
+  for (const resource of skill.resources || []) {
+    assertPath(resource.path);
+    if (!/^(references|scripts|assets|agents)\//.test(resource.path)) throw new Error('资源必须放在 references/、scripts/、assets/ 或 agents/ 下');
+    const key = resource.path.toLowerCase();
+    if (paths.has(key)) throw new Error(`资源路径重复：${resource.path}`);
+    paths.add(key);
+    const size = resource.encoding === 'base64' ? atob(resource.content).length : new TextEncoder().encode(resource.content).byteLength;
+    if (size > MAX_FILE) throw new Error(`资源 ${resource.path} 超过 2 MB`);
+    total += size;
+  }
+  for (const path of paths) {
+    const parts = path.split('/');
+    parts.pop();
+    while (parts.length) {
+      if (paths.has(parts.join('/'))) throw new Error('文件路径与文件夹冲突');
+      parts.pop();
+    }
+  }
+  if (total > MAX_EXPANDED) throw new Error('Skill 总大小不能超过 20 MB');
 }
 
-type PackageEntry = { path: string; bytes: Uint8Array };
-
-async function entriesFromFiles(files: File[]) {
+type Entry = { path: string; bytes: Uint8Array };
+async function readEntries(files: File[]): Promise<Entry[]> {
   if (!files.length) throw new Error('没有选择 Skill 文件');
+  let total = 0;
+  const paths = new Set<string>();
+  const check = (path: string, size: number) => {
+    assertPath(path);
+    const key = path.toLowerCase();
+    if (paths.has(key)) throw new Error(`文件路径重复：${path}`);
+    paths.add(key);
+    if (paths.size > 101) throw new Error('最多允许 100 个资源文件和一个 SKILL.md');
+    if (size > MAX_FILE) throw new Error(`文件 ${path} 超过 2 MB`);
+    total += size;
+    if (total > MAX_EXPANDED) throw new Error('Skill 总大小不能超过 20 MB');
+  };
   const first = files[0];
-  if (files.length === 1 && (first.name.toLowerCase().endsWith('.zip') || first.type === 'application/zip')) {
-    if (first.size > MAX_PACKAGE_BYTES) throw new Error('Skill ZIP 不能超过 10 MB');
-    const unzipped = unzipSync(new Uint8Array(await first.arrayBuffer()));
-    const entries: PackageEntry[] = [];
-    let expanded = 0;
-    for (const [rawPath, bytes] of Object.entries(unzipped)) {
-      if (rawPath.endsWith('/')) continue;
-      const path = safePath(rawPath);
-      if (path.split('/').some((part) => part === '__MACOSX' || part === '.skillhub')) continue;
-      expanded += bytes.byteLength;
-      if (expanded > MAX_EXPANDED_BYTES) throw new Error('Skill 解压后的内容不能超过 20 MB');
-      entries.push({ path, bytes });
-    }
-    return entries;
+  if (files.length === 1 && /\.zip$/i.test(first.name)) {
+    if (first.size > 10 * 1024 * 1024) throw new Error('Skill ZIP 不能超过 10 MB');
+    const entries = unzipSync(new Uint8Array(await first.arrayBuffer()), { filter(entry) {
+      if (ignored(entry.name) || entry.name.endsWith('/')) return false;
+      check(entry.name, entry.originalSize);
+      return true;
+    } });
+    return Object.entries(entries).map(([path, bytes]) => ({ path, bytes }));
   }
-  const entries: PackageEntry[] = [];
+  const entries: Entry[] = [];
   for (const file of files) {
-    if (file.size > MAX_RESOURCE_BYTES) throw new Error(`文件 ${file.name} 超过 2 MB`);
-    const rawPath = file.webkitRelativePath || file.name;
-    entries.push({ path: safePath(rawPath), bytes: new Uint8Array(await file.arrayBuffer()) });
+    const path = file.webkitRelativePath || file.name;
+    if (ignored(path)) continue;
+    check(path, file.size);
+    entries.push({ path, bytes: new Uint8Array(await file.arrayBuffer()) });
   }
   return entries;
 }
-
 export async function importSkillPackage(files: File[]): Promise<AgentSkill> {
-  const entries = await entriesFromFiles(files);
-  const manifest = entries.find((entry) => /(^|\/)SKILL\.md$/i.test(entry.path));
-  if (!manifest) throw new Error('Skill 包缺少 SKILL.md');
-  const manifestParts = manifest.path.split('/');
-  const base = manifestParts.length > 1 ? manifestParts.slice(0, -1).join('/') + '/' : '';
-  const markdown = decodeText(manifest.bytes, 'SKILL.md');
-  const parsed = parseSkillMarkdown(markdown, manifestParts.at(-2) || '导入的 Skill');
+  const entries = await readEntries(files);
+  const manifests = entries.filter((entry) => /(^|\/)SKILL\.md$/i.test(entry.path));
+  if (!manifests.length) throw new Error('Skill 包缺少 SKILL.md');
+  if (manifests.length !== 1) throw new Error('一次只能导入一个 Skill，包内必须只有一个 SKILL.md');
+  const manifest = manifests[0];
+  const base = manifest.path.slice(0, -'SKILL.md'.length);
+  const markdown = text(manifest.bytes, 'SKILL.md');
+  const parsed = parseSkillMarkdown(markdown);
   const resources: AgentSkillResource[] = [];
   for (const entry of entries) {
-    if (entry.path === manifest.path) continue;
-    if (!entry.path.startsWith(base)) continue;
+    if (entry === manifest) continue;
     const path = entry.path.slice(base.length);
-    if (!RESOURCE_ROOTS.some((root) => path.startsWith(root))) continue;
-    if (resources.length >= MAX_RESOURCES) throw new Error('Skill 最多允许 100 个资源文件');
-    if (entry.bytes.byteLength > MAX_RESOURCE_BYTES) throw new Error(`资源 ${path} 超过 2 MB`);
-    if (path.startsWith('assets/')) {
-      try {
-        resources.push({ path, content: decodeText(entry.bytes, `资源 ${path}`) });
-      } catch {
-        resources.push({ path, content: encodeBase64(entry.bytes), encoding: 'base64' });
-      }
-    } else {
-      resources.push({ path, content: decodeText(entry.bytes, `资源 ${path}`) });
+    if (!entry.path.startsWith(base) || !/^(references|scripts|assets|agents)\//.test(path)) throw new Error(`Skill 包包含不支持的文件：${entry.path}`);
+    try { resources.push({ path, content: text(entry.bytes, path) }); }
+    catch (error) {
+      if (!path.startsWith('assets/')) throw error;
+      let binary = '';
+      for (const byte of entry.bytes) binary += String.fromCharCode(byte);
+      resources.push({ path, content: btoa(binary), encoding: 'base64' });
     }
   }
-  return {
-    id: makeId(),
-    name: parsed.name,
-    description: parsed.description,
-    instructions: parsed.instructions,
-    resources,
-    category: '通用',
-    enabled: true,
-    scope: 'custom',
-    version: '1.0',
-    updatedAt: new Date().toISOString(),
-  };
+  const skill: AgentSkill = { id: newId(), ...parsed, slug: parsed.name, frontmatter: markdown.match(/^\uFEFF?---[^\S\r\n]*\r?\n([\s\S]*?)\r?\n---/)?.[1], resources, category: '通用', enabled: true, scope: 'custom', version: '1.0' };
+  const presentation = resources.find((item) => item.path === 'agents/openai.yaml' && !item.encoding);
+  if (presentation) {
+    const doc = yaml(presentation.content);
+    const displayName: unknown = doc.getIn(['interface', 'display_name']);
+    if (typeof displayName === 'string' && displayName.trim()) skill.name = displayName.trim();
+  }
+  validateSkill(skill);
+  return skill;
 }
-
-export function skillMarkdown(skill: Pick<AgentSkill, 'name' | 'description' | 'instructions'>) {
-  return `---\nname: ${skill.name}\ndescription: ${skill.description}\n---\n\n${(skill.instructions || '').trim()}\n`;
+export function skillMarkdown(skill: Pick<AgentSkill, 'name' | 'slug' | 'frontmatter' | 'description' | 'instructions'>) {
+  const doc = skill.frontmatter ? yaml(skill.frontmatter) : yaml(stringify({ name: skill.slug || skill.name, description: skill.description || '' }));
+  doc.set('name', skill.slug || skill.name);
+  doc.set('description', skill.description || '');
+  return `---\n${doc.toString().trimEnd()}\n---\n\n${(skill.instructions || '').trim()}\n`;
 }
-
 export function newSkillDraft(): AgentSkill {
-  return { id: makeId(), name: '', description: '', instructions: '', resources: [], category: '通用', enabled: true, scope: 'custom', version: '0.1' };
+  return { id: newId(), name: '', description: '', instructions: '', resources: [], category: '通用', enabled: true, scope: 'custom', version: '0.0' };
+}
+export function nextSkillVersion(version = '0.0') {
+  if (!/^\d+(\.\d+)*$/.test(version)) return `${version}.1`;
+  const parts = version.split('.');
+  parts[parts.length - 1] = String(Number(parts.at(-1)) + 1);
+  return parts.join('.');
 }
