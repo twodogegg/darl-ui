@@ -46,20 +46,34 @@ function Markdown({ content, onCopyCode, depth = 0 }: { content: string; onCopyC
   return <div className="darl-agent-markdown"><ReactMarkdown remarkPlugins={[remarkGfm, markCodeBlocks]} rehypePlugins={[rehypeSanitize]} components={components}>{content}</ReactMarkdown></div>;
 }
 
-function ToolCallCard({ call }: { call: AgentToolCall }) {
+function ToolCallCard({ call, onConfirm }: { call: AgentToolCall; onConfirm?: AgentSidebarProps['onToolConfirm'] }) {
   const [expanded, setExpanded] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => { setPending(false); setError(''); }, [call.status]);
+  const decide = async (approved: boolean) => {
+    if (!onConfirm || pending) return;
+    setPending(true); setError('');
+    try { await onConfirm(call.id, approved); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : '确认失败，请重试'); setPending(false); }
+  };
   const status = { pending: '等待调用', running: '执行中', success: '已完成', error: '调用失败', confirmation: '等待确认' }[call.status];
   const StatusIcon = call.status === 'running' ? LoaderCircle : call.status === 'error' ? AlertCircle : call.status === 'success' ? Check : Wrench;
   return <article className={`darl-agent-tool-call darl-agent-tool-call--${call.status}`}>
-    <button type="button" className="darl-agent-tool-summary" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
+    <button type="button" className="darl-agent-tool-summary" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded || call.status === 'confirmation'}>
       <span className="darl-agent-tool-icon"><StatusIcon size={14} className={call.status === 'running' ? 'darl-agent-spin' : undefined} /></span>
       <span className="darl-agent-tool-title"><strong>{call.appName}</strong><span>{call.toolTitle || call.toolName}</span></span>
       <span className="darl-agent-tool-status">{status}<ChevronDown size={14} className={expanded ? 'darl-agent-rotate' : undefined} /></span>
     </button>
-    {expanded && <div className="darl-agent-tool-detail">
+    {(expanded || call.status === 'confirmation') && <div className="darl-agent-tool-detail">
       {call.input !== undefined && <div><span>参数</span><pre>{formatToolValue(call.input)}</pre></div>}
       {call.output !== undefined && <div><span>结果</span><pre>{formatToolValue(call.output)}</pre></div>}
       {call.error && <p className="darl-agent-tool-error">{call.error}</p>}
+    </div>}
+    {call.status === 'confirmation' && <div className="darl-agent-tool-confirm">
+      <span>此操作需要你的确认。</span>
+      {onConfirm ? <div><Button size="sm" disabled={pending} onClick={() => void decide(true)}>允许执行</Button><Button variant="outline" size="sm" disabled={pending} onClick={() => void decide(false)}>拒绝</Button></div> : <span>等待宿主处理确认。</span>}
+      {error && <p role="alert" className="darl-agent-tool-error">{error}</p>}
     </div>}
   </article>;
 }
@@ -72,7 +86,7 @@ function statusText(status: AgentApplication['status']): string {
   return status === 'connected' ? '已连接' : status === 'needs-auth' ? '需要授权' : '未连接';
 }
 
-export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, onSessionChange, onSessionRename, onNewSession, onSend, onRegenerate, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onSkillSave, onSkillDelete, onSkillFavoriteChange, onFileUpload, models = [], onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
+export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, onSessionChange, onSessionRename, onNewSession, onSend, onRegenerate, onToolConfirm, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onSkillSave, onSkillDelete, onSkillFavoriteChange, onFileUpload, models = [], onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
   const [view, setView] = useState<'chat' | 'history'>('chat');
   const [expanded, setExpanded] = useState(false);
   const [picker, setPicker] = useState<'add' | 'apps' | 'skills' | 'models' | 'effort' | null>(null);
@@ -189,7 +203,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
         {!activeMessages.length && <div className="darl-agent-empty-state"><span className="darl-agent-empty-icon"><Sparkles size={22} /></span><h2>需要我帮你做什么？</h2><p>选择应用和 Skill，把它们插入消息中。</p></div>}
         {activeMessages.map((message) => <article key={message.id} className={`darl-agent-message darl-agent-message--${message.role}`}>
           <div className="darl-agent-message-label">{message.role === 'user' ? '你' : 'Agent'}</div>
-          <div className="darl-agent-message-body">{message.streaming && !message.content && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{message.attachments?.map((name, index) => <span className="darl-agent-chip" key={index}><Paperclip size={12} />{name}</span>)}{message.toolCalls?.map((call) => <ToolCallCard key={call.id} call={call} />)}</div>
+          <div className="darl-agent-message-body">{message.streaming && !message.content && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{message.attachments?.map((name, index) => <span className="darl-agent-chip" key={index}><Paperclip size={12} />{name}</span>)}{message.toolCalls?.map((call) => <ToolCallCard key={call.id} call={call} onConfirm={onToolConfirm} />)}</div>
           {message.role === 'assistant' && !message.streaming && <div className="darl-agent-message-actions"><Button variant="ghost" size="sm" onClick={() => void copy(message.content, message.id)}><Clipboard size={13} />{copyState === message.id ? '已复制' : '复制'}</Button>{onRegenerate && <Button variant="ghost" size="sm" disabled={isGenerating} onClick={() => onRegenerate(message.id)}><RefreshCw size={13} />重新生成</Button>}</div>}
         </article>)}
         <div className="darl-agent-scroll-controls" aria-label="消息导航"><Button variant="ghost" size="icon" aria-label="滚动到顶部" title="滚动到顶部" onClick={() => scrollMessages('top')}><ArrowUp size={15} /></Button><Button variant="ghost" size="icon" aria-label="滚动到底部" title="滚动到底部" onClick={() => scrollMessages('bottom')}><ArrowDown size={15} /></Button></div>

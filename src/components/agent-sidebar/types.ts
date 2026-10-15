@@ -109,6 +109,8 @@ export interface AgentSidebarProps {
   isGenerating?: boolean;
   onStop?: () => void;
   onRegenerate?: (messageId: string) => void;
+  /** Host confirms or rejects a pending tool call. The host must enforce the decision. */
+  onToolConfirm?: (toolCallId: string, approved: boolean) => void | Promise<void>;
   applications?: AgentApplication[];
   skills?: AgentSkill[];
   onSkillUpload?: (file: File) => void | Promise<void>;

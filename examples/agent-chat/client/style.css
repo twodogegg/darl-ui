@@ -65,3 +65,10 @@ body { margin: 0; background: #101113; }
 .guide-checklist-grid svg { color: #5fbe85; }
 @media (min-width: 750px) { .with-agent { margin-right: 450px; } .example-info { grid-template-columns: 2fr 1fr 1fr; } .example-settings { padding: 32px; } }
 @media (max-width: 749px) { .with-agent { visibility: hidden; } .chat-example .darl-agent-sidebar { width: 100%; } .example-guide { padding: 20px 16px 56px; } .guide-layout { display: block; padding-top: 22px; } .guide-nav { position: static; display: flex; overflow-x: auto; margin: 0 -4px 30px; padding: 0 4px 4px; } .guide-nav button { flex: none; white-space: nowrap; } .guide-section { padding-bottom: 48px; } .guide-grid, .guide-split, .guide-mcp-grid, .guide-checklist-grid { grid-template-columns: 1fr; } }
+
+.example-applications { max-width: 960px; min-width: 0; }
+.example-applications p { color: var(--darl-muted); line-height: 1.7; overflow-wrap: anywhere; }
+.example-applications article { margin-top: 20px; padding: 18px; border: 1px solid var(--darl-border); border-radius: 10px; }
+.example-applications ul { padding: 0; list-style: none; }
+.example-applications li { padding: 12px 0; border-top: 1px solid var(--darl-border); }
+.example-applications li > span { margin-left: 12px; color: var(--darl-muted); font-size: 12px; }

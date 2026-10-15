@@ -7,6 +7,19 @@ const skills: AgentSkill[] = [{ id: 'summary', name: '客户摘要', description
 const sessions: AgentSession[] = [{ id: 'one', title: '已有对话', updatedAt: '今天', messages: [{ id: 'assistant', role: 'assistant', content: '## 标题\n\n**加粗**\n\n```ts\nconst answer = true\n```' }] }];
 
 describe('AgentSidebar', () => {
+  it('确认工具时展示参数，宿主失败可重试并可拒绝', async () => {
+    const onToolConfirm = vi.fn().mockRejectedValueOnce(new Error('确认请求失败')).mockResolvedValue(undefined);
+    const pending: AgentSession[] = [{ id: 'one', title: '工具确认', messages: [{ id: 'assistant', role: 'assistant', content: '', toolCalls: [{ id: 'write-call', appId: 'catalog', appName: '素材库', toolName: 'save', status: 'confirmation', input: { name: '新素材' } }] }] }];
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={pending} activeSessionId="one" onToolConfirm={onToolConfirm} />);
+    expect(screen.getByText(/"name": "新素材"/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '允许执行' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('确认请求失败');
+    fireEvent.click(screen.getByRole('button', { name: '拒绝' }));
+    await waitFor(() => expect(onToolConfirm).toHaveBeenLastCalledWith('write-call', false));
+    expect(screen.getByRole('button', { name: '允许执行' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled();
+  });
+
   it('输入 @ 和 / 时显示对应建议并可插入不同颜色的引用', () => {
     render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" applications={apps} skills={skills} onSend={vi.fn()} />);
     const editor = screen.getByRole('textbox', { name: '输入消息' });

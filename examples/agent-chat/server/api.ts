@@ -1,7 +1,8 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
-import type { AgentSkill } from '../../../src/index';
+import type { AgentSkill, AgentToolCall } from '../../../src/index';
+import { applicationCatalog, connectApplication, loadApplications, toolRisk, ToolConfirmations } from './mcp';
 import { generate, listModels, publicProvider, safeError, validateProvider, type ChatMessage, type StoredProvider } from './models';
 
 async function readBody(request: IncomingMessage) {
@@ -18,6 +19,7 @@ async function readBody(request: IncomingMessage) {
 export function createApi(directory: string, env: Record<string, string>) {
   const file = resolve(directory, 'providers.json');
   let queue: Promise<void> = Promise.resolve();
+  const confirmations = new ToolConfirmations();
   const initial: StoredProvider[] = [{ id: 'darl', name: 'Darl', baseUrl: env.AGENT_CHAT_BASE_URL || 'https://api.darl.cn/v1', protocol: 'openai-completions', apiKey: env.AGENT_CHAT_API_KEY || '', status: 'unknown', models: [{ id: env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash', name: env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash', providerId: 'darl', type: 'text', enabled: true }] }];
   const load = async (): Promise<StoredProvider[]> => {
     try { return JSON.parse(await readFile(file, 'utf8')); }
@@ -46,10 +48,19 @@ export function createApi(directory: string, env: Record<string, string>) {
     response.on('close', () => controller.abort());
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(180_000)]);
     let secret = '';
+    const connections: Awaited<ReturnType<typeof connectApplication>>[] = [];
     try {
       await queue;
       const providers = await load();
       const path = request.url.split('?')[0];
+      if (path === '/api/applications' && request.method === 'GET') return send(200, await applicationCatalog(directory, signal));
+      const confirmation = path.match(/^\/api\/tool-confirmations\/([\w-]+)$/);
+      if (confirmation && request.method === 'POST') {
+        const { approved } = await readBody(request);
+        if (typeof approved !== 'boolean') throw new Error('请明确确认或拒绝工具调用');
+        confirmations.decide(confirmation[1], approved);
+        return send(200, { ok: true });
+      }
       if (path === '/api/providers' && request.method === 'GET') return send(200, providers.map(publicProvider));
       if (path === '/api/providers' && request.method === 'POST') {
         const { provider: value, apiKey } = await readBody(request);
@@ -103,9 +114,62 @@ export function createApi(directory: string, env: Record<string, string>) {
           if (typeof skill?.name !== 'string' || typeof skill.instructions !== 'string' || skill.instructions.length > 100_000) throw new Error('Skill 指令格式无效');
           return `Skill: ${skill.name}\n${skill.instructions}`;
         })].join('\n\n');
+        const applicationIds = body.applicationIds ?? [];
+        if (!Array.isArray(applicationIds) || applicationIds.length > 20 || applicationIds.some((id: unknown) => typeof id !== 'string')) throw new Error('应用列表无效');
+        const configs = await loadApplications(directory);
+        const selectedApps = [...new Set<string>(applicationIds)].map((id) => {
+          const app = configs.find((item) => item.id === id);
+          if (!app) throw new Error('所选应用不存在，请刷新应用列表');
+          return app;
+        });
+        for (const app of selectedApps) connections.push(await connectApplication(app, signal));
+        const functions = connections.flatMap((connection, appIndex) => connection.tools.map((tool, index) => ({ name: `mcp_${appIndex}_${index}`, connection, tool })));
+        if (functions.length > 128) throw new Error('所选应用合计超过 128 个工具，请减少应用数量');
+        const emitTool = (call: AgentToolCall) => {
+          if (!signal.aborted) response.write(`${JSON.stringify({ type: 'tool', call })}\n`);
+        };
+        const execution = functions.length ? {
+          tools: functions.map(({ name, connection, tool }) => ({ name, description: `${connection.app.name} / ${tool.title || tool.name} (${tool.name}): ${tool.description || ''}`, parameters: tool.inputSchema })),
+          execute: async (request: { name: string; arguments: string }) => {
+            const selected = functions.find((item) => item.name === request.name);
+            if (!selected) throw new Error('模型请求了未授权的工具');
+            const { connection, tool } = selected;
+            const call: AgentToolCall = { id: crypto.randomUUID(), appId: connection.app.id, appName: connection.app.name, toolName: tool.name, toolTitle: tool.title || tool.annotations?.title, input: request.arguments, status: 'pending' };
+            try {
+              const args = JSON.parse(request.arguments || '{}');
+              if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('工具参数必须为 JSON 对象');
+              call.input = args;
+              if (toolRisk(connection.app, tool) !== 'read') {
+                call.status = 'confirmation';
+                const decision = confirmations.wait(call.id, signal);
+                emitTool(call);
+                if (!await decision) throw new Error('用户拒绝了本次工具调用，不要再次尝试相同操作');
+              }
+              signal.throwIfAborted();
+              call.status = 'running';
+              emitTool(call);
+              const result = await connection.call(tool.name, args);
+              signal.throwIfAborted();
+              call.status = result.isError ? 'error' : 'success';
+              call.output = result.structuredContent ?? result.content.map((block) => {
+                if (!block || typeof block !== 'object' || !('text' in block) || typeof block.text !== 'string') return block;
+                try { return JSON.parse(block.text); } catch { return block.text; }
+              });
+              if (result.isError) call.error = 'MCP 工具返回错误，详见结果';
+              emitTool(call);
+              return JSON.stringify(result);
+            } catch (error) {
+              call.status = 'error';
+              call.error = safeError(error, connection.app.apiKey);
+              emitTool(call);
+              if (signal.aborted) throw error;
+              return JSON.stringify({ isError: true, error: call.error });
+            }
+          },
+        } : undefined;
         response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
         response.flushHeaders();
-        for await (const text of generate(provider, model, messages, instructions, body.effort, signal)) {
+        for await (const text of generate(provider, model, messages, instructions, body.effort, signal, execution)) {
           if (!response.write(`${JSON.stringify({ type: 'text', text })}\n`)) await new Promise<void>((done) => {
             const resume = () => { response.off('drain', resume); response.off('close', resume); done(); };
             response.once('drain', resume);
@@ -122,6 +186,9 @@ export function createApi(directory: string, env: Record<string, string>) {
       const message = signal.aborted ? '模型请求超时，请重试' : safeError(error, secret);
       if (response.headersSent) response.end(`${JSON.stringify({ type: 'error', error: message })}\n`);
       else send(400, { error: message });
-    } finally { controller.abort(); }
+    } finally {
+      controller.abort();
+      await Promise.allSettled(connections.map((connection) => connection.close()));
+    }
   };
 }

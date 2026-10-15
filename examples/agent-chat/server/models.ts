@@ -27,7 +27,7 @@ export function publicProvider({ apiKey, ...provider }: StoredProvider): ModelPr
 export function safeError(reason: unknown, key = '') {
   let message = reason instanceof Error ? reason.message : '请求失败';
   if (key) message = message.split(key).join('[已隐藏]');
-  return message.replace(/sk-[\w-]+/g, '[已隐藏]').slice(0, 400);
+  return message.replace(/(?:sk|ahk)_[\w-]+|sk-[\w-]+/g, '[已隐藏]').slice(0, 400);
 }
 
 async function upstream(provider: StoredProvider, path: string, signal: AbortSignal, body?: unknown) {
@@ -53,29 +53,80 @@ export async function listModels(provider: StoredProvider, signal: AbortSignal):
   });
 }
 
-export async function* generate(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal) {
+export interface FunctionTool { name: string; description?: string; parameters: Record<string, unknown> }
+export interface FunctionCall { id: string; name: string; arguments: string }
+export interface ToolExecution {
+  tools: FunctionTool[];
+  execute: (call: FunctionCall) => Promise<string>;
+}
+
+export async function* generate(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution) {
   const reasoning = effort && ({ 低: 'low', 中: 'medium', 高: 'high' }[effort] || effort);
   const responses = provider.protocol === 'openai-responses';
-  const body = responses
-    ? { model: model.id, input: messages, instructions, stream: true, store: false, ...(reasoning ? { reasoning: { effort: reasoning } } : {}) }
-    : { model: model.id, messages: [{ role: 'system', content: instructions }, ...messages], stream: true, ...(reasoning ? { reasoning_effort: reasoning } : {}) };
-  const response = await upstream(provider, responses ? 'responses' : 'chat/completions', signal, body);
-  if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) throw new Error('模型没有返回流式响应');
-  let completed = false;
-  let hasText = false;
-  for await (const data of events(response.body)) {
-    if (data === '[DONE]') { completed = true; break; }
-    const event = JSON.parse(data);
-    if (event.error || event.type === 'response.failed' || event.type === 'error') throw new Error(safeError(new Error(event.error?.message || event.response?.error?.message || event.message || '模型生成失败'), provider.apiKey));
-    if (event.type === 'response.incomplete') throw new Error('模型输出未完成，请重新生成');
-    if (event.type === 'response.completed') { completed = true; break; }
-    const choice = event.choices?.[0];
-    if (choice?.finish_reason === 'length') throw new Error('已达到模型输出长度限制');
-    if (choice?.finish_reason === 'content_filter') throw new Error('模型未能输出此内容');
-    if (choice?.finish_reason) completed = true;
-    const delta = responses ? (event.type === 'response.output_text.delta' ? event.delta : '') : choice?.delta?.content;
-    if (typeof delta === 'string' && delta) { hasText = true; yield delta; }
+  const history: unknown[] = responses ? [...messages] : [{ role: 'system', content: instructions }, ...messages];
+  const tools = execution?.tools.map((tool) => responses
+    ? { type: 'function', ...tool, strict: false }
+    : { type: 'function', function: tool });
+  for (let round = 0; round < 8; round++) {
+    signal.throwIfAborted();
+    const body = responses
+      ? { model: model.id, input: history, instructions, stream: true, store: false, ...(reasoning ? { reasoning: { effort: reasoning }, include: ['reasoning.encrypted_content'] } : {}) }
+      : { model: model.id, messages: history, stream: true, ...(reasoning ? { reasoning_effort: reasoning } : {}) };
+    const response = await upstream(provider, responses ? 'responses' : 'chat/completions', signal, { ...body, ...(tools?.length ? { tools, parallel_tool_calls: false } : {}) });
+    if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) throw new Error('模型没有返回流式响应');
+    let completed = false;
+    let text = '';
+    const calls = new Map<number, FunctionCall>();
+    const output: Record<string, unknown>[] = [];
+    for await (const data of events(response.body)) {
+      if (data === '[DONE]') { completed = true; break; }
+      const event = JSON.parse(data);
+      if (event.error || event.type === 'response.failed' || event.type === 'error') throw new Error(safeError(new Error(event.error?.message || event.response?.error?.message || event.message || '模型生成失败'), provider.apiKey));
+      if (event.type === 'response.incomplete') throw new Error('模型输出未完成，请重新生成');
+      if (event.type === 'response.output_item.done') output[event.output_index] = event.item;
+      if (event.type === 'response.completed') {
+        if (Array.isArray(event.response?.output)) output.splice(0, output.length, ...event.response.output);
+        completed = true;
+        break;
+      }
+      const choice = event.choices?.[0];
+      if (choice?.finish_reason === 'length') throw new Error('已达到模型输出长度限制');
+      if (choice?.finish_reason === 'content_filter') throw new Error('模型未能输出此内容');
+      if (choice?.finish_reason) completed = true;
+      for (const delta of choice?.delta?.tool_calls || []) {
+        if (!Number.isInteger(delta.index) || delta.index < 0 || delta.index > 15) throw new Error('模型工具调用数量或索引无效');
+        const call = calls.get(delta.index) || { id: '', name: '', arguments: '' };
+        if (delta.id) call.id = delta.id;
+        if (delta.function?.name) call.name += delta.function.name;
+        if (delta.function?.arguments) call.arguments += delta.function.arguments;
+        if (call.arguments.length > 100_000) throw new Error('工具参数过长');
+        calls.set(delta.index, call);
+      }
+      const delta = responses ? (event.type === 'response.output_text.delta' ? event.delta : '') : choice?.delta?.content;
+      if (typeof delta === 'string' && delta) { text += delta; yield delta; }
+    }
+    if (!completed) throw new Error('模型连接中断，请重新生成');
+    if (responses) {
+      for (const item of output) {
+        if (item?.type === 'function_call') calls.set(calls.size, { id: String(item.call_id || ''), name: String(item.name || ''), arguments: String(item.arguments || '') });
+      }
+    }
+    if (!calls.size) {
+      if (!text) throw new Error('模型没有返回文本内容');
+      return;
+    }
+    if (!execution || calls.size > 16) throw new Error('模型请求了不可用的工具');
+    const requested = [...calls.values()];
+    if (requested.some((call) => !call.id || !call.name || call.arguments.length > 100_000) || new Set(requested.map((call) => call.id)).size !== requested.length) throw new Error('模型工具调用格式无效');
+    if (round === 7) throw new Error('已达到 8 轮工具调用上限，请缩小任务范围后继续');
+    if (responses) history.push(...output);
+    else history.push({ role: 'assistant', content: text || null, tool_calls: requested.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })) });
+    for (const call of requested) {
+      signal.throwIfAborted();
+      const result = await execution.execute(call);
+      if (responses) history.push({ type: 'function_call_output', call_id: call.id, output: result });
+      else history.push({ role: 'tool', tool_call_id: call.id, content: result });
+    }
+    if (text) yield '\n\n';
   }
-  if (!completed) throw new Error('模型连接中断，请重新生成');
-  if (!hasText) throw new Error('模型没有返回文本内容');
 }
