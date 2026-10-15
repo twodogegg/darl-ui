@@ -47,7 +47,6 @@ function Markdown({ content, onCopyCode, depth = 0 }: { content: string; onCopyC
 }
 
 function ToolCallCard({ call, onConfirm }: { call: AgentToolCall; onConfirm?: AgentSidebarProps['onToolConfirm'] }) {
-  const [expanded, setExpanded] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => { setPending(false); setError(''); }, [call.status]);
@@ -60,16 +59,15 @@ function ToolCallCard({ call, onConfirm }: { call: AgentToolCall; onConfirm?: Ag
   const status = { pending: '等待调用', running: '执行中', success: '已完成', error: '调用失败', confirmation: '等待确认' }[call.status];
   const StatusIcon = call.status === 'running' ? LoaderCircle : call.status === 'error' ? AlertCircle : call.status === 'success' ? Check : Wrench;
   return <article className={`darl-agent-tool-call darl-agent-tool-call--${call.status}`}>
-    <button type="button" className="darl-agent-tool-summary" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded || call.status === 'confirmation'}>
+    <div className="darl-agent-tool-summary">
       <span className="darl-agent-tool-icon"><StatusIcon size={14} className={call.status === 'running' ? 'darl-agent-spin' : undefined} /></span>
       <span className="darl-agent-tool-title"><strong>{call.appName}</strong><span>{call.toolTitle || call.toolName}</span></span>
-      <span className="darl-agent-tool-status">{status}<ChevronDown size={14} className={expanded ? 'darl-agent-rotate' : undefined} /></span>
-    </button>
-    {(expanded || call.status === 'confirmation') && <div className="darl-agent-tool-detail">
+      <span className="darl-agent-tool-status">{status}</span>
+    </div>
+    {call.status === 'confirmation' && <div className="darl-agent-tool-detail">
       {call.input !== undefined && <div><span>参数</span><pre>{formatToolValue(call.input)}</pre></div>}
-      {call.output !== undefined && <div><span>结果</span><pre>{formatToolValue(call.output)}</pre></div>}
-      {call.error && <p className="darl-agent-tool-error">{call.error}</p>}
     </div>}
+    {call.error && <p className="darl-agent-tool-error">{call.error}</p>}
     {call.status === 'confirmation' && <div className="darl-agent-tool-confirm">
       <span>此操作需要你的确认。</span>
       {onConfirm ? <div><Button size="sm" disabled={pending} onClick={() => void decide(true)}>允许执行</Button><Button variant="outline" size="sm" disabled={pending} onClick={() => void decide(false)}>拒绝</Button></div> : <span>等待宿主处理确认。</span>}

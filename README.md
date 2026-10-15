@@ -52,11 +52,11 @@ MCP 连接由宿主示例的服务端管理。将配置保存为 Git 忽略的 `
 ]
 ```
 
-`apiKey` 可省略，用于无需鉴权的服务；URL 不接受内嵌凭证或查询参数。`readOnlyTools` 是宿主核实后的只读工具名单，无需这类覆盖时省略。工具 schema、名称和参数从 MCP 动态发现，设置 → 应用 / MCP 可查看连接状态和重新连接。聊天中用 `@` 引用应用，仅本次选择的应用参与调用；同名工具通过服务端命名空间区分。
+`apiKey` 可省略，用于无需鉴权的服务；URL 不接受内嵌凭证或查询参数。`readOnlyTools` 是宿主核实后的只读工具名单，无需这类覆盖时省略。工具 schema、名称和参数从 MCP 动态发现，设置 → 应用 / MCP 可查看连接状态和重新连接。聊天中用 `@` 引用应用，仅本次选择的应用参与调用；同名工具通过服务端命名空间区分。询问应用用途或用法时，默认依据工具目录简短回答；只有明确需要真实数据或执行操作时才调用工具，避免额外浏览示例素材和无关文档。
 
-- 模型的 Chat Completions 和 Responses 两种协议均支持工具调用，最多 8 轮、合计最多 128 个工具。工具失败会回传模型，界面展示真实参数、结果和状态。
+- 模型的 Chat Completions 和 Responses 两种协议均支持工具调用，最多 8 轮、合计最多 128 个工具。工具失败会回传模型，界面以紧凑记录展示应用、工具名和状态，不展开原始参数和结果；执行确认时展示待确认参数。
 - 除标记为只读或经宿主核实列入 `readOnlyTools` 的工具外，其他调用均等待用户允许或拒绝；破坏性标记始终要求确认。确认在服务端执行，停止、断连、超时后失效，不因刷新自动重试写操作。
-- MCP 凭证不返回浏览器。会话历史保存工具调用摘要，原始工具结果仅在当前页面内存中展示；临时文件链接需要重新调用工具获取。
+- MCP 凭证不返回浏览器。原始工具结果只回传给模型，聊天界面和会话历史保存调用摘要；仅待确认操作向界面发送参数。
 - 当前只支持 Streamable HTTP 和可选 Bearer 凭证；OAuth、stdio、旧版 HTTP+SSE、MCP Apps 内嵌界面及文件授权尚未接入。示例仍仅供本机开发，生产环境的用户身份、会话存储和工具权限由宿主提供。
 
 单独启动：`npm run dev:agent-chat`；仅启动组件站：`npm run dev:playground`。示例服务仅监听本机，用于开发验证。`npm run build:agent-chat` 只构建前端到 `dist/agent-chat`，生产部署需由宿主提供 API、鉴权和存储。
@@ -264,7 +264,7 @@ import '@darl/ui/styles.css';
 />
 ```
 
-`sessions` 包含会话 ID、标题和消息；`applications`、`skills`、`models` 全部由宿主提供。工具记录通过消息的 `toolCalls` 传入，参数和结果支持任意 JSON，不绑定具体 MCP。`onToolConfirm(toolCallId, approved)` 接收用户对 `confirmation` 状态调用的允许或拒绝，宿主必须在服务端落实该决定；确认前会自动展示参数，失败可重试。`onSend` 收到会话 ID、正文、应用 / Skill ID、有效模型及推理强度、可选本地附件 `files`；失败保留草稿并显示错误。模型不提供 `reasoningEfforts` 时隐藏推理选择。`isGenerating/onStop` 可连接宿主生成状态。完整类型从 `@darl/ui` 导出。
+`sessions` 包含会话 ID、标题和消息；`applications`、`skills`、`models` 全部由宿主提供。工具记录通过消息的 `toolCalls` 传入，参数和结果支持任意 JSON，不绑定具体 MCP；普通记录仅显示应用、工具名、状态及失败原因，不提供原始 JSON 展开入口。`onToolConfirm(toolCallId, approved)` 接收用户对 `confirmation` 状态调用的允许或拒绝，宿主必须在服务端落实该决定；确认前会自动展示参数，失败可重试。`onSend` 收到会话 ID、正文、应用 / Skill ID、有效模型及推理强度、可选本地附件 `files`；失败保留草稿并显示错误。模型不提供 `reasoningEfforts` 时隐藏推理选择。`isGenerating/onStop` 可连接宿主生成状态。完整类型从 `@darl/ui` 导出。
 
 `onSkillImport`、`onSkillSave`、`onSkillDelete` 和 `onSkillFavoriteChange` 用于接管 Skill 库变更；不传这些回调时，侧栏仍会在当前组件实例内完成本地编辑和选择。
 

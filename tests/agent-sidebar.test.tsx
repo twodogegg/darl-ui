@@ -7,6 +7,19 @@ const skills: AgentSkill[] = [{ id: 'summary', name: '客户摘要', description
 const sessions: AgentSession[] = [{ id: 'one', title: '已有对话', updatedAt: '今天', messages: [{ id: 'assistant', role: 'assistant', content: '## 标题\n\n**加粗**\n\n```ts\nconst answer = true\n```' }] }];
 
 describe('AgentSidebar', () => {
+  it('普通工具记录只显示名称和状态，不提供参数或结果展开入口', () => {
+    const history: AgentSession[] = [{ id: 'one', title: '查询', messages: [{ id: 'assistant', role: 'assistant', content: '已完成查询。', toolCalls: [{ id: 'read-call', appId: 'catalog', appName: '素材库', toolName: 'search', toolTitle: '搜索素材', status: 'success', input: { query: '不显示的参数' }, output: { text: '不显示的详细结果' } }] }] }];
+    const { container } = render(<AgentSidebar open onOpenChange={vi.fn()} sessions={history} activeSessionId="one" />);
+    expect(screen.getByText('素材库')).toBeInTheDocument();
+    expect(screen.getByText('搜索素材')).toBeInTheDocument();
+    expect(screen.getByText('已完成')).toBeInTheDocument();
+    expect(screen.queryByText('参数')).toBeNull();
+    expect(screen.queryByText('结果')).toBeNull();
+    expect(container.querySelector('.darl-agent-tool-summary button, button.darl-agent-tool-summary, .darl-agent-tool-detail')).toBeNull();
+    expect(container).not.toHaveTextContent('不显示的参数');
+    expect(container).not.toHaveTextContent('不显示的详细结果');
+  });
+
   it('确认工具时展示参数，宿主失败可重试并可拒绝', async () => {
     const onToolConfirm = vi.fn().mockRejectedValueOnce(new Error('确认请求失败')).mockResolvedValue(undefined);
     const pending: AgentSession[] = [{ id: 'one', title: '工具确认', messages: [{ id: 'assistant', role: 'assistant', content: '', toolCalls: [{ id: 'write-call', appId: 'catalog', appName: '素材库', toolName: 'save', status: 'confirmation', input: { name: '新素材' } }] }] }];
