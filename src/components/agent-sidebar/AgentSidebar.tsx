@@ -1,5 +1,6 @@
 import { AgentComposerInput, ReferenceText, referenceIds } from './AgentComposerInput';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { AlertCircle, ArrowDown, ArrowLeft, ArrowUp, Bot, Check, ChevronDown, Clipboard, Copy, History, LoaderCircle, Maximize2, Minimize2, Paperclip, Pencil, Plus, RefreshCw, Search, Send, Sparkles, Square, Upload, Wrench, X } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
@@ -43,10 +44,50 @@ function attachmentName(attachment: string | AgentAttachment) {
   return typeof attachment === 'string' ? attachment : attachment.name;
 }
 
+function originalImageUrl(content: string, source: string): string {
+  const images = Array.from(content.matchAll(/!\[[^\]]*\]\((<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)/g));
+  for (let index = 0; index < images.length; index += 1) {
+    const image = images[index];
+    if (image[1].replace(/^<|>$/g, '') !== source) continue;
+    const start = (image.index ?? 0) + image[0].length;
+    const end = images[index + 1]?.index ?? content.length;
+    const links = content.slice(start, end).matchAll(/\[([^\]]+)\]\((<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)/g);
+    for (const match of links) {
+      const label = match[1];
+      const href = match[2].replace(/^<|>$/g, '');
+      if (href !== source && /原图|原始|查看|下载|original|full[- ]?size/i.test(label) && !/^(?:javascript|vbscript|data:(?!image\/))/i.test(href)) return href;
+    }
+  }
+  return source;
+}
+
+/** Shared lightbox so Markdown images and message attachments both zoom in-place instead of opening a new tab (signed URLs expire). */
+type ImagePreviewTheme = CSSProperties & Record<`--${string}`, string>;
+type ImagePreview = { src: string; alt: string; theme?: ImagePreviewTheme };
+const ImagePreviewContext = createContext<((image: Pick<ImagePreview, 'src' | 'alt'>) => void) | null>(null);
+
+function useImagePreview() {
+  return useContext(ImagePreviewContext);
+}
+
+function ImageLightbox({ image, onClose }: { image: ImagePreview | null; onClose: () => void }) {
+  return <DialogPrimitive.Root open={Boolean(image)} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <DialogPrimitive.Portal>
+      <DialogPrimitive.Overlay className="darl-agent-lightbox-overlay" />
+      <DialogPrimitive.Content className="darl-agent-lightbox" role="dialog" aria-describedby={undefined} style={image?.theme}>
+        <DialogPrimitive.Title className="darl-agent-lightbox-title">{image?.alt || '图片预览'}</DialogPrimitive.Title>
+        {image && <img src={image.src} alt={image.alt} />}
+        <DialogPrimitive.Close asChild><Button variant="ghost" size="icon" className="darl-agent-lightbox-close" aria-label="关闭预览"><X size={18} /></Button></DialogPrimitive.Close>
+      </DialogPrimitive.Content>
+    </DialogPrimitive.Portal>
+  </DialogPrimitive.Root>;
+}
+
 function Markdown({ content, onCopyCode, depth = 0 }: { content: string; onCopyCode: (code: string) => void; depth?: number }) {
+  const openImage = useImagePreview();
   const components: Components = {
     a: ({ href, children }) => <a href={href} target={href?.startsWith('http') ? '_blank' : undefined} rel={href?.startsWith('http') ? 'noreferrer' : undefined}>{children}</a>,
-    img: ({ src, alt }) => typeof src === 'string' && src ? <button type="button" className="darl-agent-markdown-image" onClick={() => window.open(src, '_blank', 'noopener')} title="在新标签页查看原图"><img src={src} alt={alt || ''} loading="lazy" /></button> : null,
+    img: ({ src, alt }) => typeof src === 'string' && src ? <button type="button" className="darl-agent-markdown-image" onClick={() => openImage?.({ src: originalImageUrl(content, src), alt: alt || '' })} title="点击放大预览"><img src={src} alt={alt || ''} loading="lazy" /></button> : null,
     pre: ({ children }) => <>{children}</>,
     code: ({ className, children, ...props }) => {
       const language = /language-([\w-]+)/.exec(className || '')?.[1]?.toLowerCase() || '';
@@ -124,11 +165,14 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const [attachmentPreviews, setAttachmentPreviews] = useState<Record<string, string>>({});
   const attachmentPreviewUrls = useRef<Record<string, string>>({});
   const [uploadKind, setUploadKind] = useState<'file' | 'skill'>('skill');
+  const [imagePreview, setImagePreview] = useState<ImagePreview | null>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLElement>(null);
   const followOutput = useRef(true);
   const copyTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(copyTimer.current), []);
+  useEffect(() => { if (!open) setImagePreview(null); }, [open]);
   useEffect(() => {
     const changed = skillsPropRef.current !== skills;
     if (changed) {
@@ -221,8 +265,42 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
     messagesRef.current?.scrollTo({ top: direction === 'top' ? 0 : messagesRef.current.scrollHeight, behavior: 'smooth' });
   };
   const activeMessages = activeSession?.messages ?? [];
+  const openImagePreview = (image: Pick<ImagePreview, 'src' | 'alt'>) => {
+    const sidebar = sidebarRef.current;
+    if (!sidebar) { setImagePreview(image); return; }
+    const computed = (element: Element, property: string, fallback: string) => getComputedStyle(element).getPropertyValue(property).trim() || fallback;
+    const surface = sidebar.querySelector('.darl-agent-composer') || sidebar;
+    const muted = sidebar.querySelector('.darl-agent-heading span') || sidebar;
+    const border = sidebar.querySelector('.darl-agent-header') || sidebar;
+    const primary = sidebar.querySelector('.darl-agent-brand-mark') || sidebar;
+    const background = computed(sidebar, 'background-color', '#fff');
+    const surfaceColor = computed(surface, 'background-color', '#f8fafc');
+    const text = computed(sidebar, 'color', '#0f172a');
+    const mutedColor = computed(muted, 'color', '#64748b');
+    const borderColor = computed(border, 'border-bottom-color', '#e2e8f0');
+    const primaryColor = computed(primary, 'background-color', '#2563eb');
+    const primaryForeground = computed(primary, 'color', '#fff');
+    const radius = getComputedStyle(sidebar).getPropertyValue('--darl-radius').trim() || '12px';
+    setImagePreview({ ...image, theme: {
+      '--darl-agent-bg': background,
+      '--darl-agent-surface': surfaceColor,
+      '--darl-agent-text': text,
+      '--darl-agent-muted': mutedColor,
+      '--darl-agent-border': borderColor,
+      '--darl-agent-primary': primaryColor,
+      '--darl-agent-primary-foreground': primaryForeground,
+      '--darl-background': background,
+      '--darl-surface': surfaceColor,
+      '--darl-text': text,
+      '--darl-muted': mutedColor,
+      '--darl-border': borderColor,
+      '--darl-primary': primaryColor,
+      '--darl-primary-foreground': primaryForeground,
+      '--darl-radius': radius,
+    } });
+  };
 
-  return <><div className={`darl-agent-expanded-backdrop${expanded ? ' is-visible' : ''}`} aria-hidden="true" onClick={() => setExpanded(false)} /><aside className={`darl-agent-sidebar${expanded ? ' darl-agent-sidebar--expanded' : ''} ${className}`} role={expanded ? 'dialog' : 'complementary'} aria-modal={expanded ? 'true' : undefined} aria-label="Agent 辅助侧栏" onKeyDown={(event) => { if (event.key === 'Escape') { setPicker(null); setExpanded(false); } }}>
+  return <ImagePreviewContext.Provider value={openImagePreview}><div className={`darl-agent-expanded-backdrop${expanded ? ' is-visible' : ''}`} aria-hidden="true" onClick={() => setExpanded(false)} /><aside ref={sidebarRef} className={`darl-agent-sidebar${expanded ? ' darl-agent-sidebar--expanded' : ''} ${className}`} role={expanded ? 'dialog' : 'complementary'} aria-modal={expanded ? 'true' : undefined} aria-label="Agent 辅助侧栏" onKeyDown={(event) => { if (event.key === 'Escape') { setPicker(null); setExpanded(false); } }}>
     <header className="darl-agent-header">
       {view === 'history' ? <Button variant="ghost" size="icon" aria-label="返回当前对话" onClick={() => setView('chat')}><ArrowLeft size={17} /></Button> : <span className="darl-agent-brand-mark"><Bot size={17} /></span>}
       <div className="darl-agent-heading"><strong>{view === 'history' ? '历史记录' : '网站助手'}</strong>{view === 'chat' && <span><i />辅助 Agent</span>}</div>
@@ -244,7 +322,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
         {!activeMessages.length && <div className="darl-agent-empty-state"><span className="darl-agent-empty-icon"><Sparkles size={22} /></span><h2>需要我帮你做什么？</h2><p>选择应用和 Skill，把它们插入消息中。</p></div>}
         {activeMessages.map((message) => <article key={message.id} className={`darl-agent-message darl-agent-message--${message.role}`}>
           <div className="darl-agent-message-label">{message.role === 'user' ? '你' : 'Agent'}</div>
-          <div className="darl-agent-message-body">{message.streaming && !message.content && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{message.attachments?.map((attachment, index) => { const name = attachmentName(attachment); const url = typeof attachment === 'string' ? undefined : attachment.url; return url?.startsWith('data:image/') || url?.startsWith('http') ? <figure className="darl-agent-image-attachment" key={`${name}-${index}`}><img src={url} alt={name} loading="lazy" /><figcaption><Paperclip size={12} />{name}</figcaption></figure> : <span className="darl-agent-chip" key={`${name}-${index}`}><Paperclip size={12} />{name}</span>; })}{message.toolCalls?.map((call) => <ToolCallCard key={call.id} call={call} onConfirm={onToolConfirm} />)}</div>
+          <div className="darl-agent-message-body">{message.streaming && !message.content && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{message.attachments?.map((attachment, index) => { const name = attachmentName(attachment); const url = typeof attachment === 'string' ? undefined : attachment.url; return url?.startsWith('data:image/') || url?.startsWith('http') ? <figure className="darl-agent-image-attachment" key={`${name}-${index}`}><button type="button" className="darl-agent-image-trigger" onClick={() => openImagePreview({ src: url, alt: name })} title="点击放大预览"><img src={url} alt={name} loading="lazy" /></button><figcaption><Paperclip size={12} />{name}</figcaption></figure> : <span className="darl-agent-chip" key={`${name}-${index}`}><Paperclip size={12} />{name}</span>; })}{message.toolCalls?.map((call) => <ToolCallCard key={call.id} call={call} onConfirm={onToolConfirm} />)}</div>
           {message.role === 'assistant' && !message.streaming && <div className="darl-agent-message-actions"><Button variant="ghost" size="sm" onClick={() => void copy(message.content, message.id)}><Clipboard size={13} />{copyState === message.id ? '已复制' : '复制'}</Button>{onRegenerate && <Button variant="ghost" size="sm" disabled={isGenerating} onClick={() => onRegenerate(message.id)}><RefreshCw size={13} />重新生成</Button>}</div>}
         </article>)}
         <div className="darl-agent-scroll-controls" aria-label="消息导航"><Button variant="ghost" size="icon" aria-label="滚动到顶部" title="滚动到顶部" onClick={() => scrollMessages('top')}><ArrowUp size={15} /></Button><Button variant="ghost" size="icon" aria-label="滚动到底部" title="滚动到底部" onClick={() => scrollMessages('bottom')}><ArrowDown size={15} /></Button></div>
@@ -266,7 +344,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
     {picker === 'effort' && selectedModel && <Picker title="思考强度" onClose={closePicker}><div className="darl-agent-effort-list">{supportedEfforts.map((value) => <button type="button" key={value} data-selected={value === effort} onClick={() => { setEffort(value); setPicker(null); }}><strong>{value}</strong><small>{value === '低' ? '更快响应' : value === '高' ? '更深入分析' : '平衡速度和质量'}</small>{value === effort && <Check size={15} />}</button>)}</div></Picker>}
     <input ref={fileInput} aria-label="选择上传文件" type="file" hidden multiple={uploadKind === 'file'} onChange={(event) => { const files = Array.from(event.target.files ?? []); const first = files[0]; if (uploadKind === 'skill' && files.length) void Promise.resolve().then(async () => { const imported = await importSkillPackage(files); await onSkillImport?.(imported); if (first) await onSkillUpload?.(first); setLocalSkills((current) => [...current.filter((item) => item.id !== imported.id), imported]); }).catch((reason) => setError(reason instanceof Error ? reason.message : '导入失败')); if (uploadKind === 'file' && files.length) { const images = files.filter((file) => file.type.startsWith('image/')); if (images.length !== files.length) setError('仅支持图片附件，请选择 PNG、JPEG、WebP 或 GIF'); if (images.length) { setAttachments((current) => ({ ...current, [draftKey]: [...(current[draftKey] ?? []), ...images] })); if (onFileUpload) void Promise.resolve().then(() => onFileUpload(images)).catch(() => setError('附件处理失败')); } } setPicker(null); event.currentTarget.value = ''; }} accept={uploadKind === 'skill' ? skillFileAccept : 'image/*,.png,.jpg,.jpeg,.webp,.gif'} />
     <SkillManager open={skillManagerOpen} skills={availableSkills} onClose={() => setSkillManagerOpen(false)} onUse={(skill) => { insertReference('skill', skill.id, skill.name); setSkillManagerOpen(false); }} onImport={async (skill) => { await onSkillImport?.(skill); setLocalSkills((current) => [...current.filter((item) => item.id !== skill.id), skill]); }} onSave={async (skill) => { await onSkillSave?.(skill); setLocalSkills((current) => [...current.filter((item) => item.id !== skill.id), skill]); }} onDelete={async (skillId) => { await onSkillDelete?.(skillId); setLocalSkills((current) => current.filter((skill) => skill.id !== skillId)); }} onFavoriteChange={async (skillId, favorite) => { await onSkillFavoriteChange?.(skillId, favorite); setLocalSkills((current) => current.map((skill) => skill.id === skillId ? { ...skill, favorite } : skill)); }} />
-  </aside></>;
+  </aside><ImageLightbox image={imagePreview} onClose={() => setImagePreview(null)} /></ImagePreviewContext.Provider>;
 }
 
 export type { AgentApplication, AgentAttachment, AgentImageAttachment, AgentMessage, AgentModel, AgentSession, AgentSkill, AgentTool, AgentToolCall } from './types';

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AgentSidebar, type AgentApplication, type AgentSession, type AgentSkill } from '../src';
 
@@ -85,18 +85,43 @@ describe('AgentSidebar', () => {
     expect(screen.getByRole('img', { name: '结果.png' })).toBeInTheDocument();
   });
 
-  it('Markdown 正文图片套用统一容器，可点击打开原图', () => {
+  it('Markdown 正文图片套用统一容器，点击在当前页面放大而非打开新标签页', async () => {
     const open = vi.fn();
     vi.stubGlobal('open', open);
-    const content = '![预览](https://example.com/a.png)\n\n![人物](data:image/png;base64,aGVsbG8=)';
-    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[{ id: 'md-img', title: '图片', messages: [{ id: 'answer', role: 'assistant', content }] }]} activeSessionId="md-img" />);
+    const content = '![预览](https://example.com/thumb.png)\n\n- 下载原图：[点击查看/下载原图](https://example.com/original.png)\n\n![人物](data:image/png;base64,aGVsbG8=)';
+    const props = { onOpenChange: vi.fn(), sessions: [{ id: 'md-img', title: '图片', messages: [{ id: 'answer', role: 'assistant' as const, content }] }], activeSessionId: 'md-img' };
+    render(<AgentSidebar open {...props} />);
     const preview = screen.getByRole('img', { name: '预览' });
-    expect(preview).toHaveAttribute('src', 'https://example.com/a.png');
+    expect(preview).toHaveAttribute('src', 'https://example.com/thumb.png');
     expect(preview).toHaveAttribute('loading', 'lazy');
     expect(preview.closest('.darl-agent-markdown-image')).toBeInTheDocument();
     fireEvent.click(preview.closest('button')!);
-    expect(open).toHaveBeenCalledWith('https://example.com/a.png', '_blank', 'noopener');
+    expect(open).not.toHaveBeenCalled();
+    const lightbox = await screen.findByRole('dialog', { name: '预览' });
+    expect(within(lightbox).getByRole('img', { name: '预览' })).toHaveAttribute('src', 'https://example.com/original.png');
+    fireEvent.click(within(lightbox).getByRole('img', { name: '预览' }));
+    expect(screen.getByRole('dialog', { name: '预览' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '关闭预览' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     vi.unstubAllGlobals();
+  });
+
+  it('关闭侧栏时清理图片预览状态', async () => {
+    const props = { onOpenChange: vi.fn(), sessions: [{ id: 'md-img', title: '图片', messages: [{ id: 'answer', role: 'assistant' as const, content: '![预览](https://example.com/a.png)' }] }], activeSessionId: 'md-img' };
+    const { rerender } = render(<AgentSidebar open {...props} />);
+    fireEvent.click(screen.getByRole('img', { name: '预览' }));
+    await screen.findByRole('dialog', { name: '预览' });
+    rerender(<AgentSidebar open={false} {...props} />);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    rerender(<AgentSidebar open {...props} />);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('点击 Agent 图片附件也在当前页面放大预览', async () => {
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[{ id: 'image', title: '图片', messages: [{ id: 'answer', role: 'assistant', content: '看这里。', attachments: [{ name: '结果.png', type: 'image/png', url: 'data:image/png;base64,aGVsbG8=' }] }] }]} activeSessionId="image" />);
+    fireEvent.click(screen.getByRole('button', { name: /结果\.png/ }));
+    const lightbox = await screen.findByRole('dialog', { name: '结果.png' });
+    expect(within(lightbox).getByRole('img', { name: '结果.png' })).toHaveAttribute('src', 'data:image/png;base64,aGVsbG8=');
   });
 
   it('整条消息复制原始 Markdown，代码块单独复制代码', async () => {
