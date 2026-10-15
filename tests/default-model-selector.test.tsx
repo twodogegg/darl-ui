@@ -31,14 +31,15 @@ describe('DefaultModelSelector', () => {
   it('navigates in four steps and returns configured values', async () => {
     const onComplete = vi.fn();
     render(<DefaultModelSelector models={models} onComplete={onComplete} />);
-    expect(screen.getByRole('button', { name: /上一步/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /上一步/ })).not.toBeInTheDocument();
     next();
+    fireEvent.change(screen.getByRole('combobox', { name: '选择图片模型' }), { target: { value: 'image-a' } });
     fireEvent.click(screen.getByLabelText('4K'));
     next();
     next();
-    fireEvent.click(screen.getByLabelText('视频 B'));
+    fireEvent.change(screen.getByRole('combobox', { name: '选择视频模型' }), { target: { value: 'video-b' } });
     expect(screen.getByLabelText('768P')).toBeChecked();
-    expect(screen.getByText('当前默认配置')).toBeInTheDocument();
+    expect(screen.queryByText('当前默认配置')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /完成/ }));
     await waitFor(() => expect(onComplete).toHaveBeenCalledWith({
       text: { modelId: 'text-a' },
@@ -67,5 +68,13 @@ describe('DefaultModelSelector', () => {
     fireEvent.click(screen.getByRole('button', { name: /完成/ }));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('网络错误'));
     expect(screen.getByLabelText('720P')).toBeChecked();
+  });
+  it('supports controlled modal mode and closes with Escape', () => {
+    const onOpenChange = vi.fn();
+    render(<DefaultModelSelector models={models} open onOpenChange={onOpenChange} onComplete={vi.fn()} />);
+    expect(screen.getByRole('dialog', { name: '选择你的创作模型' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /上一步/ })).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });

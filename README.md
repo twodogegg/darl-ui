@@ -321,7 +321,7 @@ import '@darl/ui/styles.css';
 
 ## DefaultModelSelector｜四步默认模型向导
 
-固定顺序：文本 → 图片 → 音频 → 视频。传入模型（必填）及可选能力、默认值；组件只管理选择和交互，`onComplete` 交给宿主保存。缺少任意类型模型时不允许完成；最后一步可查看所有默认选择。支持手机端布局与 DarlUIProvider 主题。
+固定顺序：文本 → 图片 → 音频 → 视频。传入模型（必填）及可选能力、默认值；组件以弹窗提供选择流程，只管理选择和交互，`onComplete` 交给宿主保存。缺少任意类型模型时不允许完成；最后一步确认配置并保存。模型使用下拉框，支持手机端布局与 DarlUIProvider 主题。
 
 ```tsx
 import { DefaultModelSelector, type DefaultModelOption } from '@darl/ui';
@@ -336,7 +336,15 @@ const models: DefaultModelOption[] = [
     defaults: { resolution: '768P', aspectRatio: '9:16' } },
 ];
 
-<DefaultModelSelector models={models} onComplete={async (result) => saveDefaults(result)} />
+const [open, setOpen] = useState(false);
+
+<Button onClick={() => setOpen(true)}>配置默认模型</Button>
+<DefaultModelSelector
+  open={open}
+  onOpenChange={setOpen}
+  models={models}
+  onComplete={async (result) => saveDefaults(result)}
+/>
 ```
 
 - `models`: 所有模型的数组，支持运行时更新；每条记录需要 `id`、`name`、`type`，也可提供 `description`。
@@ -344,6 +352,7 @@ const models: DefaultModelOption[] = [
 - `capabilities.aspectRatios`: 支持的比例，限定 3:4、4:3、16:9、9:16；省略时提供全部四种。
 - `defaults.resolution` 与 `defaults.aspectRatio`: 模型建议默认值；未提供时图片优先 2K、视频优先 720P、画幅优先 9:16，不支持时使用首个有效选项。
 - `value`/`onChange`: 可选受控模式；`defaultValue` 为非受控初值；`onComplete` 必填，接受四类 `{ modelId, resolution?, aspectRatio? }`，可以异步保存，出错时保持当前选择并展示错误。
+- `open`/`onOpenChange`: 传入后以弹窗模式渲染；按 Esc、点击遮罩或关闭按钮可关闭。未传 `open` 时保留内嵌渲染，便于兼容已有用法。
 - `accentColor`/`className`: 可选外观覆盖。组件不调用模型 API、不保存配置、不加载远程模型数据。
 - 切换模型时应用该模型默认参数；返回已有步骤保留用户有效的手动选择。宿主替换模型列表后，失效模型/参数自动回退到有效选项。
 
