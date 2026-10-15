@@ -7,3 +7,4 @@ dist
 !.env.example
 coverage
 .local/
+codex-session-*.md
