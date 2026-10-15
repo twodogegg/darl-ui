@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
 import type { AgentSkill, AgentToolCall } from '../../../src/index';
-import { applicationCatalog, connectApplication, loadApplications, toolRisk, ToolConfirmations } from './mcp';
+import { applicationCatalog, connectApplication, conversationApplications, loadApplications, toolRisk, ToolConfirmations } from './mcp';
 import { generate, listModels, publicProvider, safeError, validateProvider, type ChatMessage, type StoredProvider } from './models';
 
 async function readBody(request: IncomingMessage) {
@@ -135,11 +135,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const applicationIds = body.applicationIds ?? [];
         if (!Array.isArray(applicationIds) || applicationIds.length > 20 || applicationIds.some((id: unknown) => typeof id !== 'string')) throw new Error('应用列表无效');
         const configs = await loadApplications(directory);
-        const selectedApps = [...new Set<string>(applicationIds)].map((id) => {
-          const app = configs.find((item) => item.id === id);
-          if (!app) throw new Error('所选应用不存在，请刷新应用列表');
-          return app;
-        });
+        const selectedApps = conversationApplications(configs, applicationIds, messages);
         for (const app of selectedApps) connections.push(await connectApplication(app, signal));
         const functions = connections.flatMap((connection, appIndex) => connection.tools.map((tool, index) => ({ name: `mcp_${appIndex}_${index}`, connection, tool })));
         if (functions.length > 128) throw new Error('所选应用合计超过 128 个工具，请减少应用数量');

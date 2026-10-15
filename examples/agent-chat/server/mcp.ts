@@ -4,7 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentApplication } from '../../../src/index';
-import { safeError } from './models';
+import { safeError, type ChatMessage } from './models';
 
 export interface McpApplicationConfig {
   id: string;
@@ -13,6 +13,23 @@ export interface McpApplicationConfig {
   apiKey?: string;
   /** Host-reviewed exceptions for servers without readOnlyHint annotations. */
   readOnlyTools?: string[];
+}
+
+export function conversationApplications(configs: McpApplicationConfig[], applicationIds: string[], messages: ChatMessage[]) {
+  const selected = new Set(applicationIds);
+  for (const message of messages) {
+    if (message.role !== 'user') continue;
+    for (const match of message.content.matchAll(/\[[^\]]+\]\(app:([^\s)]+)\)/g)) {
+      let id: string;
+      try { id = decodeURIComponent(match[1]); } catch { continue; }
+      if (configs.some((app) => app.id === id)) selected.add(id);
+    }
+  }
+  return [...selected].map((id) => {
+    const app = configs.find((item) => item.id === id);
+    if (!app) throw new Error('所选应用不存在，请刷新应用列表');
+    return app;
+  });
 }
 
 export async function loadApplications(directory: string): Promise<McpApplicationConfig[]> {
