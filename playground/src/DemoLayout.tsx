@@ -1,12 +1,12 @@
 import { useState, type ReactNode } from 'react';
-import { Bot, Component, FileImage, Github, Layers3, LayoutPanelTop, Menu, Moon, Palette, Play, Settings, Sun, Upload } from 'lucide-react';
+import { Bot, Component, FileImage, Github, Layers3, LayoutPanelTop, Menu, Moon, Palette, Play, Settings, Sun, Upload, ListChecks } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import type { Mode } from './usePlaygroundTheme';
 
-export type Page = 'intro' | 'theme' | 'uploader' | 'video' | 'media' | 'styles' | 'agent' | 'settings';
+export type Page = 'intro' | 'theme' | 'uploader' | 'video' | 'media' | 'styles' | 'agent' | 'settings' | 'default-models';
 const pages = [
   { id: 'intro', label: '概览', title: 'Introduction', icon: LayoutPanelTop },
   { id: 'theme', label: '主题系统', title: 'Theme', icon: Palette },
@@ -16,6 +16,7 @@ const pages = [
   { id: 'styles', label: 'StyleSelector', title: 'StyleSelector', icon: Palette },
   { id: 'agent', label: 'AgentSidebar', title: 'AgentSidebar', icon: Bot },
   { id: 'settings', label: 'SettingsPage', title: 'SettingsPage', icon: Settings },
+  { id: 'default-models', label: 'DefaultModelSelector', title: 'DefaultModelSelector', icon: ListChecks },
 ] as const;
 
 export function DemoLayout({ selected, onNavigate, mode, onModeChange, children }: {
@@ -26,7 +27,7 @@ export function DemoLayout({ selected, onNavigate, mode, onModeChange, children 
   const navigation = <nav aria-label="组件导航" className="demo-navigation">
     <p className="demo-nav-caption">开始使用</p>
     {pages.map((page, index) => <div key={page.id}>
-      {index === 2 && <p className="demo-nav-caption mt-6">组件 <Badge variant="secondary">4</Badge></p>}
+      {index === 2 && <p className="demo-nav-caption mt-6">组件 <Badge variant="secondary">6</Badge></p>}
       <Button variant={selected === page.id ? 'secondary' : 'ghost'} className="w-full justify-start" aria-current={selected === page.id ? 'page' : undefined} onClick={() => navigate(page.id)}>
         <page.icon data-icon="inline-start" />{page.label}
       </Button>
