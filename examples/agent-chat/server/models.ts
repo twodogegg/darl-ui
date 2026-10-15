@@ -1,8 +1,8 @@
 import type { ModelProvider, AgentModelConfig } from '../../../src/index';
-import { Agent, type AgentMessage, type AgentTool } from '@earendil-works/pi-agent-core';
-import { Type, type Model } from '@earendil-works/pi-ai';
-import { stream as streamCompletions } from '@earendil-works/pi-ai/api/openai-completions';
-import { stream as streamResponses } from '@earendil-works/pi-ai/api/openai-responses';
+import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
+import { dynamicTool, jsonSchema, stepCountIs, streamText, type LanguageModel, type ModelMessage } from 'ai';
 
 export interface StoredProvider extends ModelProvider { apiKey: string }
 export interface ChatImage { type: 'image'; name: string; mimeType: string; data: string; size?: number }
@@ -87,124 +87,72 @@ export async function* checkedText(chunks: AsyncIterable<string>) {
   if (prefix) yield prefix;
 }
 
-export async function* generate(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution) {
-  yield* checkedText(generateRaw(provider, model, messages, instructions, effort, signal, execution));
+function reasoningValue(effort: string | undefined) {
+  return effort && ({ 低: 'low', 中: 'medium', 高: 'high' }[effort] || effort);
 }
 
-export function piModel(provider: StoredProvider, model: AgentModelConfig): Model<'openai-completions' | 'openai-responses'> {
-  return {
-    id: model.id, name: model.name, api: provider.protocol, provider: provider.id, baseUrl: provider.baseUrl,
-    reasoning: Boolean(model.reasoningEfforts?.length), input: model.capabilities?.vision === false ? ['text'] : ['text', 'image'],
-    // Metadata is unknown for user-configured models; native streams do not send token limits.
-    contextWindow: model.capabilities?.contextWindow ?? 0, maxTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    compat: { supportsDeveloperRole: false, supportsStrictMode: false },
-  };
-}
-
-export function piHistory(messages: ChatMessage[], model: Model<'openai-completions' | 'openai-responses'>): AgentMessage[] {
-  const textOf = (content: ChatContent) => typeof content === 'string' ? content : content.filter((item): item is { type: 'text'; text: string } => item.type === 'text').map((item) => item.text).join('\n');
-  return messages.map<AgentMessage>((message) => message.role === 'user'
-    ? { role: 'user', content: typeof message.content === 'string' ? message.content : message.content.map((item) => item.type === 'text' ? { type: 'text', text: item.text } : { type: 'image', data: item.data, mimeType: item.mimeType }), timestamp: Date.now() }
-    : { role: 'assistant', content: [{ type: 'text', text: textOf(message.content) }], api: model.api, provider: model.provider, model: model.id, stopReason: 'stop', timestamp: Date.now(),
-      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
-}
-
-export function piTools(execution: ToolExecution | undefined, signal: AbortSignal): AgentTool[] {
-  return execution?.tools.map((tool) => ({
-    name: tool.name, label: tool.name, description: tool.description || '', parameters: Type.Unsafe<Record<string, unknown>>(tool.parameters),
-    execute: async (id, params, toolSignal) => {
-      const callSignal = toolSignal ? AbortSignal.any([signal, toolSignal]) : signal;
-      callSignal.throwIfAborted();
-      const text = await execution.execute({ id, name: tool.name, arguments: JSON.stringify(params) }, callSignal);
-      callSignal.throwIfAborted();
-      let isError = false;
-      try { isError = JSON.parse(text)?.isError === true; } catch { /* Plain text tool results remain valid. */ }
-      return { content: [{ type: 'text', text }], details: undefined, isError };
-    },
-  })) ?? [];
-}
-
-async function* generateRaw(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution) {
-  signal.throwIfAborted();
+export function languageModel(provider: StoredProvider, model: AgentModelConfig): LanguageModel {
   if (!provider.apiKey) throw new Error('请先在设置中保存 API Key');
-  if (!messages.length) throw new Error('对话消息不能为空');
-  const reasoning = effort && ({ 低: 'low', 中: 'medium', 高: 'high' }[effort] || effort);
-  const channel = new TransformStream<string, string>();
-  const writer = channel.writable.getWriter();
-  const reader = channel.readable.getReader();
-  let rounds = 0;
-  let turnHasText = false;
-  let failure: Error | undefined;
-  const selectedModel = piModel(provider, model);
-  const agent = new Agent({
-    initialState: { model: selectedModel, systemPrompt: instructions, messages: piHistory(messages, selectedModel), tools: piTools(execution, signal) },
-    toolExecution: 'sequential',
-    prepareRequest: async () => {
-      signal.throwIfAborted();
-      if (++rounds > 8) throw new Error('已达到 8 轮工具调用上限，请缩小任务范围后继续');
-    },
-    streamFn: (selected, context, options) => {
-      const request = { ...options, apiKey: provider.apiKey, signal: AbortSignal.any([signal, ...(options?.signal ? [options.signal] : [])]), maxRetries: 0,
-        onPayload: (payload: unknown) => {
-          // Preserve the host's explicitly configured effort, including "none"; no inferred defaults.
-          const body = payload as Record<string, unknown>;
-          if (provider.protocol === 'openai-responses') {
-            if (reasoning) { body.reasoning = { effort: reasoning }; body.include = ['reasoning.encrypted_content']; }
-            else { delete body.reasoning; delete body.include; }
-          } else {
-            if (reasoning) body.reasoning_effort = reasoning;
-            else delete body.reasoning_effort;
-          }
-          if (Array.isArray(body.tools) && body.tools.length) body.parallel_tool_calls = false;
-        } };
-      return provider.protocol === 'openai-responses'
-        ? streamResponses(selected as Model<'openai-responses'>, context, request)
-        : streamCompletions(selected as Model<'openai-completions'>, context, request);
-    },
-  });
-  const unsubscribe = agent.subscribe(async (event) => {
-    if (event.type === 'turn_start') {
-      if (turnHasText) await writer.write('\n\n');
-      turnHasText = false;
-    }
-    if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
-      turnHasText = true;
-      await writer.write(event.assistantMessageEvent.delta);
-    }
-    if (event.type === 'message_end' && event.message.role === 'assistant') {
-      const message = event.message;
-      const calls = message.content.filter((block) => block.type === 'toolCall');
-      if (message.stopReason === 'error') failure ??= new Error(message.errorMessage || '模型生成失败');
-      if (message.stopReason === 'length') failure ??= new Error('已达到模型输出长度限制');
-      if (message.stopReason === 'aborted') failure ??= new Error('模型生成已停止');
-      if (calls.length > 16 || calls.some((call) => !call.id || !call.name || JSON.stringify(call.arguments).length > 100_000) || new Set(calls.map((call) => call.id)).size !== calls.length) failure ??= new Error('模型工具调用数量或格式无效');
-      if (rounds === 8 && calls.length) failure ??= new Error('已达到 8 轮工具调用上限，请缩小任务范围后继续');
-      if (failure) agent.abort();
-    }
-  });
-  const abort = () => agent.abort();
-  signal.addEventListener('abort', abort, { once: true });
-  const run = (async () => {
-    try {
-      await agent.continue();
-      signal.throwIfAborted();
-      if (failure || agent.state.errorMessage) throw failure || new Error(agent.state.errorMessage);
-      if (!turnHasText) throw new Error('模型没有返回文本内容');
-      await writer.close();
-    } catch (reason) { await writer.abort(new Error(safeError(reason, provider.apiKey))).catch(() => {}); }
-  })();
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      yield value;
-    }
-  } finally {
-    agent.abort();
-    await reader.cancel().catch(() => {});
-    await run;
-    unsubscribe();
-    signal.removeEventListener('abort', abort);
-    reader.releaseLock(); writer.releaseLock();
+  if (provider.protocol === 'openai-responses') {
+    return createOpenAI({ baseURL: provider.baseUrl, apiKey: provider.apiKey, name: provider.id }).responses(model.id);
   }
+  return createOpenAICompatible({ baseURL: provider.baseUrl, apiKey: provider.apiKey, name: provider.id, includeUsage: true }).chatModel(model.id);
+}
+
+export function modelMessages(messages: ChatMessage[]): ModelMessage[] {
+  return messages.map((message) => ({
+    role: message.role,
+    content: typeof message.content === 'string' ? message.content : message.content.map((item) => item.type === 'text'
+      ? { type: 'text' as const, text: item.text }
+      : { type: 'image' as const, image: `data:${item.mimeType};base64,${item.data}`, mediaType: item.mimeType }),
+  })) as ModelMessage[];
+}
+
+const mcpSchemaValidator = new AjvJsonSchemaValidator();
+
+export function aiTools(execution: ToolExecution | undefined, signal: AbortSignal) {
+  if (!execution) return undefined;
+  return Object.fromEntries(execution.tools.map((tool) => [tool.name, dynamicTool({
+    description: tool.description || '',
+    inputSchema: jsonSchema(tool.parameters as Parameters<typeof jsonSchema>[0], {
+      validate: (input) => {
+        const result = mcpSchemaValidator.getValidator(tool.parameters as Parameters<typeof jsonSchema>[0])(input);
+        return result.valid ? { success: true, value: result.data } : { success: false, error: new Error(result.errorMessage) };
+      },
+    }),
+    execute: async (input, options) => {
+      const callSignal = options.abortSignal ? AbortSignal.any([signal, options.abortSignal]) : signal;
+      callSignal.throwIfAborted();
+      const result = await execution.execute({ id: options.toolCallId, name: tool.name, arguments: JSON.stringify(input) }, callSignal);
+      callSignal.throwIfAborted();
+      return result;
+    },
+  })]));
+}
+
+export async function* generate(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution) {
+  signal.throwIfAborted();
+  if (!messages.length) throw new Error('对话消息不能为空');
+  const reasoning = reasoningValue(effort);
+  const providerOptionsName = provider.protocol === 'openai-responses' ? 'openai' : provider.id;
+  const result = streamText({
+    model: languageModel(provider, model),
+    system: instructions,
+    messages: modelMessages(messages),
+    tools: aiTools(execution, signal),
+    stopWhen: stepCountIs(8),
+    toolCallConcurrency: 1,
+    maxRetries: 0,
+    abortSignal: signal,
+    ...(reasoning ? { providerOptions: { [providerOptionsName]: { reasoningEffort: reasoning } } } : {}),
+  });
+  let hasText = false;
+  for await (const text of checkedText(result.textStream)) {
+    hasText = true;
+    yield text;
+  }
+  signal.throwIfAborted();
+  const finishReason = await result.finishReason;
+  if (finishReason === 'length') throw new Error('已达到模型输出长度限制');
+  if (!hasText) throw new Error('模型没有返回文本内容');
 }

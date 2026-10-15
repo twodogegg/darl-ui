@@ -44,8 +44,8 @@
     "react-dom": ">=18.2.0 <20"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "1.2.0",
-    "@earendil-works/pi-ai": "1.2.0",
+    "@ai-sdk/openai": "^4.0.94",
+    "@ai-sdk/openai-compatible": "^3.0.69",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^6.6.0",
@@ -54,6 +54,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "ai": "^7.0.141",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",
     "jsdom": "^26.1.0",

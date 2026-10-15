@@ -5,15 +5,53 @@ import type { AgentSkill, AgentToolCall } from '../../../src/index';
 import { applicationCatalog, connectApplication, conversationApplications, loadApplications, toolRisk, ToolConfirmations } from './mcp';
 import { generate, listModels, publicProvider, safeError, validateProvider, type ChatImage, type ChatMessage, type StoredProvider } from './models';
 
+const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
+const MAX_IMAGE_DATA_URL_LENGTH = 64 + 4 * Math.ceil(MAX_IMAGE_BYTES / 3);
+
 async function readBody(request: IncomingMessage) {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > 20_000_000) throw new Error('请求内容超过 20MB');
+    if (size > 80 * 1024 * 1024) throw new Error('请求内容超过 80MB');
     chunks.push(Buffer.from(chunk));
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+type McpCallResult = { content: unknown[]; structuredContent?: unknown; isError: boolean };
+type ImageInputFields = { assetId: string; dataUrl: string; fileName: string; displayName?: string };
+
+export async function uploadAttachedImage(
+  call: (args: Record<string, unknown>, signal: AbortSignal) => Promise<McpCallResult>,
+  image: ChatImage,
+  args: Record<string, unknown>,
+  fields: ImageInputFields,
+  signal: AbortSignal,
+) {
+  const bytes = Buffer.from(image.data, 'base64');
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(image.mimeType)) throw new Error('素材文件兼容上传仅支持 PNG、JPEG、WebP');
+  if (!bytes.length || bytes.length > MAX_IMAGE_BYTES || image.data.length + 32 > MAX_IMAGE_DATA_URL_LENGTH) throw new Error('图片附件为空或超过 50 MiB');
+  const assetId = args[fields.assetId];
+  if (typeof assetId !== 'string') throw new Error('图片上传能力缺少素材 ID');
+  return call({ [fields.assetId]: assetId, [fields.dataUrl]: `data:${image.mimeType};base64,${image.data}`, [fields.fileName]: image.name, ...(fields.displayName && typeof args[fields.displayName] === 'string' ? { [fields.displayName]: args[fields.displayName] } : {}) }, signal);
+}
+
+function latestUserImages(messages: ChatMessage[]) {
+  const message = [...messages].reverse().find((item) => item.role === 'user');
+  return typeof message?.content === 'string' ? [] : (message?.content.filter((item): item is ChatImage => item.type === 'image') ?? []);
+}
+
+type McpToolDescriptor = { _meta?: Record<string, unknown> };
+
+export function findAttachedImageForUpload(tool: McpToolDescriptor, args: Record<string, unknown>, images: ChatImage[]) {
+  const metadata = tool._meta?.['darl-ui/image-input'];
+  if (!metadata || typeof metadata !== 'object' || !('kind' in metadata) || !('fields' in metadata) || !metadata.fields || typeof metadata.fields !== 'object') return undefined;
+  const fields = metadata.fields as Record<string, unknown>;
+  if (metadata.kind !== 'data-url' || typeof fields.assetId !== 'string' || typeof fields.dataUrl !== 'string' || typeof fields.fileName !== 'string' || (fields.displayName !== undefined && typeof fields.displayName !== 'string')) return undefined;
+  const mapped = { assetId: fields.assetId, dataUrl: fields.dataUrl, fileName: fields.fileName, ...(fields.displayName ? { displayName: fields.displayName } : {}) } satisfies ImageInputFields;
+  if (typeof args[mapped.assetId] !== 'string' || args.file || args.file_id || args[mapped.dataUrl] !== undefined || args.data_base64 !== undefined || (args.action !== undefined && args.action !== 'start')) return undefined;
+  return { image: images.find((image) => typeof args[mapped.fileName] !== 'string' || image.name === args[mapped.fileName]) ?? images[0], fields: mapped };
 }
 
 export function createApi(directory: string, env: Record<string, string>, promptFile: string) {
@@ -135,7 +173,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
             if (item?.type === 'image' && typeof item.name === 'string' && typeof item.mimeType === 'string' && /^image\/(png|jpe?g|webp|gif)$/i.test(item.mimeType) && typeof item.data === 'string' && item.data.startsWith('data:')) {
               const [, encoded = ''] = item.data.split(',', 2);
               const data = encoded.replace(/\s/g, '');
-              if (!data || data.length > 12_000_000) throw new Error('图片附件过大，请压缩后重试');
+              if (!data || data.length > MAX_IMAGE_DATA_URL_LENGTH || Buffer.from(data, 'base64').length > MAX_IMAGE_BYTES || Buffer.from(data, 'base64').toString('base64') !== data) throw new Error('图片附件过大或不是规范 Base64，请压缩后重试');
               return { type: 'image' as const, name: item.name.slice(0, 200), mimeType: item.mimeType, data, size: item.size } satisfies ChatImage;
             }
             throw new Error('图片消息格式无效');
@@ -155,6 +193,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         if (!Array.isArray(applicationIds) || applicationIds.length > 20 || applicationIds.some((id: unknown) => typeof id !== 'string')) throw new Error('应用列表无效');
         const configs = await loadApplications(directory);
         const selectedApps = conversationApplications(configs, applicationIds, messages);
+        const attachedImages = latestUserImages(messages);
         for (const app of selectedApps) connections.push(await connectApplication(app, signal));
         const functions = connections.flatMap((connection, appIndex) => connection.tools.map((tool, index) => ({ name: `mcp_${appIndex}_${index}`, connection, tool })));
         if (functions.length > 128) throw new Error('所选应用合计超过 128 个工具，请减少应用数量');
@@ -191,7 +230,10 @@ export function createApi(directory: string, env: Record<string, string>, prompt
               callSignal.throwIfAborted();
               call.status = 'running';
               emitTool(call);
-              const result = await connection.call(tool.name, args, callSignal);
+              const attachedUpload = findAttachedImageForUpload(tool, args, attachedImages);
+              const result = attachedUpload
+                ? await uploadAttachedImage((stepArgs, stepSignal) => connection.call(tool.name, stepArgs, stepSignal), attachedUpload.image, args, attachedUpload.fields, callSignal)
+                : await connection.call(tool.name, args, callSignal);
               callSignal.throwIfAborted();
               call.status = result.isError ? 'error' : 'success';
               if (result.isError) {
