@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => ({
     name: 'agent-chat-api',
     configureServer(server) {
       const env = { ...process.env, ...loadEnv(mode, root, '') } as Record<string, string>;
-      server.middlewares.use(createApi(resolve(root, '.local/agent-chat'), env));
+      server.middlewares.use(createApi(resolve(root, '.local/agent-chat'), env, resolve(root, 'examples/agent-chat/prompts/system.md')));
     },
   }],
   resolve: { alias: [

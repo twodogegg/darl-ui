@@ -58,3 +58,8 @@ export interface ModelSettingsCardProps {
   onTestConnection?: (provider: ModelProvider) => void | Promise<void>;
   onFetchModels?: (provider: ModelProvider) => void | Promise<AgentModelConfig[]>;
 }
+
+export interface AgentSettingsCardProps {
+  systemPrompt: string;
+  onSave: (systemPrompt: string) => void | Promise<void>;
+}

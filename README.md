@@ -33,6 +33,7 @@ npm run dev
 
 - 支持 OpenAI Chat Completions / Responses 流式文本协议、多轮对话、停止、重新生成、新对话和历史搜索。
 - Markdown 使用开源的 `react-markdown`、`remark-gfm` 和 `rehype-sanitize` 渲染；回复中的 `md` / `markdown` 代码块会显示为编译后的内容，复制按钮仍复制原始 Markdown。
+- 系统提示词保存在 `examples/agent-chat/prompts/system.md`，是唯一来源；可在「设置 → Agent」中编辑，保存直接更新该文件，也可直接编辑 Markdown。每次聊天和连接测试重新读取文件，修改后下次请求生效；缺失、空白或过长时报错，代码没有内置默认值。选中的 Skill 指令在发送时追加。
 - 对话和 Skills 保存在当前浏览器的 localStorage；Skill 指令通过 `/` 引用后发送给模型，资源脚本不会执行。
 - 提供方和 Key 保存到 Git 忽略的 `.local/agent-chat/providers.json`，前端只获取是否已配置 Key。环境变量只用于首次初始化；后续以已保存设置为准。连接测试会实际调用已启用的文本模型。
 - 获取模型目录后需确认模型类型、启用状态并保存；新发现的模型默认禁用，接口返回的 ID 无法证明其媒体或推理能力。
@@ -292,7 +293,7 @@ import '@darl/ui/styles.css';
 
 ## SettingsPage｜整体设置中心
 
-`SettingsPage` 提供设置中心的导航外壳，`ModelSettingsCard` 负责模型提供方和模型目录。模型类型统一为 `text`、`image`、`video`、`audio`；模型的推理强度和能力标签由宿主提供，API Key 只通过宿主回调保存，组件不会自行持久化密钥。
+`SettingsPage` 提供设置中心的导航外壳，`ModelSettingsCard` 负责模型提供方和模型目录，`AgentSettingsCard` 负责系统提示词编辑。模型类型统一为 `text`、`image`、`video`、`audio`；模型的推理强度和能力标签由宿主提供，API Key 只通过宿主回调保存，组件不会自行持久化密钥。
 
 ```tsx
 <SettingsPage activeSection="models" sections={sections}>
@@ -306,4 +307,12 @@ import '@darl/ui/styles.css';
 </SettingsPage>
 ```
 
-设置中心当前提供通用设置、模型、应用 / MCP、Skills、Agent 预设和桌面设置入口；除模型卡片外，其他页面内容由宿主通过 `children` 接入。模型配置完成后，将 `providers` 中启用的模型转换为 `AgentSidebar` 的 `models` 即可复用同一个聊天侧栏。
+`AgentSettingsCard` 通过 `systemPrompt: string` 接收已保存内容，通过 `onSave: (systemPrompt: string) => void | Promise<void>` 交给宿主持久化。支持多行编辑、保存进度、成功反馈及失败后保留草稿重试；不自行读文件或调用 API。
+
+```tsx
+<SettingsPage activeSection="agent" sections={sections}>
+  <AgentSettingsCard systemPrompt={systemPrompt} onSave={saveSystemPrompt} />
+</SettingsPage>
+```
+
+设置中心当前提供通用设置、模型、应用 / MCP、Skills、Agent 预设和桌面设置入口；页面内容由宿主通过 `children` 接入。模型配置完成后，将 `providers` 中启用的模型转换为 `AgentSidebar` 的 `models` 即可复用同一个聊天侧栏。

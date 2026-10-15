@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { AgentSidebar, DarlUIProvider, ModelSettingsCard, SettingsPage, type AgentApplication, type AgentToolCall, type AgentModelConfig, type AgentSendRequest, type AgentSession, type AgentSkill, type ModelProvider } from '@darl/ui';
-import { ArrowLeft, BookOpen, MessageSquare, Settings2, Wrench } from 'lucide-react';
+import { AgentSidebar, AgentSettingsCard, DarlUIProvider, ModelSettingsCard, SettingsPage, type AgentApplication, type AgentToolCall, type AgentModelConfig, type AgentSendRequest, type AgentSession, type AgentSkill, type ModelProvider } from '@darl/ui';
+import { ArrowLeft, BookOpen, Bot, MessageSquare, Settings2, Wrench } from 'lucide-react';
 import { lines } from '../stream';
 import { Guide } from './Guide';
 
@@ -38,6 +38,9 @@ export function App() {
   const [applicationsLoading, setApplicationsLoading] = useState(false);
   const [applicationError, setApplicationError] = useState('');
   const [settingsSection, setSettingsSection] = useState('models');
+  const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
+  const [promptError, setPromptError] = useState('');
+  const [promptRevision, setPromptRevision] = useState(0);
   const [modelId, setModelId] = useState('');
   const [effort, setEffort] = useState<string | undefined>();
   const [open, setOpen] = useState(true);
@@ -55,6 +58,14 @@ export function App() {
     api<ModelProvider[]>('providers').then((value) => { if (active) setProviders(value); }).catch((reason) => { if (active) setError(reason.message); });
     return () => { active = false; };
   }, []);
+  useEffect(() => {
+    if (!settings || settingsSection !== 'agent') return;
+    let active = true;
+    setSystemPrompt(null); setPromptError('');
+    api<{ systemPrompt: string }>('agent-settings').then((value) => { if (active) setSystemPrompt(value.systemPrompt); })
+      .catch((reason) => { if (active) setPromptError(reason.message); });
+    return () => { active = false; };
+  }, [settings, settingsSection, promptRevision]);
   useEffect(() => {
     const controller = new AbortController();
     setApplicationsLoading(true); setApplicationError('');
@@ -158,7 +169,7 @@ export function App() {
     <div className={`example-page ${open ? 'with-agent' : ''}`}>
       <header className="example-header"><a href="http://localhost:5188">Darl UI <span>/ Agent Chat</span></a><div><button className={buttonClass} onClick={showGuide}><BookOpen size={16} />开发说明</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />设置</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setOpen((value) => !value); }}><MessageSquare size={16} />聊天</button></div></header>
       {(error || storageError) && <p className="example-error" role="alert">{error || storageError}</p>}
-      {guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : settings ? <main className="example-settings"><button className={buttonClass} onClick={() => { setSettings(false); setOpen(true); }}><ArrowLeft size={15} />返回聊天</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'applications', label: '应用 / MCP', icon: <Wrench /> }]}>{settingsSection === 'applications' ? <section className="example-applications"><h2>应用 / MCP</h2><p>服务端配置连接，工具目录由 MCP 动态发现。用 @ 引用应用后，模型才可以调用它的工具。</p><button className={buttonClass} disabled={applicationsLoading} onClick={() => setApplicationRevision((value) => value + 1)}>{applicationsLoading ? '正在连接…' : '重新连接'}</button>{applicationError && <p role="alert">{applicationError}</p>}{!applicationsLoading && !applications.length && <p>暂无应用，请在服务端配置 applications.json。</p>}{applications.map((app) => <article key={app.id}><h3>{app.name} · {app.status === 'connected' ? '已连接' : '未连接'}</h3><p>{app.description}</p><ul>{app.tools?.map((tool) => <li key={tool.name}><strong>{tool.title || tool.name}</strong><span>{tool.risk === 'read' ? '只读' : '执行前确认'}</span><p>{tool.description}</p></li>)}</ul></article>)}</section> : <ModelSettingsCard providers={providers}
+      {guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : settings ? <main className="example-settings"><button className={buttonClass} onClick={() => { setSettings(false); setOpen(true); }}><ArrowLeft size={15} />返回聊天</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'agent', label: 'Agent', icon: <Bot /> }, { id: 'applications', label: '应用 / MCP', icon: <Wrench /> }]}>{settingsSection === 'agent' ? systemPrompt !== null ? <AgentSettingsCard systemPrompt={systemPrompt} onSave={async (value) => { const saved = await api<{ systemPrompt: string }>('agent-settings', { systemPrompt: value }); setSystemPrompt(saved.systemPrompt); }} /> : <div>{promptError ? <><p role="alert">{promptError}</p><button className={buttonClass} onClick={() => setPromptRevision((value) => value + 1)}>重新加载提示词</button></> : <p role="status">正在加载提示词…</p>}</div> : settingsSection === 'applications' ? <section className="example-applications"><h2>应用 / MCP</h2><p>服务端配置连接，工具目录由 MCP 动态发现。用 @ 引用应用后，模型才可以调用它的工具。</p><button className={buttonClass} disabled={applicationsLoading} onClick={() => setApplicationRevision((value) => value + 1)}>{applicationsLoading ? '正在连接…' : '重新连接'}</button>{applicationError && <p role="alert">{applicationError}</p>}{!applicationsLoading && !applications.length && <p>暂无应用，请在服务端配置 applications.json。</p>}{applications.map((app) => <article key={app.id}><h3>{app.name} · {app.status === 'connected' ? '已连接' : '未连接'}</h3><p>{app.description}</p><ul>{app.tools?.map((tool) => <li key={tool.name}><strong>{tool.title || tool.name}</strong><span>{tool.risk === 'read' ? '只读' : '执行前确认'}</span><p>{tool.description}</p></li>)}</ul></article>)}</section> : <ModelSettingsCard providers={providers}
         onProviderSave={async (provider, apiKey) => setProviders(await api<ModelProvider[]>('providers', { provider, apiKey }))}
         onProviderDelete={async (id) => setProviders(await api<ModelProvider[]>(`providers/${id}`, undefined, 'DELETE'))}
         onTestConnection={async (provider) => setProviders(await api<ModelProvider[]>(`providers/${provider.id}/test`, {}))}

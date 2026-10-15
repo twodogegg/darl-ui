@@ -13,6 +13,8 @@ export { importSkillPackage, parseSkillMarkdown, skillMarkdown, newSkillDraft } 
 export type { AgentSidebarProps, AgentApplication, AgentMessage, AgentModel, AgentSession, AgentSkill, AgentSkillDraft, AgentSkillResource, AgentTool, AgentToolCall, AgentSendRequest, AgentMessageRole, AgentToolStatus } from './components/agent-sidebar/types';
 export { SettingsPage } from './components/settings/SettingsPage';
 export { ModelSettingsCard } from './components/settings/ModelSettingsCard';
+export { AgentSettingsCard } from './components/settings/AgentSettingsCard';
+export type { AgentSettingsCardProps } from './components/settings/types';
 export type { AgentModelCapabilities, AgentModelConfig, AgentModelType, ModelProvider, ModelProviderProtocol, ModelProviderStatus, ModelSettingsCardProps, SettingsPageProps, SettingsSection } from './components/settings/types';
 export { StyleSelector } from './components/style-selector/StyleSelector';
 export type { StyleCollection, StyleOption, StyleCreateRequest, StyleFilter, StyleLoadMoreRequest, StyleSelectorProps } from './components/style-selector/StyleSelector';
