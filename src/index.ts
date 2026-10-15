@@ -18,3 +18,6 @@ export type { AgentSettingsCardProps } from './components/settings/types';
 export type { AgentModelCapabilities, AgentModelConfig, AgentModelType, ModelProvider, ModelProviderProtocol, ModelProviderStatus, ModelSettingsCardProps, SettingsPageProps, SettingsSection } from './components/settings/types';
 export { StyleSelector } from './components/style-selector/StyleSelector';
 export type { StyleCollection, StyleOption, StyleCreateRequest, StyleFilter, StyleLoadMoreRequest, StyleSelectorProps } from './components/style-selector/StyleSelector';
+
+export { DefaultModelSelector, normalizeDefaultModels, modelOptions } from './components/default-model-selector/DefaultModelSelector';
+export type { DefaultModelKind, DefaultModelOption, DefaultModelChoice, DefaultModelDraft, DefaultModelSelection, DefaultModelSelectorProps } from './components/default-model-selector/DefaultModelSelector';
