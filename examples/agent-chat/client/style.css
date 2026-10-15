@@ -18,5 +18,50 @@ body { margin: 0; background: #101113; }
 .example-settings { padding: 24px 16px; }
 .example-settings > .darl-button { margin-bottom: 20px; }
 .example-error { margin: 16px 24px; color: var(--darl-danger); overflow-wrap: anywhere; }
+.example-guide { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+.guide-header { display: grid; gap: 28px; padding: 12px 0 42px; border-bottom: 1px solid var(--darl-border); }
+.guide-back { justify-self: start; }
+.guide-header h1 { margin: 10px 0 8px; font-size: clamp(28px, 4vw, 48px); line-height: 1.15; letter-spacing: -.04em; font-weight: 600; }
+.guide-header p, .guide-lead { max-width: 720px; color: var(--darl-muted); line-height: 1.8; }
+.guide-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 54px; align-items: start; padding-top: 38px; }
+.guide-nav { position: sticky; top: 24px; display: grid; gap: 4px; }
+.guide-nav button { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--darl-muted); text-align: left; cursor: pointer; font: inherit; font-size: 12px; }
+.guide-nav button:hover, .guide-nav button.is-active { border-color: var(--darl-border); background: var(--darl-surface); color: var(--darl-text); }
+.guide-content { min-width: 0; }
+.guide-section { scroll-margin-top: 24px; padding: 0 0 66px; }
+.guide-section + .guide-section { padding-top: 8px; border-top: 1px solid var(--darl-border); }
+.guide-section-kicker { color: var(--darl-muted); font-size: 10px; letter-spacing: .14em; }
+.guide-section h2 { margin: 8px 0 10px; font-size: clamp(22px, 3vw, 32px); letter-spacing: -.025em; }
+.guide-section h3 { margin: 0 0 8px; font-size: 15px; }
+.guide-section p { color: var(--darl-muted); line-height: 1.75; }
+.guide-section code { padding: 1px 4px; border-radius: 4px; background: var(--darl-surface); color: var(--darl-text); font: .9em ui-monospace, SFMono-Regular, Consolas, monospace; }
+.guide-flow { display: grid; gap: 9px; margin-top: 28px; }
+.guide-flow-step { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; padding: 14px; border: 1px solid var(--darl-border); border-radius: 10px; background: var(--darl-surface); }
+.guide-flow-icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: color-mix(in srgb, var(--darl-primary) 16%, var(--darl-surface)); color: var(--darl-primary); }
+.guide-flow-icon svg { width: 17px; height: 17px; }
+.guide-flow-step strong, .guide-card strong { font-size: 13px; }
+.guide-flow-step p { margin: 4px 0 0; font-size: 12px; }
+.guide-note { display: flex; align-items: flex-start; gap: 9px; margin-top: 22px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--darl-primary) 35%, var(--darl-border)); border-radius: 9px; background: color-mix(in srgb, var(--darl-primary) 8%, var(--darl-background)); color: var(--darl-muted); font-size: 12px; line-height: 1.65; }
+.guide-note svg { flex: none; margin-top: 2px; color: var(--darl-primary); }
+.guide-note--warning { margin-top: 16px; border-color: color-mix(in srgb, #d7a74b 45%, var(--darl-border)); }
+.guide-note--warning svg { color: #d7a74b; }
+.guide-code { margin: 20px 0; overflow: hidden; border: 1px solid var(--darl-border); border-radius: 10px; background: #0c0d0f; }
+.guide-code-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 8px 11px; border-bottom: 1px solid var(--darl-border); color: var(--darl-muted); font-size: 10px; }
+.guide-code-toolbar button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 6px; border: 0; border-radius: 5px; background: transparent; color: var(--darl-muted); cursor: pointer; font: inherit; }
+.guide-code-toolbar button:hover { background: var(--darl-surface); color: var(--darl-text); }
+.guide-code pre { overflow: auto; margin: 0; padding: 14px; color: #dbe2ea; font: 11px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre; }
+.guide-grid, .guide-split, .guide-mcp-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.guide-card { padding: 15px; border: 1px solid var(--darl-border); border-radius: 10px; background: var(--darl-surface); }
+.guide-card svg { width: 17px; height: 17px; margin-bottom: 12px; color: var(--darl-primary); }
+.guide-card p { margin: 6px 0 0; font-size: 11px; }
+.guide-split { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 26px; }
+.guide-split .guide-code { margin-top: 14px; }
+.guide-mcp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 24px; }
+.guide-mcp-grid > div { padding: 18px; border: 1px solid var(--darl-border); border-radius: 10px; background: var(--darl-surface); }
+.guide-mcp-grid ol { display: grid; gap: 10px; margin: 12px 0 0; padding-left: 20px; color: var(--darl-muted); font-size: 12px; line-height: 1.65; }
+.guide-checklist { padding-bottom: 0; }
+.guide-checklist-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 20px; }
+.guide-checklist-grid span { display: inline-flex; align-items: center; gap: 8px; padding: 11px 12px; border: 1px solid var(--darl-border); border-radius: 8px; color: var(--darl-muted); font-size: 11px; }
+.guide-checklist-grid svg { color: #5fbe85; }
 @media (min-width: 750px) { .with-agent { margin-right: 450px; } .example-info { grid-template-columns: 2fr 1fr 1fr; } .example-settings { padding: 32px; } }
-@media (max-width: 749px) { .with-agent { visibility: hidden; } .chat-example .darl-agent-sidebar { width: 100%; } }
+@media (max-width: 749px) { .with-agent { visibility: hidden; } .chat-example .darl-agent-sidebar { width: 100%; } .example-guide { padding: 20px 16px 56px; } .guide-layout { display: block; padding-top: 22px; } .guide-nav { position: static; display: flex; overflow-x: auto; margin: 0 -4px 30px; padding: 0 4px 4px; } .guide-nav button { flex: none; white-space: nowrap; } .guide-section { padding-bottom: 48px; } .guide-grid, .guide-split, .guide-mcp-grid, .guide-checklist-grid { grid-template-columns: 1fr; } }

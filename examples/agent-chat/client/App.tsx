@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { AgentSidebar, DarlUIProvider, ModelSettingsCard, SettingsPage, type AgentModelConfig, type AgentSendRequest, type AgentSession, type AgentSkill, type ModelProvider } from '@darl/ui';
-import { ArrowLeft, MessageSquare, Settings2 } from 'lucide-react';
+import { ArrowLeft, BookOpen, MessageSquare, Settings2 } from 'lucide-react';
 import { lines } from '../stream';
+import { Guide } from './Guide';
 
 const storageKey = 'darl-agent-chat-v1';
 const newSession = (): AgentSession => ({ id: crypto.randomUUID(), title: '新对话', messages: [] });
@@ -35,6 +36,7 @@ export function App() {
   const [effort, setEffort] = useState<string | undefined>();
   const [open, setOpen] = useState(true);
   const [settings, setSettings] = useState(false);
+  const [guide, setGuide] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(initial.error || '');
   const [storageError, setStorageError] = useState('');
@@ -124,7 +126,8 @@ export function App() {
     localStorage.setItem(storageKey, JSON.stringify({ sessions, activeId, skills: next }));
     setSkills(next);
   };
-  const showSettings = () => { setOpen(false); setSettings(true); };
+  const showSettings = () => { setOpen(false); setGuide(false); setSettings(true); };
+  const showGuide = () => { setOpen(false); setSettings(false); setGuide(true); };
   const renameSession = (sessionId: string, title: string) => {
     setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, title, updatedAt: new Date().toLocaleString() } : session));
   };
@@ -132,9 +135,9 @@ export function App() {
 
   return <DarlUIProvider theme={{ mode: 'dark', primaryColor: '#8ba4c5' }} className="chat-example">
     <div className={`example-page ${open ? 'with-agent' : ''}`}>
-      <header className="example-header"><a href="http://localhost:5188">Darl UI <span>/ Agent Chat</span></a><div><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />设置</button><button className={buttonClass} onClick={() => { setSettings(false); setOpen((value) => !value); }}><MessageSquare size={16} />聊天</button></div></header>
+      <header className="example-header"><a href="http://localhost:5188">Darl UI <span>/ Agent Chat</span></a><div><button className={buttonClass} onClick={showGuide}><BookOpen size={16} />开发说明</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />设置</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setOpen((value) => !value); }}><MessageSquare size={16} />聊天</button></div></header>
       {(error || storageError) && <p className="example-error" role="alert">{error || storageError}</p>}
-      {settings ? <main className="example-settings"><button className={buttonClass} onClick={() => { setSettings(false); setOpen(true); }}><ArrowLeft size={15} />返回聊天</button><SettingsPage title="设置" activeSection="models" sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }]}><ModelSettingsCard providers={providers}
+      {guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : settings ? <main className="example-settings"><button className={buttonClass} onClick={() => { setSettings(false); setOpen(true); }}><ArrowLeft size={15} />返回聊天</button><SettingsPage title="设置" activeSection="models" sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }]}><ModelSettingsCard providers={providers}
         onProviderSave={async (provider, apiKey) => setProviders(await api<ModelProvider[]>('providers', { provider, apiKey }))}
         onProviderDelete={async (id) => setProviders(await api<ModelProvider[]>(`providers/${id}`, undefined, 'DELETE'))}
         onTestConnection={async (provider) => setProviders(await api<ModelProvider[]>(`providers/${provider.id}/test`, {}))}
