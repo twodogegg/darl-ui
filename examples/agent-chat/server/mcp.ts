@@ -19,7 +19,8 @@ export function conversationApplications(configs: McpApplicationConfig[], applic
   const selected = new Set(applicationIds);
   for (const message of messages) {
     if (message.role !== 'user') continue;
-    for (const match of message.content.matchAll(/\[[^\]]+\]\(app:([^\s)]+)\)/g)) {
+    const text = typeof message.content === 'string' ? message.content : message.content.filter((item) => item.type === 'text').map((item) => item.text).join('\n');
+    for (const match of text.matchAll(/\[[^\]]+\]\(app:([^\s)]+)\)/g)) {
       let id: string;
       try { id = decodeURIComponent(match[1]); } catch { continue; }
       if (configs.some((app) => app.id === id)) selected.add(id);

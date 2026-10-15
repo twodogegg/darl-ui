@@ -70,13 +70,27 @@ export interface AgentToolCall {
   status: AgentToolStatus;
 }
 
+export interface AgentAttachment {
+  name: string;
+  type?: string;
+  url?: string;
+  size?: number;
+}
+
+export interface AgentImageAttachment {
+  name: string;
+  type: string;
+  data: string;
+  size?: number;
+}
+
 export interface AgentMessage {
   id: string;
   role: AgentMessageRole;
   content: string;
   createdAt?: string;
   streaming?: boolean;
-  attachments?: string[];
+  attachments?: Array<string | AgentAttachment>;
   toolCalls?: AgentToolCall[];
 }
 
@@ -89,6 +103,7 @@ export interface AgentSession {
 
 export interface AgentSendRequest {
   files?: File[];
+  attachments?: AgentImageAttachment[];
   sessionId: string;
   content: string;
   applicationIds: string[];

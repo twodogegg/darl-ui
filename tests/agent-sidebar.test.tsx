@@ -68,6 +68,37 @@ describe('AgentSidebar', () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('查一下客户'), applicationIds: ['crm'], skillIds: ['summary'], modelId: 'model', reasoningEffort: '低' })));
   });
 
+  it('可以只发送图片并把图片编码交给宿主', async () => {
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" onSend={onSend} />);
+    fireEvent.click(screen.getByRole('button', { name: '添加材料或能力' }));
+    fireEvent.click(screen.getByRole('button', { name: /上传图片/ }));
+    const image = new File(['image-bytes'], '参考图.png', { type: 'image/png' });
+    fireEvent.change(screen.getByLabelText('选择上传文件'), { target: { files: [image] } });
+    expect(screen.getByText('参考图.png')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ content: '', files: [image], attachments: [expect.objectContaining({ name: '参考图.png', type: 'image/png', data: expect.stringMatching(/^data:image\/png;base64,/) })] })));
+  });
+
+  it('渲染 Agent 返回的图片附件', () => {
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[{ id: 'image', title: '图片', messages: [{ id: 'answer', role: 'assistant', content: '看这里。', attachments: [{ name: '结果.png', type: 'image/png', url: 'data:image/png;base64,aGVsbG8=' }] }] }]} activeSessionId="image" />);
+    expect(screen.getByRole('img', { name: '结果.png' })).toBeInTheDocument();
+  });
+
+  it('Markdown 正文图片套用统一容器，可点击打开原图', () => {
+    const open = vi.fn();
+    vi.stubGlobal('open', open);
+    const content = '![预览](https://example.com/a.png)\n\n![人物](data:image/png;base64,aGVsbG8=)';
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[{ id: 'md-img', title: '图片', messages: [{ id: 'answer', role: 'assistant', content }] }]} activeSessionId="md-img" />);
+    const preview = screen.getByRole('img', { name: '预览' });
+    expect(preview).toHaveAttribute('src', 'https://example.com/a.png');
+    expect(preview).toHaveAttribute('loading', 'lazy');
+    expect(preview.closest('.darl-agent-markdown-image')).toBeInTheDocument();
+    fireEvent.click(preview.closest('button')!);
+    expect(open).toHaveBeenCalledWith('https://example.com/a.png', '_blank', 'noopener');
+    vi.unstubAllGlobals();
+  });
+
   it('整条消息复制原始 Markdown，代码块单独复制代码', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });

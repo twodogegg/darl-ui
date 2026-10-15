@@ -5,7 +5,9 @@ import { stream as streamCompletions } from '@earendil-works/pi-ai/api/openai-co
 import { stream as streamResponses } from '@earendil-works/pi-ai/api/openai-responses';
 
 export interface StoredProvider extends ModelProvider { apiKey: string }
-export interface ChatMessage { role: 'user' | 'assistant'; content: string }
+export interface ChatImage { type: 'image'; name: string; mimeType: string; data: string; size?: number }
+export type ChatContent = string | Array<{ type: 'text'; text: string } | ChatImage>;
+export interface ChatMessage { role: 'user' | 'assistant'; content: ChatContent }
 
 export function validateProvider(value: ModelProvider): ModelProvider {
   if (!value || !/^[a-zA-Z0-9_-]{1,80}$/.test(value.id) || !value.name?.trim()) throw new Error('提供方 ID 仅支持字母、数字、下划线和短横线');
@@ -30,7 +32,11 @@ export function publicProvider({ apiKey, ...provider }: StoredProvider): ModelPr
 export function safeError(reason: unknown, key = '') {
   let message = reason instanceof Error ? reason.message : '请求失败';
   if (key) message = message.split(key).join('[已隐藏]');
-  return message.replace(/(?:sk|ahk)_[\w-]+|sk-[\w-]+/g, '[已隐藏]').slice(0, 400);
+  message = message.replace(/(?:sk|ahk)_[\w-]+|sk-[\w-]+/g, '[已隐藏]');
+  if (/network error|failed to fetch|fetch failed|econnreset|etimedout|enotfound|socket hang up/i.test(message)) {
+    return '无法连接模型服务，请检查 API 地址、网络或代理设置后重试';
+  }
+  return message.slice(0, 400);
 }
 
 async function upstream(provider: StoredProvider, path: string, signal: AbortSignal, body?: unknown) {
@@ -88,7 +94,7 @@ export async function* generate(provider: StoredProvider, model: AgentModelConfi
 export function piModel(provider: StoredProvider, model: AgentModelConfig): Model<'openai-completions' | 'openai-responses'> {
   return {
     id: model.id, name: model.name, api: provider.protocol, provider: provider.id, baseUrl: provider.baseUrl,
-    reasoning: Boolean(model.reasoningEfforts?.length), input: ['text'],
+    reasoning: Boolean(model.reasoningEfforts?.length), input: model.capabilities?.vision === false ? ['text'] : ['text', 'image'],
     // Metadata is unknown for user-configured models; native streams do not send token limits.
     contextWindow: model.capabilities?.contextWindow ?? 0, maxTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     compat: { supportsDeveloperRole: false, supportsStrictMode: false },
@@ -96,9 +102,10 @@ export function piModel(provider: StoredProvider, model: AgentModelConfig): Mode
 }
 
 export function piHistory(messages: ChatMessage[], model: Model<'openai-completions' | 'openai-responses'>): AgentMessage[] {
+  const textOf = (content: ChatContent) => typeof content === 'string' ? content : content.filter((item): item is { type: 'text'; text: string } => item.type === 'text').map((item) => item.text).join('\n');
   return messages.map<AgentMessage>((message) => message.role === 'user'
-    ? { role: 'user', content: message.content, timestamp: Date.now() }
-    : { role: 'assistant', content: [{ type: 'text', text: message.content }], api: model.api, provider: model.provider, model: model.id, stopReason: 'stop', timestamp: Date.now(),
+    ? { role: 'user', content: typeof message.content === 'string' ? message.content : message.content.map((item) => item.type === 'text' ? { type: 'text', text: item.text } : { type: 'image', data: item.data, mimeType: item.mimeType }), timestamp: Date.now() }
+    : { role: 'assistant', content: [{ type: 'text', text: textOf(message.content) }], api: model.api, provider: model.provider, model: model.id, stopReason: 'stop', timestamp: Date.now(),
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
 }
 

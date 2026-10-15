@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { AgentSidebar, AgentSettingsCard, DarlUIProvider, ModelSettingsCard, SettingsPage, type AgentApplication, type AgentToolCall, type AgentModelConfig, type AgentSendRequest, type AgentSession, type AgentSkill, type ModelProvider } from '@darl/ui';
+import { AgentSidebar, AgentSettingsCard, DarlUIProvider, ModelSettingsCard, SettingsPage, type AgentApplication, type AgentAttachment, type AgentToolCall, type AgentModelConfig, type AgentSendRequest, type AgentSession, type AgentSkill, type ModelProvider } from '@darl/ui';
 import { ArrowLeft, BookOpen, Bot, MessageSquare, Settings2, Wrench } from 'lucide-react';
 import { lines } from '../stream';
 import { Guide } from './Guide';
 
 const storageKey = 'darl-agent-chat-v1';
-const persistedSessions = (sessions: AgentSession[]) => sessions.map((session) => ({ ...session, messages: session.messages.map((message) => ({ ...message, toolCalls: message.toolCalls?.map(({ output: _output, ...call }) => call) })) }));
+const persistedSessions = (sessions: AgentSession[]) => sessions.map((session) => ({ ...session, messages: session.messages.map((message) => ({ ...message, attachments: message.attachments?.map((attachment) => typeof attachment === 'string' ? attachment : { ...attachment, url: attachment.url?.startsWith('data:') ? undefined : attachment.url }), toolCalls: message.toolCalls?.map(({ output: _output, ...call }) => call) })) }));
 const newSession = (): AgentSession => ({ id: crypto.randomUUID(), title: '新对话', messages: [] });
 function restore(): { sessions: AgentSession[]; activeId: string; skills: AgentSkill[]; error?: string } {
   let error: string | undefined;
@@ -21,8 +21,10 @@ function restore(): { sessions: AgentSession[]; activeId: string; skills: AgentS
   return { sessions: [session], activeId: session.id, skills: [], error };
 }
 async function api<T>(path: string, body?: unknown, method = body ? 'POST' : 'GET'): Promise<T> {
-  const response = await fetch(`/api/${path}`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, ...(body ? { body: JSON.stringify(body) } : {}) });
-  const data = await response.json();
+  let response: Response;
+  try { response = await fetch(`/api/${path}`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, ...(body ? { body: JSON.stringify(body) } : {}) }); }
+  catch { throw new Error('无法连接 Agent 服务，请确认本地 5197 服务已启动'); }
+  const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `请求失败：HTTP ${response.status}`);
   return data;
 }
@@ -88,12 +90,12 @@ export function App() {
   };
   const run = async (request: AgentSendRequest, previous?: AgentSession['messages']) => {
     if (running.current) throw new Error('请先停止当前生成');
-    if (request.files?.length) throw new Error('本示例暂只支持文本，附件尚未接入模型');
     const selected = models.find((model) => model.id === request.modelId);
     if (!selected) throw new Error('请先在模型设置中配置并启用文本模型');
     const source = sessions.find((session) => session.id === request.sessionId);
     if (!source) throw new Error('会话不存在');
-    const user = { id: crypto.randomUUID(), role: 'user' as const, content: request.content };
+    const userAttachments: AgentAttachment[] | undefined = request.attachments?.map((attachment) => ({ name: attachment.name, type: attachment.type, size: attachment.size, url: attachment.data }));
+    const user = { id: crypto.randomUUID(), role: 'user' as const, content: request.content, ...(userAttachments?.length ? { attachments: userAttachments } : {}) };
     const history = previous ?? [...source.messages, user];
     const answer = { id: crypto.randomUUID(), role: 'assistant' as const, content: '', streaming: true };
     const controller = new AbortController();
@@ -108,11 +110,24 @@ export function App() {
     try {
       const usedSkills = skills.filter((skill) => skill.enabled !== false && (request.skillIds.includes(skill.id) || history.some((message) => message.role === 'user' && message.content.includes(`(skill:${encodeURIComponent(skill.id)})`))));
       if (usedSkills.some((skill) => !skill.instructions?.trim())) throw new Error('选中的 Skill 没有指令，请先编辑');
-      const response = await fetch('/api/chat', {
-        method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ applicationIds: request.applicationIds, providerId: selected.providerId, modelId: decodeURIComponent(selected.id.slice(selected.id.indexOf('/') + 1)), effort: request.reasoningEffort, messages: history.filter((message) => message.content).map(({ role, content }) => ({ role, content })), skills: usedSkills.map(({ name, instructions }) => ({ name, instructions })) }),
+      const apiMessages = history.filter((message) => message.content || message.attachments?.length).map(({ role, content, attachments }) => {
+        const images = (attachments || []).flatMap((attachment) => {
+          if (typeof attachment === 'string' || !attachment.url?.startsWith('data:image/')) return [];
+          return [{ type: 'image' as const, name: attachment.name, mimeType: attachment.type || 'image/png', data: attachment.url, size: attachment.size }];
+        });
+        return { role, content: images.length ? [{ type: 'text' as const, text: content }, ...images] : content };
       });
-      if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
+      let response: Response;
+      try {
+        response = await fetch('/api/chat', {
+          method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ applicationIds: request.applicationIds, providerId: selected.providerId, modelId: decodeURIComponent(selected.id.slice(selected.id.indexOf('/') + 1)), effort: request.reasoningEffort, messages: apiMessages, skills: usedSkills.map(({ name, instructions }) => ({ name, instructions })) }),
+        });
+      } catch (reason) {
+        if (controller.signal.aborted) throw reason;
+        throw new Error('无法连接 Agent 服务，请确认本地 5197 服务已启动');
+      }
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `请求失败：HTTP ${response.status}`);
       if (!response.body) throw new Error('响应为空');
       // Resolve on connection so AgentSidebar clears the sent draft while output streams.
       void (async () => {
@@ -125,6 +140,9 @@ export function App() {
             if (event.type === 'tool') {
               const call = event.call as AgentToolCall;
               setSessions((current) => current.map((session) => session.id === source.id ? { ...session, messages: session.messages.map((message) => message.id === answer.id ? { ...message, toolCalls: [...(message.toolCalls || []).filter((item) => item.id !== call.id), call] } : message) } : session));
+            }
+            if (event.type === 'image' && event.image) {
+              setSessions((current) => current.map((session) => session.id === source.id ? { ...session, messages: session.messages.map((message) => message.id === answer.id ? { ...message, attachments: [...(message.attachments || []), event.image] } : message) } : session));
             }
             if (event.type === 'text') patchMessage(source.id, answer.id, (value) => value + event.text, true);
             if (event.type === 'done') done = true;
@@ -150,7 +168,11 @@ export function App() {
     const history = session.messages.slice(0, index);
     const user = history.at(-1);
     if (user?.role !== 'user') return;
-    void run({ sessionId: session.id, content: user.content, skillIds: [], applicationIds: [...user.content.matchAll(/\]\(app:([^)]*)\)/g)].flatMap((match) => { try { return [decodeURIComponent(match[1])]; } catch { return []; } }), modelId: availableModelId, reasoningEffort: models.find((model) => model.id === availableModelId)?.reasoningEfforts?.includes(effort || '') ? effort : undefined }, history).catch((reason) => setError(reason.message));
+      const imageAttachments = (user.attachments || []).flatMap((attachment) => {
+        if (typeof attachment === 'string' || !attachment.url?.startsWith('data:image/')) return [];
+        return [{ name: attachment.name, type: attachment.type || 'image/png', data: attachment.url, size: attachment.size }];
+      });
+      void run({ sessionId: session.id, content: user.content, skillIds: [], applicationIds: [...user.content.matchAll(/\]\(app:([^)]*)\)/g)].flatMap((match) => { try { return [decodeURIComponent(match[1])]; } catch { return []; } }), modelId: availableModelId, reasoningEffort: models.find((model) => model.id === availableModelId)?.reasoningEfforts?.includes(effort || '') ? effort : undefined, attachments: imageAttachments }, history).catch((reason) => setError(reason.message));
   };
   const saveSkill = async (skill: AgentSkill) => {
     const next = [...skills.filter((item) => item.id !== skill.id), skill];
@@ -174,7 +196,7 @@ export function App() {
         onProviderDelete={async (id) => setProviders(await api<ModelProvider[]>(`providers/${id}`, undefined, 'DELETE'))}
         onTestConnection={async (provider) => setProviders(await api<ModelProvider[]>(`providers/${provider.id}/test`, {}))}
         onFetchModels={(provider) => api<AgentModelConfig[]>(`providers/${provider.id}/models`, {})}
-      />}</SettingsPage></main> : <main className="example-home"><span className="example-eyebrow">AGENT CHAT EXAMPLE</span><h1>让网站助手<br />真正开始工作。</h1><p>使用现有聊天 UI，连接真实模型。对话、历史和 Skills 保存在当前浏览器。</p><div className="example-actions"><button className="darl-button darl-button--default darl-button-size--default" onClick={() => setOpen(true)}><MessageSquare size={16} />打开助手</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />模型设置</button></div><div className="example-info"><div><span>模型</span><strong>{models.find((model) => model.id === availableModelId)?.name || '尚未配置'}</strong></div><div><span>会话</span><strong>{sessions.length}</strong></div><div><span>Skills</span><strong>{skills.length}</strong></div></div><small>支持文本对话与 MCP 工具调用。用 @ 引用一次即可在本对话持续使用；写入或未知工具执行前需要确认。Skill 指令会发送给模型，附带脚本不会在本机执行。附件和多媒体生成尚未接入。</small></main>}
+      />}</SettingsPage></main> : <main className="example-home"><span className="example-eyebrow">AGENT CHAT EXAMPLE</span><h1>让网站助手<br />真正开始工作。</h1><p>使用现有聊天 UI，连接真实模型。对话、历史和 Skills 保存在当前浏览器。</p><div className="example-actions"><button className="darl-button darl-button--default darl-button-size--default" onClick={() => setOpen(true)}><MessageSquare size={16} />打开助手</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />模型设置</button></div><div className="example-info"><div><span>模型</span><strong>{models.find((model) => model.id === availableModelId)?.name || '尚未配置'}</strong></div><div><span>会话</span><strong>{sessions.length}</strong></div><div><span>Skills</span><strong>{skills.length}</strong></div></div><small>支持文本和图片消息与 MCP 工具调用。用 @ 引用一次即可在本对话持续使用；写入或未知工具执行前需要确认。Skill 指令会发送给模型，图片由支持视觉输入的模型处理。</small></main>}
     </div>
     <AgentSidebar open={open} onOpenChange={setOpen} sessions={sessions} activeSessionId={activeId} onSessionChange={setActiveId} onSessionRename={renameSession}
       onNewSession={() => { const session = newSession(); setSessions((current) => [session, ...current]); setActiveId(session.id); }}

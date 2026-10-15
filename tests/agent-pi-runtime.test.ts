@@ -19,6 +19,13 @@ describe('Pi runtime integration boundary', () => {
     expect(history[1]).toMatchObject({ content: [{ type: 'text', text: '**你好**' }], api: protocol });
   });
 
+  it('preserves image content as Pi vision input', () => {
+    const mapped = piModel(provider, model);
+    const history = piHistory([{ role: 'user', content: [{ type: 'text', text: '描述这张图' }, { type: 'image', name: '参考图.png', mimeType: 'image/png', data: 'aGVsbG8=' }] }], mapped);
+    expect(history[0]).toMatchObject({ content: [{ type: 'text', text: '描述这张图' }, { type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' }] });
+    expect(mapped.input).toContain('image');
+  });
+
   it('keeps MCP schemas intact and uses Pi validation for required and enum arguments', () => {
     const parameters = { type: 'object', properties: { scope: { type: 'string', enum: ['mine', 'discover'] } }, required: ['scope'], additionalProperties: false };
     const [tool] = piTools({ tools: [{ name: 'mcp_0_0', parameters }], execute: async () => 'unused' }, new AbortController().signal);

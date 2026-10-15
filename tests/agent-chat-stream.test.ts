@@ -38,6 +38,7 @@ describe('agent chat provider boundary', () => {
     expect(value).not.toHaveProperty('apiKey');
     expect(value.hasApiKey).toBe(true);
     expect(safeError(new Error('auth private-placeholder'), 'private-placeholder')).toBe('auth [已隐藏]');
+    expect(safeError(new Error('network error'))).toBe('无法连接模型服务，请检查 API 地址、网络或代理设置后重试');
   });
 });
 

@@ -3,14 +3,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
 import type { AgentSkill, AgentToolCall } from '../../../src/index';
 import { applicationCatalog, connectApplication, conversationApplications, loadApplications, toolRisk, ToolConfirmations } from './mcp';
-import { generate, listModels, publicProvider, safeError, validateProvider, type ChatMessage, type StoredProvider } from './models';
+import { generate, listModels, publicProvider, safeError, validateProvider, type ChatImage, type ChatMessage, type StoredProvider } from './models';
 
 async function readBody(request: IncomingMessage) {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > 1_000_000) throw new Error('请求内容超过 1MB');
+    if (size > 20_000_000) throw new Error('请求内容超过 20MB');
     chunks.push(Buffer.from(chunk));
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
@@ -124,9 +124,28 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         if (body.effort && !model.reasoningEfforts?.includes(body.effort)) throw new Error('模型不支持此推理强度');
         if (!Array.isArray(body.messages) || !body.messages.length || body.messages.length > 200) throw new Error('对话消息数量无效');
         const messages: ChatMessage[] = body.messages.map((message: ChatMessage) => {
-          if (!message || !['user', 'assistant'].includes(message.role) || typeof message.content !== 'string' || message.content.length > 100_000) throw new Error('消息格式无效');
-          return { role: message.role, content: message.content };
+          if (!message || !['user', 'assistant'].includes(message.role)) throw new Error('消息格式无效');
+          if (typeof message.content === 'string') {
+            if (message.content.length > 100_000) throw new Error('消息格式无效');
+            return { role: message.role, content: message.content };
+          }
+          if (!Array.isArray(message.content) || message.content.length > 20) throw new Error('图片消息格式无效');
+          const content = message.content.map((item) => {
+            if (item?.type === 'text' && typeof item.text === 'string' && item.text.length <= 100_000) return { type: 'text' as const, text: item.text };
+            if (item?.type === 'image' && typeof item.name === 'string' && typeof item.mimeType === 'string' && /^image\/(png|jpe?g|webp|gif)$/i.test(item.mimeType) && typeof item.data === 'string' && item.data.startsWith('data:')) {
+              const [, encoded = ''] = item.data.split(',', 2);
+              const data = encoded.replace(/\s/g, '');
+              if (!data || data.length > 12_000_000) throw new Error('图片附件过大，请压缩后重试');
+              return { type: 'image' as const, name: item.name.slice(0, 200), mimeType: item.mimeType, data, size: item.size } satisfies ChatImage;
+            }
+            throw new Error('图片消息格式无效');
+          });
+          if (!content.some((item) => item.type === 'image')) throw new Error('图片消息不能为空');
+          return { role: message.role, content };
         });
+        if (messages.some((message) => Array.isArray(message.content) && message.content.some((item) => item.type === 'image')) && model.capabilities?.vision === false) {
+          throw new Error('当前模型未启用视觉输入，请在模型设置中开启 vision 或选择支持图片的模型');
+        }
         if (!Array.isArray(body.skills) || body.skills.length > 30) throw new Error('Skills 格式无效');
         const instructions = [await loadPrompt(), ...body.skills.map((skill: AgentSkill) => {
           if (typeof skill?.name !== 'string' || typeof skill.instructions !== 'string' || skill.instructions.length > 100_000) throw new Error('Skill 指令格式无效');
@@ -141,6 +160,15 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         if (functions.length > 128) throw new Error('所选应用合计超过 128 个工具，请减少应用数量');
         const emitTool = (call: AgentToolCall) => {
           if (!signal.aborted) response.write(`${JSON.stringify({ type: 'tool', call: { ...call, input: call.status === 'confirmation' ? call.input : undefined } })}\n`);
+        };
+        const emitImages = (value: unknown) => {
+          if (!Array.isArray(value)) return;
+          value.forEach((item, index) => {
+            if (!item || typeof item !== 'object' || (item as { type?: unknown }).type !== 'image') return;
+            const image = item as { data?: unknown; mimeType?: unknown };
+            if (typeof image.data !== 'string' || image.data.length > 12_000_000 || typeof image.mimeType !== 'string' || !/^image\/(png|jpe?g|webp|gif)$/i.test(image.mimeType)) return;
+            response.write(`${JSON.stringify({ type: 'image', image: { name: `工具图片-${index + 1}`, type: image.mimeType, url: `data:${image.mimeType};base64,${image.data}` } })}\n`);
+          });
         };
         const execution = functions.length ? {
           tools: functions.map(({ name, connection, tool }) => ({ name, description: `${connection.app.name} / ${tool.title || tool.name} (${tool.name}): ${tool.description || ''}`, parameters: tool.inputSchema })),
@@ -170,6 +198,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
                 const details = result.content.flatMap((block) => block && typeof block === 'object' && 'text' in block && typeof block.text === 'string' ? [block.text] : []);
                 call.error = safeError(new Error(details[0] || 'MCP 工具调用失败'), connection.app.apiKey);
               }
+              emitImages(result.content);
               emitTool(call);
               return JSON.stringify(result);
             } catch (error) {
