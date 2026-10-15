@@ -27,7 +27,7 @@ export function DemoLayout({ selected, onNavigate, mode, onModeChange, children 
   const navigation = <nav aria-label="组件导航" className="demo-navigation">
     <p className="demo-nav-caption">开始使用</p>
     {pages.map((page, index) => <div key={page.id}>
-      {index === 2 && <p className="demo-nav-caption mt-6">组件 <Badge variant="secondary">6</Badge></p>}
+      {index === 2 && <p className="demo-nav-caption mt-6">组件 <Badge variant="secondary">7</Badge></p>}
       <Button variant={selected === page.id ? 'secondary' : 'ghost'} className="w-full justify-start" aria-current={selected === page.id ? 'page' : undefined} onClick={() => navigate(page.id)}>
         <page.icon data-icon="inline-start" />{page.label}
       </Button>
