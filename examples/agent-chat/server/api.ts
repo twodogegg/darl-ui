@@ -105,7 +105,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           const model = provider.models.find((item) => item.enabled !== false && item.type === 'text');
           if (!model) throw new Error('请先保存至少一个已启用的文本模型');
           try {
-            for await (const _delta of generate(provider, model, [{ role: 'user', content: 'Reply only OK.' }], await loadPrompt(), undefined, signal)) { /* Validate the complete real stream. */ }
+            for await (const _delta of generate(provider, model, [{ role: 'user', content: '请只回复 OK。' }], await loadPrompt(), undefined, signal)) { /* Validate the complete real stream. */ }
             await update((current) => current.map((item) => item.id === provider.id ? { ...item, status: 'connected' } : item));
           } catch (error) {
             await update((current) => current.map((item) => item.id === provider.id ? { ...item, status: 'error' } : item));
@@ -130,7 +130,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         if (!Array.isArray(body.skills) || body.skills.length > 30) throw new Error('Skills 格式无效');
         const instructions = [await loadPrompt(), ...body.skills.map((skill: AgentSkill) => {
           if (typeof skill?.name !== 'string' || typeof skill.instructions !== 'string' || skill.instructions.length > 100_000) throw new Error('Skill 指令格式无效');
-          return `Skill: ${skill.name}\n${skill.instructions}`;
+          return `技能：${skill.name}\n${skill.instructions}`;
         })].join('\n\n');
         const applicationIds = body.applicationIds ?? [];
         if (!Array.isArray(applicationIds) || applicationIds.length > 20 || applicationIds.some((id: unknown) => typeof id !== 'string')) throw new Error('应用列表无效');
