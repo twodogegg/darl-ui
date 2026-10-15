@@ -60,7 +60,29 @@ export interface ToolExecution {
   execute: (call: FunctionCall) => Promise<string>;
 }
 
+/** Hold only a possible protocol prefix, so split markers never reach the UI. */
+export async function* checkedText(chunks: AsyncIterable<string>) {
+  const markers = ['<budget:token_budget', '<｜｜DSML｜｜'];
+  let prefix = '';
+  let accepted = false;
+  for await (const chunk of chunks) {
+    if (accepted) { yield chunk; continue; }
+    prefix += chunk;
+    const start = prefix.trimStart();
+    if (markers.some((marker) => start.startsWith(marker))) throw new Error('模型接口返回了内部协议标记，请重新生成；若反复出现，请检查提供方或更换模型');
+    if (markers.some((marker) => marker.startsWith(start))) continue;
+    accepted = true;
+    yield prefix;
+    prefix = '';
+  }
+  if (prefix) yield prefix;
+}
+
 export async function* generate(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution) {
+  yield* checkedText(generateRaw(provider, model, messages, instructions, effort, signal, execution));
+}
+
+async function* generateRaw(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution) {
   const reasoning = effort && ({ 低: 'low', 中: 'medium', 高: 'high' }[effort] || effort);
   const responses = provider.protocol === 'openai-responses';
   const history: unknown[] = responses ? [...messages] : [{ role: 'system', content: instructions }, ...messages];
