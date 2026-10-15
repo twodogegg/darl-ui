@@ -79,8 +79,8 @@ export async function connectApplication(app: McpApplicationConfig, signal: Abor
       if (cursor) cursors.add(cursor);
     } while (cursor);
     if (new Set(tools.map((tool) => tool.name)).size !== tools.length) throw new Error('MCP 返回重复的工具名称');
-    return { app, tools, close, call: async (name: string, args: Record<string, unknown>) => {
-      const result = await client.callTool({ name, arguments: args }, undefined, { signal, timeout: 60_000 });
+    return { app, tools, close, call: async (name: string, args: Record<string, unknown>, callSignal = signal) => {
+      const result = await client.callTool({ name, arguments: args }, undefined, { signal: AbortSignal.any([signal, callSignal]), timeout: 60_000 });
       // Strip server-only widget metadata and embedded base64 media from text-model context.
       const content = Array.isArray(result.content) ? result.content.map((block) => {
         if (block.type === 'image' || block.type === 'audio') return { type: block.type, mimeType: block.mimeType, text: '二进制媒体内容未传给文本模型' };

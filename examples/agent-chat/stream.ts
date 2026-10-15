@@ -21,14 +21,3 @@ export async function* lines(body: ReadableStream<Uint8Array>) {
     reader.releaseLock();
   }
 }
-
-export async function* events(body: ReadableStream<Uint8Array>) {
-  let data: string[] = [];
-  for await (const line of lines(body)) {
-    if (line === '') {
-      if (data.length) yield data.join('\n');
-      data = [];
-    } else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
-  }
-  if (data.length) yield data.join('\n');
-}

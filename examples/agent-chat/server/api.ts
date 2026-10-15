@@ -144,7 +144,8 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         };
         const execution = functions.length ? {
           tools: functions.map(({ name, connection, tool }) => ({ name, description: `${connection.app.name} / ${tool.title || tool.name} (${tool.name}): ${tool.description || ''}`, parameters: tool.inputSchema })),
-          execute: async (request: { name: string; arguments: string }) => {
+          execute: async (request: { name: string; arguments: string }, toolSignal = signal) => {
+            const callSignal = AbortSignal.any([signal, toolSignal]);
             const selected = functions.find((item) => item.name === request.name);
             if (!selected) throw new Error('模型请求了未授权的工具');
             const { connection, tool } = selected;
@@ -155,15 +156,15 @@ export function createApi(directory: string, env: Record<string, string>, prompt
               call.input = args;
               if (toolRisk(connection.app, tool) !== 'read') {
                 call.status = 'confirmation';
-                const decision = confirmations.wait(call.id, signal);
+                const decision = confirmations.wait(call.id, callSignal);
                 emitTool(call);
                 if (!await decision) throw new Error('用户拒绝了本次工具调用，不要再次尝试相同操作');
               }
-              signal.throwIfAborted();
+              callSignal.throwIfAborted();
               call.status = 'running';
               emitTool(call);
-              const result = await connection.call(tool.name, args);
-              signal.throwIfAborted();
+              const result = await connection.call(tool.name, args, callSignal);
+              callSignal.throwIfAborted();
               call.status = result.isError ? 'error' : 'success';
               if (result.isError) {
                 const details = result.content.flatMap((block) => block && typeof block === 'object' && 'text' in block && typeof block.text === 'string' ? [block.text] : []);
@@ -175,7 +176,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
               call.status = 'error';
               call.error = safeError(error, connection.app.apiKey);
               emitTool(call);
-              if (signal.aborted) throw error;
+              if (callSignal.aborted) throw error;
               return JSON.stringify({ isError: true, error: call.error });
             }
           },

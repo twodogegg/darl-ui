@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { events, lines } from '../examples/agent-chat/stream';
+import { lines } from '../examples/agent-chat/stream';
 import { checkedText, publicProvider, safeError, validateProvider } from '../examples/agent-chat/server/models';
 
 function stream(text: string, size: number) {
@@ -13,18 +13,16 @@ function stream(text: string, size: number) {
 async function collect<T>(generator: AsyncGenerator<T>) { const result: T[] = []; for await (const item of generator) result.push(item); return result; }
 
 describe('agent chat network framing', () => {
-  it('preserves Chinese UTF-8 text and CRLF event boundaries across one-byte chunks', async () => {
-    const body = ': keepalive\r\nevent: response.output_text.delta\r\ndata: {"text":"松柏"}\r\n\r\ndata: [DONE]\r\n\r\n';
-    expect(await collect(events(stream(body, 1)))).toEqual(['{"text":"松柏"}', '[DONE]']);
+  it('preserves Chinese UTF-8 text and CRLF line boundaries across one-byte chunks', async () => {
+    expect(await collect(lines(stream('{"text":"松柏"}\r\n{"type":"done"}\r\n', 1)))).toEqual(['{"text":"松柏"}', '{"type":"done"}']);
   });
-  it('handles multiline SSE data and a final frame without a trailing newline', async () => {
-    expect(await collect(events(stream('data: first\ndata: second\n\ndata: end', 3)))).toEqual(['first\nsecond', 'end']);
+  it('handles a final line without a trailing newline', async () => {
     expect(await collect(lines(stream('{"text":"中文"}\n{"type":"done"}', 2)))).toEqual(['{"text":"中文"}', '{"type":"done"}']);
   });
   it('cancels the network reader when the consumer stops', async () => {
     let cancelled = false;
-    const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode('data: a\n\n')); }, cancel() { cancelled = true; } });
-    for await (const _event of events(body)) break;
+    const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode('{"text":"a"}\n')); }, cancel() { cancelled = true; } });
+    for await (const _line of lines(body)) break;
     expect(cancelled).toBe(true);
   });
 });
