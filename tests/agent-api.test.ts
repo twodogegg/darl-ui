@@ -105,4 +105,23 @@ describe('Agent configuration API', () => {
       });
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
+
+  it('persists model configuration separately from provider credentials', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'darl-model-config-'));
+    const promptFile = join(directory, 'system.md');
+    await writeFile(promptFile, '默认提示词');
+    try {
+      await withApi(directory, promptFile, async (request) => {
+        const initial = await request('model-config');
+        expect(initial.status).toBe(200);
+        const configuration = await initial.json() as { models: Array<{ id: string }>; version: number };
+        configuration.models.push({ id: 'test' });
+        const invalid = await request('model-config', { configuration });
+        expect(invalid.status).toBe(400);
+        const valid = await request('model-config', { configuration: await (await request('model-config')).json() });
+        expect(valid.status).toBe(200);
+        expect(await readFile(join(directory, 'model-config.json'), 'utf8')).not.toContain('apiKey');
+      });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
 });

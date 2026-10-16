@@ -14,9 +14,12 @@ export type { AgentSidebarProps, AgentApplication, AgentAttachment, AgentErrorIn
 export { SettingsPage } from './components/settings/SettingsPage';
 export { AgentsSettingsCard } from './components/settings/AgentsSettingsCard';
 export { ModelSettingsCard } from './components/settings/ModelSettingsCard';
+export { ModelManagementCard } from './components/settings/ModelManagementCard';
 export { AgentSettingsCard } from './components/settings/AgentSettingsCard';
 export type { AgentSettingsCardProps } from './components/settings/types';
-export type { AgentChildContextMode, AgentConfig, AgentContextPolicy, AgentHistoryMode, AgentsSettingsCardProps, AgentModelCapabilities, AgentModelConfig, AgentModelType, AgentToolResultMode, ModelProvider, ModelProviderProtocol, ModelProviderStatus, ModelSettingsCardProps, SettingsPageProps, SettingsSection } from './components/settings/types';
+export type { AgentChildContextMode, AgentConfig, AgentContextPolicy, AgentHistoryMode, AgentsSettingsCardProps, AgentModelCapabilities, AgentModelConfig, AgentModelType, AgentToolResultMode, ModelProvider, ModelProviderProtocol, ModelProviderStatus, ModelSettingsCardProps, ModelManagementCardProps, SettingsPageProps, SettingsSection } from './components/settings/types';
+export { BUILTIN_MODELS, BUILTIN_PROTOCOLS, BUILTIN_TEMPLATES, defaultModelConfiguration, effectiveCapabilities, enabledBindings, mediaCapabilities, resolveCapabilities, toAgentModels, toMediaModels, validateModelConfiguration } from './components/settings/model-config';
+export type { AudioCapabilities, CapabilityOverride, CapabilityTemplate, CapabilityTemplateType, CapabilityValues, FirstLastFrameSupport, ImageCapabilities, LogicalModel, ModelBinding, ModelConfiguration, ModelConfigurationError, ProtocolAdapterDefinition, TextCapabilities, VideoCapabilities, VideoGenerationMode } from './components/settings/model-config';
 export { StyleSelector } from './components/style-selector/StyleSelector';
 export type { StyleCollection, StyleOption, StyleCreateRequest, StyleFilter, StyleLoadMoreRequest, StyleSelectorProps } from './components/style-selector/StyleSelector';
 

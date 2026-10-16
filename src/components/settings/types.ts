@@ -12,6 +12,19 @@ export interface AgentModelCapabilities {
   audioInput?: boolean;
   audioOutput?: boolean;
   contextWindow?: number;
+  /** Host supplied media capabilities shared with MediaWorkspace. */
+  aspectRatios?: string[];
+  resolutions?: string[];
+  durations?: number[] | { min: number; max: number };
+  maxOutputs?: number;
+  referenceImages?: number;
+  referenceVideos?: number;
+  referenceAudios?: number;
+  generationModes?: string[];
+  firstLastFrame?: boolean;
+  referenceEdit?: boolean;
+  textToImage?: boolean;
+  qualities?: string[];
 }
 
 export interface ModelProvider {
@@ -98,6 +111,33 @@ export interface ModelSettingsCardProps {
   onTestConnection?: (provider: ModelProvider) => void | Promise<void>;
   onFetchModels?: (provider: ModelProvider) => void | Promise<AgentModelConfig[]>;
 }
+
+export interface ModelManagementCardProps {
+  configuration: import('./model-config').ModelConfiguration;
+  providers?: ModelProvider[];
+  onSave?: (configuration: import('./model-config').ModelConfiguration) => void | Promise<void>;
+  onProviderSave?: (provider: ModelProvider, apiKey?: string) => void | Promise<void>;
+  onProviderDelete?: (providerId: string) => void | Promise<void>;
+  onTestConnection?: (provider: ModelProvider) => void | Promise<void>;
+}
+
+export type {
+  AudioCapabilities,
+  CapabilityOverride,
+  CapabilityTemplate,
+  CapabilityTemplateType,
+  CapabilityValues,
+  FirstLastFrameSupport,
+  ImageCapabilities,
+  LogicalModel,
+  ModelBinding,
+  ModelConfiguration,
+  ModelConfigurationError,
+  ProtocolAdapterDefinition,
+  TextCapabilities,
+  VideoCapabilities,
+  VideoGenerationMode,
+} from './model-config';
 
 export interface AgentSettingsCardProps {
   systemPrompt: string;

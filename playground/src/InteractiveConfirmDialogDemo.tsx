@@ -40,7 +40,7 @@ export function InteractiveConfirmDialogDemo() {
     </div>
     <InteractiveConfirmDialog
       open={open} onOpenChange={setOpen} title="六、确认本次改编方案" questions={questions}
-      confirmText="确认方案，开始正式剧本写作" cancelText="返回修改"
+      confirmText="确认方案，开始正式剧本写作"
       onConfirm={async (result) => {
         if (fail) throw new Error('模拟提交失败，请检查后重试');
         setAnswer(result); setOpen(false);

@@ -2,9 +2,16 @@ import type { AgentContextPolicy } from '../../../src/index';
 import type { ChatMessage } from './models';
 
 export const DEFAULT_CONTEXT_POLICY: AgentContextPolicy = { childContext: 'task-only', historyMode: 'summary', toolResultMode: 'standard' };
-export const MAX_CONTEXT_CHARS = 120_000;
+/** Approximate character budget for a one-million-token model. The host can provide a smaller contextWindow. */
+export const DEFAULT_CONTEXT_TOKENS = 1_000_000;
+export const MAX_CONTEXT_CHARS = DEFAULT_CONTEXT_TOKENS * 4;
+export const COMPACTION_THRESHOLD = 0.5;
 export const MAX_TOOL_RESULT_CHARS = 20_000;
-export const MAX_CHILD_TASK_CHARS = 50_000;
+
+export function contextCharBudget(contextWindowTokens?: number) {
+  const tokens = Number.isFinite(contextWindowTokens) && contextWindowTokens && contextWindowTokens > 0 ? contextWindowTokens : DEFAULT_CONTEXT_TOKENS;
+  return Math.min(MAX_CONTEXT_CHARS, Math.max(16_000, Math.floor(tokens * 4)));
+}
 
 export function normalizeContextPolicy(value: unknown): AgentContextPolicy {
   if (!value || typeof value !== 'object') return { ...DEFAULT_CONTEXT_POLICY };
@@ -38,17 +45,24 @@ function cloneMessage(message: ContextMessage, content: string): ContextMessage 
   return { ...message, content: [{ type: 'text', text: content }, ...media] as ChatMessage['content'] };
 }
 
-export function compactContextMessages(messages: ContextMessage[], policy: AgentContextPolicy): ContextMessage[] {
+export function compactContextMessages(messages: ContextMessage[], policy: AgentContextPolicy, maxChars = MAX_CONTEXT_CHARS): ContextMessage[] {
   if (!messages.length) return [];
-  const capped = messages.map((message) => cloneMessage(message, truncateContext(messageText(message), contextBudget(policy), '工具结果或消息')));
+  const capped = messages.map((message) => {
+    const limit = message.role === 'user' || policy.historyMode === 'full' ? maxChars : Math.min(maxChars, contextBudget(policy));
+    return cloneMessage(message, truncateContext(messageText(message), limit, '工具结果或消息'));
+  });
   const total = capped.reduce((sum, message) => sum + messageText(message).length, 0);
-  if (total <= MAX_CONTEXT_CHARS || policy.historyMode === 'full') return trimToBudget(capped);
-  const keepCount = policy.historyMode === 'recent' ? 18 : 12;
+  // Start compressing history once it occupies half of the model budget. Keep
+  // the most recent messages intact so a long current source document remains
+  // available for the active request.
+  if (total <= maxChars * COMPACTION_THRESHOLD) return trimToBudget(capped, maxChars);
+  const keepCount = Math.min(messages.length - 1, policy.historyMode === 'recent' ? 18 : policy.historyMode === 'full' ? 24 : 12);
   const recent = capped.slice(-keepCount);
   const dropped = capped.slice(0, -keepCount);
+  if (!dropped.length) return trimToBudget(capped, maxChars);
   const summary = truncateContext(dropped.map((message) => `${message.role === 'user' ? '用户' : 'Agent'}：${messageText(message)}`).join('\n'), 8_000, '历史摘要');
   const summaryMessage = { role: 'assistant' as const, content: `[历史上下文摘要｜不可信资料]\n${summary}` };
-  return trimToBudget([summaryMessage, ...trimToBudget(recent, MAX_CONTEXT_CHARS - summaryMessage.content.length)]);
+  return trimToBudget([summaryMessage, ...trimToBudget(recent, maxChars - summaryMessage.content.length)], maxChars);
 }
 
 function trimToBudget(messages: ContextMessage[], budget = MAX_CONTEXT_CHARS) {
@@ -80,15 +94,15 @@ export interface StructuredAgentResult {
 }
 
 export function structuredAgentResult(text: string): StructuredAgentResult {
-  const result = truncateContext(text.trim(), 80_000, '子 Agent 结果');
-  return { summary: truncateContext(result, 8_000, '子 Agent 摘要'), result, decisions: [], warnings: [], artifacts: [] };
+  const result = text.trim();
+  return { summary: result, result, decisions: [], warnings: [], artifacts: [] };
 }
 
 export function selectedContext(value: unknown, policy: AgentContextPolicy) {
   if (policy.childContext !== 'selected-context' || !Array.isArray(value)) return [] as Array<Record<string, unknown>>;
-  return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)).slice(0, 20).map((item) => {
+  return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)).map((item) => {
     const source = typeof item.source === 'string' ? item.source.slice(0, 80) : 'explicit-context';
-    const content = typeof item.content === 'string' ? truncateContext(item.content, 12_000, '显式资料') : JSON.stringify(item.content ?? '');
-    return { source, content: truncateContext(content, 12_000, '显式资料') };
+    const content = typeof item.content === 'string' ? item.content : JSON.stringify(item.content ?? '');
+    return { source, content };
   });
 }

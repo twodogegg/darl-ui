@@ -55,6 +55,9 @@ describe('structured Agent errors', () => {
     const error = createAgentError('mcp-connection', failure('mcp-connection', 'MCP_CONNECTION_FAILED', 'Asset Hub API 404: asset 不存在或无权访问', false), { requestId: 'req-404' });
     expect(error).toMatchObject({ message: 'Asset Hub API 404: asset 不存在或无权访问', retryable: false });
   });
+  it('exposes safe validation details instead of collapsing every request into a generic error', () => {
+    expect(createAgentError('validation', new Error('消息格式无效'), { requestId: 'req-validation' })).toMatchObject({ code: 'VALIDATION_FAILED', message: '消息格式无效', retryable: false });
+  });
 
   it('distinguishes cancellation and timeout from model failures', () => {
     expect(createAgentError('model', Object.assign(new Error('aborted'), { name: 'AbortError' }), { requestId: 'req-2' })).toMatchObject({ code: 'REQUEST_CANCELLED', stage: 'cancellation', retryable: false });

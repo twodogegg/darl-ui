@@ -44,10 +44,13 @@ export function createAgentError(stage: AgentErrorStage, reason: unknown, contex
   const custom = reason instanceof AgentFailure ? reason : undefined;
   const resolvedStage = timeout ? 'timeout' : aborted ? 'cancellation' : custom?.stage || stage;
   const code = context.code || custom?.code || (resolvedStage === 'cancellation' ? 'REQUEST_CANCELLED' : resolvedStage === 'timeout' ? 'REQUEST_TIMEOUT' : `${resolvedStage.replaceAll('-', '_').toUpperCase()}_FAILED`);
+  const safeValidationMessage = resolvedStage === 'validation' || resolvedStage === 'tool-validation'
+    ? (reason instanceof Error ? reason.message.slice(0, 400) : '')
+    : '';
   return {
     code,
     stage: resolvedStage,
-    message: context.message || custom?.message || messages[resolvedStage],
+    message: context.message || custom?.message || safeValidationMessage || messages[resolvedStage],
     ...(context.requestId ? { requestId: context.requestId } : {}),
     ...(context.runId ? { runId: context.runId } : {}),
     ...(context.parentRunId ? { parentRunId: context.parentRunId } : {}),

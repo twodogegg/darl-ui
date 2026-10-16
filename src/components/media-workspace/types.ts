@@ -8,6 +8,9 @@ export interface ImageModel {
   id: string;
   name: string;
   type: 'image';
+  logicalModelId?: string;
+  bindingId?: string;
+  upstreamModelId?: string;
   capabilities: BaseCapabilities & { images?: number };
   defaults?: BaseDefaults;
 }
@@ -15,6 +18,9 @@ export interface VideoModel {
   id: string;
   name: string;
   type: 'video';
+  logicalModelId?: string;
+  bindingId?: string;
+  upstreamModelId?: string;
   capabilities: BaseCapabilities & {
     images?: number;
     videos?: number;

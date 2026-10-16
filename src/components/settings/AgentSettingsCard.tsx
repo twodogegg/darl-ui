@@ -15,7 +15,7 @@ export function AgentSettingsCard({ systemPrompt, onSave }: AgentSettingsCardPro
   const save = async () => {
     if (saving) return;
     setError(''); setNotice('');
-    if (!draft.trim() || draft.length > 100_000) { setError('系统提示词不能为空，且不能超过 100000 个字符'); return; }
+    if (!draft.trim()) { setError('系统提示词不能为空'); return; }
     setSaving(true);
     try { await onSave(draft); setSaved(draft); setNotice('已保存，下次发送消息时生效。'); }
     catch (reason) { setError(reason instanceof Error ? reason.message : '保存失败，请重试'); }
@@ -26,7 +26,7 @@ export function AgentSettingsCard({ systemPrompt, onSave }: AgentSettingsCardPro
     <header className="darl-settings-card-header"><div><h2>Agent</h2><p>设置助手的回答方式与工具使用规则。</p></div></header>
     <div className="darl-agent-settings-body">
       <label htmlFor={inputId}>系统提示词</label>
-      <textarea id={inputId} value={draft} disabled={saving} maxLength={100_000} spellCheck={false} onChange={(event) => { setDraft(event.target.value); setNotice(''); setError(''); }} />
+      <textarea id={inputId} value={draft} disabled={saving} spellCheck={false} onChange={(event) => { setDraft(event.target.value); setNotice(''); setError(''); }} />
       <div className="darl-agent-settings-actions"><Button disabled={saving || draft === saved} onClick={() => void save()}>{saving ? '正在保存…' : '保存提示词'}</Button><span role="status">{notice}</span></div>
       {error && <p role="alert" className="darl-agent-settings-error">{error}</p>}
     </div>

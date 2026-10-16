@@ -46,7 +46,7 @@ function startingAnswers(questions: ConfirmQuestion[]): ConfirmAnswers {
 
 export function InteractiveConfirmDialog({
   open, onOpenChange, title, description, questions, confirmText = '确认', cancelText = '取消',
-  showCancel = true, onConfirm, onCancel, accentColor, className = '',
+  showCancel = false, onConfirm, onCancel, accentColor, className = '',
 }: InteractiveConfirmDialogProps) {
   const headingId = useId();
   const theme = useDarlTheme();

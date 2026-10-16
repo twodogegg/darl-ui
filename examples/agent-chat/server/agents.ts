@@ -17,7 +17,7 @@ export function validateAgent(value: unknown, existing: StoredAgent[] = []): Sto
   const item = value as Partial<AgentConfig>;
   if (typeof item.id !== 'string' || !idPattern.test(item.id) || typeof item.name !== 'string' || !item.name.trim()) throw new Error('Agent ID 或名称无效');
   if (item.avatar !== undefined && (typeof item.avatar !== 'string' || /[\u0000-\u001f\u007f]/.test(item.avatar) || (item.avatar.startsWith('data:image/') ? item.avatar.length > 12_000_000 || !/^data:image\/(?:png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/i.test(item.avatar) : item.avatar.length > 1000))) throw new Error('Agent 头像格式无效');
-  if (typeof item.instructions !== 'string' || !item.instructions.trim() || item.instructions.length > 100_000) throw new Error('Agent 系统提示词不能为空，且不能超过 100000 个字符');
+  if (typeof item.instructions !== 'string' || !item.instructions.trim()) throw new Error('Agent 系统提示词不能为空');
   if (typeof item.providerId !== 'string' || !item.providerId.trim() || typeof item.modelId !== 'string' || !item.modelId.trim()) throw new Error('Agent 必须选择模型');
   const skillIds = list(item.skillIds, 'Skill');
   const applicationIds = list(item.applicationIds, 'MCP 应用', 20);

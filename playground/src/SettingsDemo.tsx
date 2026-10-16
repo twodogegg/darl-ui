@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Blocks, Bot, Monitor, Settings2, SlidersHorizontal, Sparkles } from 'lucide-react';
-import { AgentSettingsCard, ModelSettingsCard, SettingsPage, type ModelProvider } from '../../src';
+import { AgentSettingsCard, ModelManagementCard, SettingsPage, defaultModelConfiguration, type ModelConfiguration, type ModelProvider } from '../../src';
 
 import initialPrompt from '../../examples/agent-chat/prompts/system.md?raw';
 
@@ -14,6 +14,7 @@ const initialProviders: ModelProvider[] = [{
 
 export function SettingsDemo() {
   const [providers, setProviders] = useState(initialProviders);
+  const [configuration, setConfiguration] = useState<ModelConfiguration>(() => defaultModelConfiguration());
   const [activeSection, setActiveSection] = useState('models');
   const [systemPrompt, setSystemPrompt] = useState(initialPrompt);
   const sections = [
@@ -24,5 +25,5 @@ export function SettingsDemo() {
     { id: 'agent-presets', label: 'Agent 预设', icon: <Bot /> },
     { id: 'desktop', label: '桌面设置', icon: <Monitor /> },
   ];
-  return <SettingsPage sections={sections} activeSection={activeSection} onSectionChange={(section) => { if (section === 'models' || section === 'agent-presets') setActiveSection(section); }} title="设置">{activeSection === 'agent-presets' ? <><AgentSettingsCard systemPrompt={systemPrompt} onSave={setSystemPrompt} /><p className="demo-mock-hint">本地编辑演示，仅保存在当前页面内存中。真实 Markdown 文件编辑请使用 Agent Chat 示例。</p></> : <ModelSettingsCard providers={providers} onProviderSave={(provider) => setProviders((current) => [...current.filter((item) => item.id !== provider.id), provider])} onProviderDelete={(id) => setProviders((current) => current.filter((provider) => provider.id !== id))} onTestConnection={async () => undefined} onFetchModels={async (provider) => provider.models} />}</SettingsPage>;
+  return <SettingsPage sections={sections} activeSection={activeSection} onSectionChange={(section) => { if (section === 'models' || section === 'agent-presets') setActiveSection(section); }} title="设置">{activeSection === 'agent-presets' ? <><AgentSettingsCard systemPrompt={systemPrompt} onSave={setSystemPrompt} /><p className="demo-mock-hint">本地编辑演示，仅保存在当前页面内存中。真实 Markdown 文件编辑请使用 Agent Chat 示例。</p></> : <ModelManagementCard configuration={configuration} providers={providers} onSave={setConfiguration} onProviderSave={(provider) => setProviders((current) => [...current.filter((item) => item.id !== provider.id), provider])} onProviderDelete={(id) => setProviders((current) => current.filter((provider) => provider.id !== id))} onTestConnection={async () => undefined} />}</SettingsPage>;
 }

@@ -87,6 +87,11 @@ export type AgentSkillDraft = Omit<AgentSkill, 'id' | 'version' | 'updatedAt'> &
 export interface AgentModel {
   id: string;
   name: string;
+  /** Logical model identity and the selected host routing binding. */
+  logicalModelId?: string;
+  bindingId?: string;
+  upstreamModelId?: string;
+  providerName?: string;
   description?: string;
   providerId?: string;
   type?: AgentModelType;

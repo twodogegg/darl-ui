@@ -29,12 +29,17 @@ describe('InteractiveConfirmDialog', () => {
     const onCancel = vi.fn();
     const onOpenChange = vi.fn();
     const onConfirm = vi.fn();
-    render(<InteractiveConfirmDialog open onOpenChange={onOpenChange} onCancel={onCancel} title="确认" questions={questions} onConfirm={onConfirm} />);
+    render(<InteractiveConfirmDialog open onOpenChange={onOpenChange} onCancel={onCancel} showCancel title="确认" questions={questions} onConfirm={onConfirm} />);
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onConfirm).not.toHaveBeenCalled();
+  });
+  it('shows only the confirmation action by default', () => {
+    render(<InteractiveConfirmDialog open onOpenChange={vi.fn()} title="确认" questions={[]} onConfirm={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /确认/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument();
   });
   it('keeps selections after rejected callback and prevents duplicate pending submissions', async () => {
     let reject!: (error: Error) => void;

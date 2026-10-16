@@ -21,7 +21,7 @@ export function validateProvider(value: ModelProvider): ModelProvider {
   const models: AgentModelConfig[] = value.models.map((model) => {
     if (!model.id?.trim() || !model.name?.trim() || ids.has(model.id) || !['text', 'image', 'video', 'audio'].includes(model.type)) throw new Error('模型 ID 重复或模型配置无效');
     ids.add(model.id);
-    if (model.reasoningEfforts && (!Array.isArray(model.reasoningEfforts) || model.reasoningEfforts.some((effort) => !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', '低', '中', '高'].includes(effort)))) throw new Error('请填写模型支持的推理强度，如 low, medium, high');
+    if (model.reasoningEfforts && (!Array.isArray(model.reasoningEfforts) || model.reasoningEfforts.some((effort) => !['minimal', 'low', 'medium', 'high', 'xhigh', '低', '中', '高'].includes(effort)))) throw new Error('请填写模型支持的推理强度，如 low, medium, high');
     return { id: model.id, name: model.name, type: model.type, providerId: value.id, enabled: model.enabled !== false, reasoningEfforts: model.reasoningEfforts, capabilities: model.capabilities };
   });
   return { id: value.id, name: value.name.trim(), baseUrl: url.toString().replace(/\/$/, ''), protocol: value.protocol, status: 'unknown', models };
@@ -175,7 +175,7 @@ function loopTools(execution: ToolExecution | undefined, delegations: AgentDeleg
         const task = (input as { task?: unknown })?.task;
         if (typeof task !== 'string' || !task.trim()) throw new Error('子任务说明不能为空');
         const context = (input as { context?: unknown }).context;
-        return delegation.execute(task.slice(0, 50_000), Array.isArray(context) ? context as Array<Record<string, unknown>> : [], options.abortSignal ? AbortSignal.any([signal, options.abortSignal]) : signal);
+        return delegation.execute(task, Array.isArray(context) ? context as Array<Record<string, unknown>> : [], options.abortSignal ? AbortSignal.any([signal, options.abortSignal]) : signal);
       },
     });
   }

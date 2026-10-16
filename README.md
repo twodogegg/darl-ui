@@ -39,6 +39,7 @@ npm run dev
 - 提供方和 Key 保存到 Git 忽略的 `.local/agent-chat/providers.json`，前端只获取是否已配置 Key。环境变量只用于首次初始化；后续以已保存设置为准。连接测试会实际调用已启用的文本模型。
 - 获取模型目录后需确认模型类型、启用状态并保存；新发现的模型默认禁用，接口返回的 ID 无法证明其媒体或推理能力。
 - 支持通过 Streamable HTTP 接入 MCP 应用和真实多步工具调用；AgentSidebar 支持图片附件预览、发送到支持视觉输入的文本模型，以及 MCP 图片结果回传；模型目录仍可设置图片 / 视频 / 音频类型，聊天仅列出启用的文本模型。
+- 聊天请求不设置固定的 100000 字符文本上限；上下文预算按模型 `contextWindow` 能力计算，未声明时按 1M token 的默认预算处理。累计上下文超过预算 50% 后主动压缩较早历史，当前消息和最近上下文优先保留；工具结果仍按 Agent 上下文策略控制。
 
 MCP 连接由宿主示例的服务端管理。将配置保存为 Git 忽略的 `.local/agent-chat/applications.json`（数组，可配置多个服务）：
 
@@ -304,7 +305,18 @@ import '@darl/ui/styles.css';
 
 ## SettingsPage｜整体设置中心
 
-`SettingsPage` 提供设置中心的导航外壳，`ModelSettingsCard` 负责模型提供方和模型目录，`AgentSettingsCard` 负责系统提示词编辑。模型类型统一为 `text`、`image`、`video`、`audio`；模型的推理强度和能力标签由宿主提供，API Key 只通过宿主回调保存，组件不会自行持久化密钥。
+`SettingsPage` 提供设置中心的导航外壳，`ModelManagementCard` 负责逻辑模型、能力模板、供应商渠道和覆盖能力，`ModelSettingsCard` 保留为旧版 Provider + 模型目录适配，`AgentSettingsCard` 负责系统提示词编辑。模型类型统一为 `text`、`image`、`video`、`audio`；模型的推理强度和能力标签由宿主提供，API Key 只通过宿主回调保存，组件不会自行持久化密钥。
+
+模型配置的数据层导出 `LogicalModel`、`CapabilityTemplate`、`ModelBinding`、`ModelConfiguration` 以及 `resolveCapabilities`、`validateModelConfiguration`、`toAgentModels`、`toMediaModels`。模板字段由绑定覆盖时采用整体替换，`0` 和 `false` 会保留；协议键只在宿主注册后参与运行时路由。
+
+```tsx
+<ModelManagementCard
+  configuration={configuration}
+  providers={providers}
+  onSave={saveConfiguration}
+  onProviderSave={saveProvider}
+/>
+```
 
 ```tsx
 <SettingsPage activeSection="models" sections={sections}>
@@ -381,7 +393,6 @@ import { InteractiveConfirmDialog } from '@darl/ui';
   onOpenChange={setOpen}
   title="确认本次改编方案"
   confirmText="确认方案，开始正式剧本写作"
-  cancelText="返回修改"
   questions={[
     { id: 'duration', label: '目标成片时长', type: 'single', required: true,
       defaultValue: '6m', options: [{ value: '6m', label: '6 分钟' }, { value: '10m', label: '10 分钟' }] },
@@ -398,7 +409,7 @@ import { InteractiveConfirmDialog } from '@darl/ui';
 - `open/onOpenChange`：受控弹窗开关；`title/description`：标题与描述；`questions`：按顺序展示的问题数组（`id` 必须唯一）。
 - `type`：`single` 单选、`multiple` 多选、`text` 单行文本、`textarea` 多行文本；选择题使用 `options: { value, label, description?, disabled? }[]`。
 - `required` 默认为否，`defaultValue` 提供初始答案；`placeholder` 设置输入提示。
-- `confirmText/cancelText/showCancel` 可配置按钮；`onCancel` 响应所有关闭方式，包括 Esc 与遮罩；`accentColor/className` 可覆盖样式。
+- 默认只显示确认按钮；需要额外的取消按钮时传入 `showCancel`，并可用 `confirmText/cancelText` 配置文案。`onCancel` 响应所有关闭方式，包括 Esc、遮罩、关闭按钮和取消按钮；`accentColor/className` 可覆盖样式。
 - `onConfirm(answers)` 返回 `Record<questionId, string | string[]>`；多选始终是数组，输入题始终是字符串。支持 Promise：处理中禁用按钮，失败保留答案并显示错误；成功后由宿主关闭弹窗并恢复 Agent。
 
 Playground：`/#confirm-dialog`（含原著改编确认示例及模拟提交失败）。

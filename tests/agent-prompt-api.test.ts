@@ -39,7 +39,11 @@ describe('Markdown prompt persistence', () => {
         expect(saved.ok).toBe(true);
         expect(await saved.json()).toEqual({ systemPrompt: content });
         expect(await readFile(file, 'utf8')).toBe(content);
-        for (const invalid of ['', '   ', null, 'x'.repeat(100_001)]) expect((await request({ systemPrompt: invalid })).status).toBe(400);
+        for (const invalid of ['', '   ', null]) expect((await request({ systemPrompt: invalid })).status).toBe(400);
+        const longPrompt = 'x'.repeat(100_001);
+        expect((await request({ systemPrompt: longPrompt })).status).toBe(200);
+        expect(await readFile(file, 'utf8')).toBe(longPrompt);
+        expect((await request({ systemPrompt: content })).status).toBe(200);
         expect(await readFile(file, 'utf8')).toBe(content);
       });
       await withApi(directory, file, async (request) => {
