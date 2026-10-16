@@ -93,7 +93,10 @@ export async function connectApplication(app: McpApplicationConfig, signal: Abor
     } };
   } catch (error) {
     await close().catch(() => {});
-    throw new Error(safeError(error, app.apiKey));
+    const wrapped = new Error(safeError(error, app.apiKey), { cause: error });
+    const status = error && typeof error === 'object' ? (error as { status?: unknown; statusCode?: unknown }).status ?? (error as { statusCode?: unknown }).statusCode : undefined;
+    if (typeof status === 'number' || typeof status === 'string') Object.assign(wrapped, { status });
+    throw wrapped;
   }
 }
 

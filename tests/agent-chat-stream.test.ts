@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { lines } from '../examples/agent-chat/stream';
 import { checkedText, publicProvider, safeError, validateProvider } from '../examples/agent-chat/server/models';
+import { createAgentError, failure } from '../examples/agent-chat/server/errors';
 
 function stream(text: string, size: number) {
   const bytes = new TextEncoder().encode(text);
@@ -39,6 +40,27 @@ describe('agent chat provider boundary', () => {
     expect(value.hasApiKey).toBe(true);
     expect(safeError(new Error('auth private-placeholder'), 'private-placeholder')).toBe('auth [已隐藏]');
     expect(safeError(new Error('network error'))).toBe('无法连接模型服务，请检查 API 地址、网络或代理设置后重试');
+  });
+});
+
+describe('structured Agent errors', () => {
+  it('keeps stage, retry guidance and tracing fields while hiding credentials', () => {
+    const error = createAgentError('mcp-tool', new Error('request sk-secret-value failed'), { requestId: 'req-1', runId: 'run-1', parentRunId: 'run-0', key: 'sk-secret-value' });
+    expect(error).toMatchObject({ code: 'MCP_TOOL_FAILED', stage: 'mcp-tool', requestId: 'req-1', runId: 'run-1', parentRunId: 'run-0', retryable: true });
+    expect(error.message).not.toContain('sk-secret-value');
+    expect(error.suggestion).toContain('工具');
+  });
+
+  it('keeps safe AgentFailure details in the structured error', () => {
+    const error = createAgentError('mcp-connection', failure('mcp-connection', 'MCP_CONNECTION_FAILED', 'Asset Hub API 404: asset 不存在或无权访问', false), { requestId: 'req-404' });
+    expect(error).toMatchObject({ message: 'Asset Hub API 404: asset 不存在或无权访问', retryable: false });
+  });
+
+  it('distinguishes cancellation and timeout from model failures', () => {
+    expect(createAgentError('model', Object.assign(new Error('aborted'), { name: 'AbortError' }), { requestId: 'req-2' })).toMatchObject({ code: 'REQUEST_CANCELLED', stage: 'cancellation', retryable: false });
+    expect(createAgentError('mcp-tool', Object.assign(new Error('aborted'), { name: 'AbortError' }), { requestId: 'req-tool' })).toMatchObject({ code: 'REQUEST_CANCELLED', stage: 'cancellation', retryable: false });
+    expect(createAgentError('delegation', Object.assign(new Error('timed out'), { name: 'TimeoutError' }), { requestId: 'req-3' })).toMatchObject({ code: 'REQUEST_TIMEOUT', stage: 'timeout' });
+    expect(failure('tool-validation', 'TOOL_ARGUMENT_INVALID', '参数不正确', false).code).toBe('TOOL_ARGUMENT_INVALID');
   });
 });
 

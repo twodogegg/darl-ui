@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AgentSidebar, AgentsSettingsCard, DarlUIProvider, ModelSettingsCard, SettingsPage, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentToolCall, type AgentModelConfig, type AgentSendRequest, type AgentSession, type AgentSkill, type ModelProvider } from '@darl/ui';
+import { AgentSidebar, AgentsSettingsCard, DarlUIProvider, ModelSettingsCard, SettingsPage, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentErrorInfo, type AgentToolCall, type AgentModelConfig, type AgentSendRequest, type AgentSession, type AgentSkill, type ModelProvider } from '@darl/ui';
 import { ArrowLeft, BookOpen, Bot, MessageSquare, Settings2, Wrench } from 'lucide-react';
 import { lines } from '../stream';
 import { Guide } from './Guide';
@@ -26,7 +26,7 @@ async function api<T>(path: string, body?: unknown, method = body ? 'POST' : 'GE
   try { response = await fetch(`/api/${path}`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, ...(body ? { body: JSON.stringify(body) } : {}) }); }
   catch { throw new Error('无法连接 Agent 服务，请确认本地 5197 服务已启动'); }
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `请求失败：HTTP ${response.status}`);
+  if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : data.error?.message || `请求失败：HTTP ${response.status}`);
   return data;
 }
 
@@ -82,8 +82,8 @@ export function App() {
   }, [sessions, activeId, skills]);
   useEffect(() => () => running.current?.abort(), []);
 
-  const patchMessage = (sessionId: string, messageId: string, content: (previous: string) => string, streaming: boolean) => {
-    setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, updatedAt: new Date().toLocaleString(), messages: session.messages.map((message) => message.id === messageId ? { ...message, content: content(message.content), streaming } : message) } : session));
+  const patchMessage = (sessionId: string, messageId: string, content: (previous: string) => string, streaming: boolean, error?: AgentErrorInfo) => {
+    setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, updatedAt: new Date().toLocaleString(), messages: session.messages.map((message) => message.id === messageId ? { ...message, content: content(message.content), streaming, ...(error ? { error } : {}) } : message) } : session));
   };
   const run = async (request: AgentSendRequest, previous?: AgentSession['messages']) => {
     if (running.current) throw new Error('请先停止当前生成');
@@ -96,12 +96,16 @@ export function App() {
     const history = previous ?? [...source.messages, user];
     const answer = { id: crypto.randomUUID(), role: 'assistant' as const, content: '', streaming: true };
     const controller = new AbortController();
+    let requestId = '';
+    let runId = '';
+    let streamError: AgentErrorInfo | undefined;
     running.current = controller;
     setGenerating(true); setError('');
     setSessions((current) => current.map((session) => session.id === source.id ? { ...session, title: history.find((message) => message.role === 'user')?.content.replace(/\[([^\]]+)\]\((?:skill|app):[^)]+\)/g, '$1').slice(0, 32) || '新对话', messages: [...history, answer] } : session));
-    const finish = () => {
+    const finish = (errorInfo?: AgentErrorInfo) => {
       setSessions((current) => current.map((session) => session.id === source.id ? { ...session, messages: session.messages.map((message) => message.id === answer.id ? { ...message, toolCalls: message.toolCalls?.map((call) => ['pending', 'running', 'confirmation'].includes(call.status) ? { ...call, status: 'error' as const, error: '工具调用已中断，请重新发起请求。' } : call) } : message) } : session));
-      patchMessage(source.id, answer.id, (value) => value || '生成已停止。', false);
+      const cancelled = controller.signal.aborted && !errorInfo ? { code: 'REQUEST_CANCELLED', stage: 'cancellation' as const, message: '生成已停止', requestId: requestId || undefined, runId: runId || undefined, retryable: true, suggestion: '可以点击“重新生成”继续请求。' } : errorInfo;
+      patchMessage(source.id, answer.id, (value) => value || (cancelled ? '' : '生成已停止。'), false, cancelled);
       if (running.current === controller) { running.current = null; setGenerating(false); }
     };
     try {
@@ -127,7 +131,14 @@ export function App() {
         if (controller.signal.aborted) throw reason;
         throw new Error('无法连接 Agent 服务，请确认本地 5197 服务已启动');
       }
-      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `请求失败：HTTP ${response.status}`);
+      requestId = response.headers.get('X-Request-Id') || '';
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        const details = payload.error;
+        const error = details && typeof details === 'object' ? details as AgentErrorInfo : undefined;
+        if (error?.requestId) requestId = error.requestId;
+        throw Object.assign(new Error(error?.message || (typeof details === 'string' ? details : `请求失败：HTTP ${response.status}`)), { agentError: error });
+      }
       if (!response.body) throw new Error('响应为空');
       // Resolve on connection so AgentSidebar clears the sent draft while output streams.
       void (async () => {
@@ -136,7 +147,13 @@ export function App() {
           for await (const line of lines(response.body!)) {
             if (!line) continue;
             const event = JSON.parse(line);
-            if (event.type === 'error') throw new Error(event.error);
+            if (event.type === 'meta') {
+              requestId = event.requestId || requestId;
+              runId = event.runId || '';
+              setSessions((current) => current.map((session) => session.id === source.id ? { ...session, messages: session.messages.map((message) => message.id === answer.id ? { ...message, requestId: requestId || undefined, runId: runId || undefined } : message) } : session));
+              continue;
+            }
+            if (event.type === 'error') { streamError = typeof event.error === 'object' ? event.error as AgentErrorInfo : { code: 'MODEL_REQUEST_FAILED', stage: 'model', message: String(event.error || '请求失败'), requestId: requestId || undefined, runId: runId || undefined, retryable: true, suggestion: '检查模型、提供方和网络设置后重试。' }; break; }
             if (event.type === 'tool') {
               const call = event.call as AgentToolCall;
               setSessions((current) => current.map((session) => session.id === source.id ? { ...session, messages: session.messages.map((message) => message.id === answer.id ? { ...message, toolCalls: [...(message.toolCalls || []).filter((item) => item.id !== call.id), call] } : message) } : session));
@@ -147,15 +164,17 @@ export function App() {
             if (event.type === 'text') patchMessage(source.id, answer.id, (value) => value + event.text, true);
             if (event.type === 'done') done = true;
           }
-          if (!done && !controller.signal.aborted) throw new Error('连接中断，请重新生成');
+          if (!done && !controller.signal.aborted && !streamError) throw new Error('连接中断，请重新生成');
         } catch (reason) {
-          if (!controller.signal.aborted) patchMessage(source.id, answer.id, (value) => `${value}\n\n生成失败：${reason instanceof Error ? reason.message : '请求失败'}`, false);
-        } finally { finish(); }
+          if (!controller.signal.aborted) streamError = (reason as { agentError?: AgentErrorInfo }).agentError || { code: 'MODEL_REQUEST_FAILED', stage: 'model', message: reason instanceof Error ? reason.message : '请求失败', requestId: requestId || undefined, runId: runId || undefined, retryable: true, suggestion: '检查模型、提供方和网络设置后重试。' };
+        } finally { finish(streamError); }
       })();
     } catch (reason) {
       if (!controller.signal.aborted) {
-        setSessions((current) => current.map((session) => session.id === source.id ? { ...session, messages: source.messages } : session));
-        finish();
+        const details = (reason as { agentError?: AgentErrorInfo }).agentError;
+        const errorInfo = details || { code: 'MODEL_REQUEST_FAILED', stage: 'model' as const, message: reason instanceof Error ? reason.message : '请求失败', requestId: requestId || undefined, runId: runId || undefined, retryable: true, suggestion: '检查模型、提供方和网络设置后重试。' };
+        setSessions((current) => current.map((session) => session.id === source.id ? { ...session, messages: [...history, { ...answer, content: '', streaming: false, requestId: requestId || undefined, runId: runId || undefined, error: errorInfo }] } : session));
+        finish(errorInfo);
         throw reason;
       }
       finish();

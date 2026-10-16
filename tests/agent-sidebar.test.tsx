@@ -1,12 +1,21 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { AgentSidebar, type AgentApplication, type AgentSession, type AgentSkill } from '../src';
+import { AgentSidebar, type AgentApplication, type AgentErrorInfo, type AgentSession, type AgentSkill } from '../src';
 
 const apps: AgentApplication[] = [{ id: 'crm', name: '客户系统', description: '查询客户资料', status: 'connected', tools: [{ name: 'find_customer', title: '查询客户' }] }];
 const skills: AgentSkill[] = [{ id: 'summary', name: '客户摘要', description: '整理客户信息' }];
 const sessions: AgentSession[] = [{ id: 'one', title: '已有对话', updatedAt: '今天', messages: [{ id: 'assistant', role: 'assistant', content: '## 标题\n\n**加粗**\n\n```ts\nconst answer = true\n```' }] }];
 
 describe('AgentSidebar', () => {
+  it('renders structured request errors with stage and trace identifiers', () => {
+    const error: AgentErrorInfo = { code: 'MCP_CONNECTION_FAILED', stage: 'mcp-connection', message: '无法连接 MCP 应用', requestId: 'req-123', runId: 'run-456', retryable: true, suggestion: '检查应用地址后重试。' };
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[{ id: 'error', title: '失败', messages: [{ id: 'answer', role: 'assistant', content: '', error }] }]} activeSessionId="error" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('MCP 连接失败');
+    expect(screen.getByRole('alert')).toHaveTextContent('requestId：req-123');
+    expect(screen.getByRole('alert')).toHaveTextContent('runId：run-456');
+    expect(screen.getByRole('alert')).toHaveTextContent('检查应用地址后重试。');
+  });
+
   it('普通工具记录只显示名称和状态，不提供参数或结果展开入口', () => {
     const history: AgentSession[] = [{ id: 'one', title: '查询', messages: [{ id: 'assistant', role: 'assistant', content: '已完成查询。', toolCalls: [{ id: 'read-call', appId: 'catalog', appName: '素材库', toolName: 'search', toolTitle: '搜索素材', status: 'success', input: { query: '不显示的参数' }, output: { text: '不显示的详细结果' } }] }] }];
     const { container } = render(<AgentSidebar open onOpenChange={vi.fn()} sessions={history} activeSessionId="one" />);

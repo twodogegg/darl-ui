@@ -5,6 +5,7 @@ import type { AgentSkill, AgentToolCall } from '../../../src/index';
 import { applicationCatalog, connectApplication, conversationApplications, loadApplications, toolRisk, ToolConfirmations } from './mcp';
 import { loadAgents, publicAgent, validateAgent, validateAgents, type StoredAgent } from './agents';
 import { generate, generateWithToolLoop, listModels, publicProvider, runToolLoopAgent, safeError, validateProvider, type AgentDelegation, type ChatImage, type ChatMessage, type StoredProvider, type ToolExecution } from './models';
+import { AgentFailure, createAgentError, failure } from './errors';
 
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_DATA_URL_LENGTH = 64 + 4 * Math.ceil(MAX_IMAGE_BYTES / 3);
@@ -15,17 +16,69 @@ async function connectApplicationWithRetry(app: Parameters<typeof connectApplica
     try { return await connectApplication(app, signal); }
     catch (error) {
       lastError = error;
-      if (attempt === 2) break;
-      await new Promise<void>((resolve, reject) => {
-        let timer: ReturnType<typeof setTimeout>;
-        const abort = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); reject(signal.reason); };
-        const finish = () => { signal.removeEventListener('abort', abort); resolve(); };
-        timer = setTimeout(finish, 150 * (attempt + 1));
-        signal.addEventListener('abort', abort, { once: true });
-      });
+      if (attempt === 2 || !isRetryableMcpError(error)) break;
+      await retryPause(signal, attempt + 1);
     }
   }
   throw lastError;
+}
+
+async function retryPause(signal: AbortSignal, attempt: number) {
+  await new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => { if (timer) clearTimeout(timer); signal.removeEventListener('abort', abort); };
+    const abort = () => { cleanup(); reject(signal.reason); };
+    const finish = () => { signal.removeEventListener('abort', abort); resolve(); };
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) { abort(); return; }
+    timer = setTimeout(finish, 150 * attempt);
+  });
+}
+
+function errorStatus(reason: unknown) {
+  const value = reason && typeof reason === 'object' ? reason as { status?: unknown; statusCode?: unknown } : {};
+  const status = value.status ?? value.statusCode;
+  return typeof status === 'number' ? status : typeof status === 'string' && /^\d{3}$/.test(status) ? Number(status) : undefined;
+}
+
+export function isRetryableMcpError(reason: unknown) {
+  if (reason instanceof Error && ['AbortError', 'CanceledError'].includes(reason.name)) return false;
+  if (reason instanceof Error && reason.name === 'TimeoutError') return true;
+  const status = errorStatus(reason) ?? (reason instanceof Error ? errorStatus(reason.cause) : undefined);
+  if (status !== undefined) return status >= 500 && status <= 599;
+  const message = reason instanceof Error ? `${reason.message} ${reason.cause instanceof Error ? reason.cause.message : ''}` : String(reason || '');
+  return /(?:network error|failed to fetch|fetch failed|econnreset|etimedout|enotfound|socket hang up|timeout|timed out|temporar(?:y|ily)|\b5\d{2}\b)/i.test(message);
+}
+
+export async function callMcpToolWithRetry(connection: Awaited<ReturnType<typeof connectApplication>>, tool: Parameters<typeof toolRisk>[1], args: Record<string, unknown>, signal: AbortSignal) {
+  const attempts = toolRisk(connection.app, tool) === 'read' ? 2 : 1;
+  let lastResult: Awaited<ReturnType<typeof connection.call>> | undefined;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      lastResult = await connection.call(tool.name, args, signal);
+      if (!lastResult.isError || attempt === attempts || !isRetryableMcpResult(lastResult)) return lastResult;
+    } catch (error) {
+      if (attempt === attempts || !isRetryableMcpError(error)) throw error;
+    }
+    await retryPause(signal, attempt);
+  }
+  return lastResult!;
+}
+
+function mcpResultDetails(result: { content: unknown[]; structuredContent?: unknown }) {
+  const details = result.content.flatMap((block) => block && typeof block === 'object' && 'text' in block && typeof block.text === 'string' ? [block.text] : []);
+  if (result.structuredContent !== undefined) {
+    try { details.push(JSON.stringify(result.structuredContent)); } catch { /* Ignore non-serializable diagnostic payloads. */ }
+  }
+  return details.filter(Boolean).join('\n').slice(0, 10_000);
+}
+
+function isRetryableMcpResult(result: { content: unknown[]; structuredContent?: unknown; isError: boolean }) {
+  return result.isError && isRetryableMcpError(new Error(mcpResultDetails(result)));
+}
+
+export function mcpResultError(result: { content: unknown[]; structuredContent?: unknown }, key = '') {
+  return safeError(new Error(mcpResultDetails(result) || 'MCP 工具调用失败'), key);
 }
 
 async function readBody(request: IncomingMessage) {
@@ -120,7 +173,9 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     if (!allowed.has(request.headers.host || '') || (request.headers.origin && !['http://localhost:5197', 'http://127.0.0.1:5197', 'http://[::1]:5197'].includes(request.headers.origin))) return send(403, { error: '仅允许本机同源访问' });
     const controller = new AbortController();
     response.on('close', () => controller.abort());
-    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(180_000)]);
+    const requestId = crypto.randomUUID();
+    const timeoutSignal = AbortSignal.timeout(180_000);
+    const signal = AbortSignal.any([controller.signal, timeoutSignal]);
     let secret = '';
     const connections: Awaited<ReturnType<typeof connectApplication>>[] = [];
     try {
@@ -217,6 +272,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         }
       }
       if (path === '/api/chat' && request.method === 'POST') {
+        response.setHeader('X-Request-Id', requestId);
         const body = await readBody(request);
         const selectedAgent = body.agentId === undefined ? agents.find((item) => item.isDefault && item.enabled !== false) : body.agentId === null ? undefined : agents.find((item) => item.id === body.agentId);
         if (body.agentId !== undefined && body.agentId !== null && (!selectedAgent || selectedAgent.enabled === false)) throw new Error('请选择已启用的 Agent');
@@ -271,8 +327,11 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const scopedApps = allowedApps ? selectedApps.filter((app) => allowedApps.has(app.id)) : selectedApps;
         const attachedImages = latestUserImages(messages);
         const runId = crypto.randomUUID();
+        response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Request-Id': requestId });
+        response.flushHeaders();
+        response.write(`${JSON.stringify({ type: 'meta', requestId, runId })}\n`);
         const emitTool = (call: AgentToolCall) => {
-          if (!signal.aborted) response.write(`${JSON.stringify({ type: 'tool', call: { ...call, input: call.appId.startsWith('agent:') || call.status === 'confirmation' ? call.input : undefined } })}\n`);
+          if (!signal.aborted) response.write(`${JSON.stringify({ type: 'tool', call: { ...call, requestId, input: call.appId.startsWith('agent:') || call.status === 'confirmation' ? call.input : undefined } })}\n`);
         };
         const emitImages = (value: unknown) => {
           if (!Array.isArray(value)) return;
@@ -285,7 +344,17 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         };
         const createExecution = async (apps: typeof scopedApps, ownerAgentId?: string, images: ChatImage[] = [], applicationTools?: Record<string, string[]>, executionRunId = runId, parentRunId?: string) => {
           const ownedConnections = [] as Awaited<ReturnType<typeof connectApplication>>[];
-          for (const app of apps) { const connection = await connectApplicationWithRetry(app, signal); connections.push(connection); ownedConnections.push(connection); }
+          for (const app of apps) {
+            try {
+              const connection = await connectApplicationWithRetry(app, signal);
+              connections.push(connection);
+              ownedConnections.push(connection);
+            } catch (error) {
+              if (timeoutSignal.aborted) throw timeoutSignal.reason || error;
+              if (controller.signal.aborted) throw controller.signal.reason || error;
+              throw failure('mcp-connection', 'MCP_CONNECTION_FAILED', safeError(error, app.apiKey));
+            }
+          }
           const functions = ownedConnections.flatMap((connection, appIndex) => connection.tools.filter((tool) => !applicationTools?.[connection.app.id] || applicationTools[connection.app.id].includes(tool.name)).map((tool, index) => ({ name: `mcp_${appIndex}_${index}`, connection, tool })));
           if (functions.length > 128) throw new Error('所选应用合计超过 128 个工具，请减少应用数量');
           const execution: ToolExecution = {
@@ -293,12 +362,12 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           execute: async (request: { name: string; arguments: string }, toolSignal = signal) => {
             const callSignal = AbortSignal.any([signal, toolSignal]);
             const selected = functions.find((item) => item.name === request.name);
-            if (!selected) throw new Error('模型请求了未授权的工具');
+            if (!selected) throw failure('tool-validation', 'TOOL_NOT_AUTHORIZED', '模型请求了未授权的工具', false);
             const { connection, tool } = selected;
             const call: AgentToolCall = { id: crypto.randomUUID(), appId: connection.app.id, appName: connection.app.name, toolName: tool.name, toolTitle: tool.title || tool.annotations?.title, input: request.arguments, status: 'pending', runId: executionRunId, ...(ownerAgentId ? { agentId: ownerAgentId, ...(parentRunId ? { parentRunId } : {}) } : {}) };
             try {
               const args = JSON.parse(request.arguments || '{}');
-              if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('工具参数必须为 JSON 对象');
+              if (!args || typeof args !== 'object' || Array.isArray(args)) throw failure('tool-validation', 'TOOL_ARGUMENT_INVALID', '工具参数必须为 JSON 对象', false);
               call.input = args;
               if (toolRisk(connection.app, tool) !== 'read') {
                 call.status = 'confirmation';
@@ -312,19 +381,26 @@ export function createApi(directory: string, env: Record<string, string>, prompt
               const attachedUpload = findAttachedImageForUpload(tool, args, images);
               const result = attachedUpload
                 ? await uploadAttachedImage((stepArgs, stepSignal) => connection.call(tool.name, stepArgs, stepSignal), attachedUpload.image, args, attachedUpload.fields, callSignal)
-                : await connection.call(tool.name, args, callSignal);
+                : await callMcpToolWithRetry(connection, tool, args, callSignal);
               callSignal.throwIfAborted();
               call.status = result.isError ? 'error' : 'success';
               if (result.isError) {
-                const details = result.content.flatMap((block) => block && typeof block === 'object' && 'text' in block && typeof block.text === 'string' ? [block.text] : []);
-                call.error = safeError(new Error(details[0] || 'MCP 工具调用失败'), connection.app.apiKey);
+                call.error = mcpResultError(result, connection.app.apiKey);
+                call.errorInfo = createAgentError('mcp-tool', new Error(call.error), { requestId, runId: executionRunId, parentRunId, key: connection.app.apiKey, code: 'MCP_TOOL_FAILED', message: call.error });
               }
               emitImages(result.content);
               emitTool(call);
               return JSON.stringify(result);
             } catch (error) {
               call.status = 'error';
-              call.error = safeError(error, connection.app.apiKey);
+              if (callSignal.aborted) {
+                call.error = '工具调用已取消';
+                call.errorInfo = createAgentError('cancellation', error, { requestId, runId: executionRunId, parentRunId, key: connection.app.apiKey, code: 'REQUEST_CANCELLED', retryable: false });
+                emitTool(call);
+                throw error;
+              }
+              call.error = error instanceof AgentFailure ? error.message : 'MCP 工具调用失败，请检查应用状态后重试';
+              call.errorInfo = createAgentError(error instanceof AgentFailure ? error.stage : 'mcp-tool', error, { requestId, runId: executionRunId, parentRunId, key: connection.app.apiKey, ...(error instanceof AgentFailure ? { code: error.code, retryable: error.retryable, suggestion: error.suggestion } : {}) });
               emitTool(call);
               if (callSignal.aborted) throw error;
               return JSON.stringify({ isError: true, error: call.error });
@@ -355,15 +431,14 @@ export function createApi(directory: string, env: Record<string, string>, prompt
                 emitTool({ ...delegationCall, status: 'success', output: result });
                 return result.slice(0, 80_000);
               } catch (error) {
-                const message = safeError(error, childProvider.apiKey);
-                emitTool({ ...delegationCall, status: 'error', error: message });
-                throw error;
+                const cause = childSignal.aborted && !signal.aborted ? failure('delegation', 'DELEGATION_TIMEOUT', '子 Agent 请求超时', true, '稍后重试，或直接让当前 Agent 完成任务。') : error;
+                const info = createAgentError('delegation', cause, { requestId, runId: childRunId, parentRunId: runId, key: childProvider.apiKey, code: cause instanceof AgentFailure ? cause.code : 'DELEGATION_FAILED', ...(cause instanceof AgentFailure ? { retryable: cause.retryable, suggestion: cause.suggestion } : {}) });
+                emitTool({ ...delegationCall, status: 'error', error: info.message, errorInfo: info });
+                throw cause;
               }
             },
           });
         }
-        response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-        response.flushHeaders();
         for await (const text of (restrictedAgent || delegations.length ? generateWithToolLoop(provider, model, messages, instructions, effort, signal, execution, delegations) : generate(provider, model, messages, instructions, effort, signal, execution))) {
           if (!response.write(`${JSON.stringify({ type: 'text', text })}\n`)) await new Promise<void>((done) => {
             const resume = () => { response.off('drain', resume); response.off('close', resume); done(); };
@@ -377,10 +452,11 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       }
       send(404, { error: '接口不存在' });
     } catch (error) {
-      if (controller.signal.aborted) return;
-      const message = signal.aborted ? '模型请求超时，请重试' : safeError(error, secret);
-      if (response.headersSent) response.end(`${JSON.stringify({ type: 'error', error: message })}\n`);
-      else send(400, { error: message });
+      if (controller.signal.aborted && !timeoutSignal.aborted) return;
+      const stage = error instanceof AgentFailure ? error.stage : timeoutSignal.aborted ? 'timeout' : response.headersSent ? 'model' : 'validation';
+      const info = createAgentError(stage, error, { requestId, key: secret, ...(error instanceof AgentFailure ? { code: error.code, retryable: error.retryable, suggestion: error.suggestion } : {}) });
+      if (response.headersSent) response.end(`${JSON.stringify({ type: 'error', error: info })}\n`);
+      else send(400, { error: info });
     } finally {
       controller.abort();
       await Promise.allSettled(connections.map((connection) => connection.close()));

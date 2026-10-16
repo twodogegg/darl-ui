@@ -3,6 +3,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import { dynamicTool, jsonSchema, stepCountIs, streamText, ToolLoopAgent, type LanguageModel, type ModelMessage } from 'ai';
+import { failure } from './errors';
 
 export interface StoredProvider extends ModelProvider { apiKey: string }
 export interface ChatImage { type: 'image'; name: string; mimeType: string; data: string; size?: number }
@@ -123,7 +124,7 @@ export function aiTools(execution: ToolExecution | undefined, signal: AbortSigna
     inputSchema: jsonSchema(tool.parameters as Parameters<typeof jsonSchema>[0], {
       validate: (input) => {
         const result = mcpSchemaValidator.getValidator(tool.parameters as Parameters<typeof jsonSchema>[0])(input);
-        return result.valid ? { success: true, value: result.data } : { success: false, error: new Error(result.errorMessage) };
+        return result.valid ? { success: true, value: result.data } : { success: false, error: failure('tool-validation', 'TOOL_ARGUMENT_INVALID', '工具参数不符合要求', false) };
       },
     }),
     execute: async (input, options) => {

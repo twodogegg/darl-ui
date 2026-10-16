@@ -3,6 +3,19 @@ import type { AgentModelCapabilities, AgentModelType } from '../settings/types';
 export type AgentMessageRole = 'user' | 'assistant';
 export type AgentToolStatus = 'pending' | 'running' | 'success' | 'error' | 'confirmation';
 
+export type AgentErrorStage = 'model' | 'mcp-connection' | 'mcp-tool' | 'delegation' | 'tool-validation' | 'validation' | 'cancellation' | 'timeout';
+
+export interface AgentErrorInfo {
+  code: string;
+  stage: AgentErrorStage;
+  message: string;
+  requestId?: string;
+  runId?: string;
+  parentRunId?: string;
+  retryable: boolean;
+  suggestion: string;
+}
+
 export interface AgentTool {
   name: string;
   title?: string;
@@ -71,6 +84,8 @@ export interface AgentToolCall {
   agentId?: string | null;
   parentRunId?: string;
   runId?: string;
+  requestId?: string;
+  errorInfo?: AgentErrorInfo;
 }
 
 export interface AgentAttachment {
@@ -96,6 +111,9 @@ export interface AgentMessage {
   attachments?: Array<string | AgentAttachment>;
   toolCalls?: AgentToolCall[];
   agentId?: string | null;
+  requestId?: string;
+  runId?: string;
+  error?: AgentErrorInfo;
 }
 
 export interface AgentSession {
