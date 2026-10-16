@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Guide } from '../examples/agent-chat/client/Guide';
 
@@ -13,16 +13,17 @@ describe('agent chat development guide', () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('navigator', { clipboard: { writeText } });
     const { unmount } = render(<Guide onBack={() => {}} />);
-    const copy = screen.getAllByRole('button', { name: '复制' })[0];
+    const copy = screen.getAllByRole('button', { name: '复制' }).find((button) => button.closest('.guide-code')?.textContent?.includes('onSend={sendMessage}'))!;
+    const code = within(copy.closest('.guide-code')!);
     await act(async () => { fireEvent.click(copy); });
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining('onSend={sendMessage}'));
-    expect(screen.getAllByRole('status')[0]).toHaveTextContent('已复制');
+    expect(code.getByRole('status')).toHaveTextContent('已复制');
     act(() => { vi.advanceTimersByTime(800); });
     await act(async () => { fireEvent.click(copy); });
     act(() => { vi.advanceTimersByTime(800); });
-    expect(screen.getAllByRole('status')[0]).toHaveTextContent('已复制');
+    expect(code.getByRole('status')).toHaveTextContent('已复制');
     act(() => { vi.advanceTimersByTime(400); });
-    expect(screen.getAllByRole('status')[0]).toHaveTextContent('example');
+    expect(code.getByRole('status')).toHaveTextContent('example');
     await act(async () => { fireEvent.click(copy); });
     unmount();
     expect(vi.getTimerCount()).toBe(0);

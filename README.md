@@ -34,7 +34,7 @@ npm run dev
 - 支持 OpenAI Chat Completions / Responses 流式文本协议、多轮对话、停止、重新生成、新对话和历史搜索。
 - 示例服务端使用 AI SDK Core 和 OpenAI-compatible Provider 运行模型与工具循环；MCP 通过已有 SDK 动态转换为 AI SDK 工具，执行确认仍由宿主处理。每次请求从传入的聊天历史重建模型上下文，不启用 coding CLI、本机文件工具或额外的会话存储；这些依赖仅用于宿主示例，不进入组件库浏览器产物。
 - Markdown 使用开源的 `react-markdown`、`remark-gfm` 和 `rehype-sanitize` 渲染；回复中的 `md` / `markdown` 代码块会显示为编译后的内容，复制按钮仍复制原始 Markdown。
-- 系统提示词保存在 `examples/agent-chat/prompts/system.md`，是唯一来源；可在「设置 → Agent」中编辑，保存直接更新该文件，也可直接编辑 Markdown。每次聊天和连接测试重新读取文件，修改后下次请求生效；缺失、空白或过长时报错，代码没有内置默认值。选中的 Skill 指令在发送时追加。
+- 系统提示词保存在 `examples/agent-chat/prompts/system.md`，是默认 Agent 的唯一来源；服务端每次聊天和连接测试重新读取文件，修改后下次请求生效。缺失、空白或过长时报错，代码没有内置默认值；专业 Agent 的提示词在 Agents 编辑器中单独配置。选中的 Skill 指令在发送时追加。
 - 对话和 Skills 保存在当前浏览器的 localStorage；Skill 指令通过 `/` 引用后发送给模型，资源脚本不会执行。
 - 提供方和 Key 保存到 Git 忽略的 `.local/agent-chat/providers.json`，前端只获取是否已配置 Key。环境变量只用于首次初始化；后续以已保存设置为准。连接测试会实际调用已启用的文本模型。
 - 获取模型目录后需确认模型类型、启用状态并保存；新发现的模型默认禁用，接口返回的 ID 无法证明其媒体或推理能力。
@@ -274,6 +274,12 @@ import '@darl/ui/styles.css';
 
 应用和 Skill 从选择面板插入输入光标处，作为正文内引用，不显示输入框上方标签，也不自动传入当前页面。输入 `@` 引用应用，输入 `/` 引用 Skill；继续输入名称或简介关键词可以筛选，上下方向键选择，Enter / Tab 插入，Esc 关闭建议。应用引用为蓝色，Skill 引用为紫色，可用 `--darl-agent-app` / `--darl-agent-skill` 覆盖。引用编码为 `[显示名称](app:ID)` / `[显示名称](skill:ID)`，发送时从正文派生应用和 Skill ID；删除引用即取消本次使用。
 
+## Agent 配置与 Sub Agent 委派
+
+`examples/agent-chat` 的设置中心提供独立的 Agents 页面。每个 Agent 在服务端保存名称、系统提示词、文本模型、推理强度、允许的 Skills 和 MCP 应用 / 工具；API Key 仍只保存在服务端。设置默认 Agent 后，聊天可以直接选择专业 Agent，也可以由主 Agent 通过 AI SDK 7 `ToolLoopAgent` 按需委派给其他已启用的 Agent。
+
+每次委派只把任务说明传给子 Agent，子 Agent 使用自己的模型、提示词和工具权限，完成后只返回最终摘要。MCP 写操作继续复用宿主的 `ToolConfirmations`，因此允许、拒绝、停止和超时都在服务端生效；NDJSON 工具事件包含 `runId`、`parentRunId` 和 `agentId`，现有侧栏会显示委派、执行和审批状态。Agent 配置保存于 `.local/agent-chat/agents.json`，不会写入浏览器存储。
+
 ## StyleSelector｜风格选择弹窗
 
 `StyleSelector` 提供风格广场弹窗，支持集合切换、分类筛选、搜索、选择、收藏和两步创建风格向导。宿主通过 `styles` 提供风格数据，通过 `onChange`、`onFavoriteChange` 和 `onCreate` 接收结果；`onCreate` 可以返回 Promise，失败时会保留表单并显示错误。
@@ -316,7 +322,7 @@ import '@darl/ui/styles.css';
 </SettingsPage>
 ```
 
-设置中心当前提供通用设置、模型、应用 / MCP、Skills、Agent 预设和桌面设置入口；页面内容由宿主通过 `children` 接入。文本模型编辑器提供 `vision` 图片输入开关；模型配置完成后，将 `providers` 中启用的模型转换为 `AgentSidebar` 的 `models` 即可复用同一个聊天侧栏。
+设置中心当前提供模型、Agents 和应用 / MCP 入口；页面内容由宿主通过 `children` 接入。文本模型编辑器提供 `vision` 图片输入开关；模型配置完成后，将 `providers` 中启用的模型转换为 `AgentSidebar` 的 `models` 即可复用同一个聊天侧栏。
 
 
 ## DefaultModelSelector｜四步默认模型向导

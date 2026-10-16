@@ -2,7 +2,7 @@ import type { ModelProvider, AgentModelConfig } from '../../../src/index';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
-import { dynamicTool, jsonSchema, stepCountIs, streamText, type LanguageModel, type ModelMessage } from 'ai';
+import { dynamicTool, jsonSchema, stepCountIs, streamText, ToolLoopAgent, type LanguageModel, type ModelMessage } from 'ai';
 
 export interface StoredProvider extends ModelProvider { apiKey: string }
 export interface ChatImage { type: 'image'; name: string; mimeType: string; data: string; size?: number }
@@ -67,6 +67,12 @@ export interface FunctionCall { id: string; name: string; arguments: string }
 export interface ToolExecution {
   tools: FunctionTool[];
   execute: (call: FunctionCall, signal?: AbortSignal) => Promise<string>;
+}
+
+export interface AgentDelegation {
+  name: string;
+  description: string;
+  execute: (task: string, signal: AbortSignal) => Promise<string>;
 }
 
 /** Hold only a possible protocol prefix, so split markers never reach the UI. */
@@ -142,7 +148,7 @@ export async function* generate(provider: StoredProvider, model: AgentModelConfi
     tools: aiTools(execution, signal),
     stopWhen: stepCountIs(8),
     toolCallConcurrency: 1,
-    maxRetries: 0,
+    maxRetries: 2,
     abortSignal: signal,
     ...(reasoning ? { providerOptions: { [providerOptionsName]: { reasoningEffort: reasoning } } } : {}),
   });
@@ -155,4 +161,56 @@ export async function* generate(provider: StoredProvider, model: AgentModelConfi
   const finishReason = await result.finishReason;
   if (finishReason === 'length') throw new Error('已达到模型输出长度限制');
   if (!hasText) throw new Error('模型没有返回文本内容');
+}
+
+function loopTools(execution: ToolExecution | undefined, delegations: AgentDelegation[] | undefined, signal: AbortSignal) {
+  const tools: Record<string, unknown> = { ...(aiTools(execution, signal) || {}) };
+  for (const delegation of delegations || []) {
+    tools[delegation.name] = dynamicTool({
+      description: delegation.description,
+      inputSchema: jsonSchema({ type: 'object', properties: { task: { type: 'string', description: '只包含完成任务所需的说明，不要复制主 Agent 的完整历史' } }, required: ['task'], additionalProperties: false }),
+      execute: async (input, options) => {
+        const task = (input as { task?: unknown })?.task;
+        if (typeof task !== 'string' || !task.trim()) throw new Error('子任务说明不能为空');
+        return delegation.execute(task.slice(0, 50_000), options.abortSignal ? AbortSignal.any([signal, options.abortSignal]) : signal);
+      },
+    });
+  }
+  return tools;
+}
+
+function createToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, delegations?: AgentDelegation[]) {
+  const reasoning = reasoningValue(effort);
+  const providerOptionsName = provider.protocol === 'openai-responses' ? 'openai' : provider.id;
+  return new ToolLoopAgent({
+    model: languageModel(provider, model),
+    instructions,
+    tools: loopTools(execution, delegations, signal),
+    stopWhen: stepCountIs(8),
+    toolCallConcurrency: 1,
+    maxRetries: 2,
+    ...(reasoning ? { providerOptions: { [providerOptionsName]: { reasoningEffort: reasoning } } } : {}),
+  } as never);
+}
+
+/** Stream a configured Agent. Each call receives only the messages passed by the host. */
+export async function* generateWithToolLoop(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, delegations?: AgentDelegation[]) {
+  signal.throwIfAborted();
+  if (!messages.length) throw new Error('对话消息不能为空');
+  const agent = createToolLoopAgent(provider, model, instructions, effort, signal, execution, delegations);
+  const result = await agent.stream({ messages: modelMessages(messages), abortSignal: signal });
+  let hasText = false;
+  for await (const text of checkedText(result.textStream)) { hasText = true; yield text; }
+  signal.throwIfAborted();
+  if ((await result.finishReason) === 'length') throw new Error('已达到模型输出长度限制');
+  if (!hasText) throw new Error('模型没有返回文本内容');
+}
+
+/** Execute one isolated child context and return only its final text. */
+export async function runToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, task: string, instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution) {
+  signal.throwIfAborted();
+  const agent = createToolLoopAgent(provider, model, instructions, effort, signal, execution);
+  const result = await agent.generate({ prompt: task, abortSignal: signal });
+  signal.throwIfAborted();
+  return result.text;
 }

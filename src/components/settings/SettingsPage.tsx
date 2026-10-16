@@ -9,7 +9,7 @@ const defaultSections = [
   { id: 'models', label: '模型', icon: <SlidersHorizontal /> },
   { id: 'applications', label: '应用 / MCP', icon: <Blocks /> },
   { id: 'skills', label: 'Skills', icon: <Sparkles /> },
-  { id: 'agent-presets', label: 'Agent 预设', icon: <Bot /> },
+  { id: 'agents', label: 'Agents', icon: <Bot /> },
   { id: 'desktop', label: '桌面设置', icon: <Monitor /> },
 ];
 

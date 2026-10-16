@@ -68,6 +68,9 @@ export interface AgentToolCall {
   output?: unknown;
   error?: string;
   status: AgentToolStatus;
+  agentId?: string | null;
+  parentRunId?: string;
+  runId?: string;
 }
 
 export interface AgentAttachment {
@@ -92,6 +95,7 @@ export interface AgentMessage {
   streaming?: boolean;
   attachments?: Array<string | AgentAttachment>;
   toolCalls?: AgentToolCall[];
+  agentId?: string | null;
 }
 
 export interface AgentSession {
@@ -110,6 +114,7 @@ export interface AgentSendRequest {
   skillIds: string[];
   modelId?: string;
   reasoningEffort?: string;
+  agentId?: string | null;
 }
 
 export interface AgentSidebarProps {
@@ -143,6 +148,9 @@ export interface AgentSidebarProps {
   onSelectedModelIdChange?: (id: string) => void;
   selectedReasoningEffort?: string;
   onSelectedReasoningEffortChange?: (effort: string) => void;
+  agents?: Array<{ id: string; name: string; avatar?: string; description?: string; enabled?: boolean; isDefault?: boolean; builtIn?: boolean; reasoningEfforts?: string[] }>;
+  selectedAgentId?: string | null;
+  onSelectedAgentIdChange?: (id: string) => void;
   pageContext?: string;
   className?: string;
 }

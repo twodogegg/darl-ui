@@ -20,6 +20,13 @@ describe('AgentSidebar', () => {
     expect(container).not.toHaveTextContent('不显示的详细结果');
   });
 
+  it('显示主 Agent 委派给子 Agent 的任务内容', () => {
+    const history: AgentSession[] = [{ id: 'one', title: '委派', messages: [{ id: 'assistant', role: 'assistant', content: '', toolCalls: [{ id: 'delegation', appId: 'agent:writer', appName: '文案 Agent', toolName: 'ask_writer', toolTitle: '文案 Agent 子任务', status: 'success', agentId: 'writer', input: { task: '请根据素材中心的结果写一段产品介绍。' } }] }] }];
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={history} activeSessionId="one" />);
+    expect(screen.getByText('委派任务')).toBeInTheDocument();
+    expect(screen.getByText('请根据素材中心的结果写一段产品介绍。')).toBeInTheDocument();
+  });
+
   it('确认工具时展示参数，宿主失败可重试并可拒绝', async () => {
     const onToolConfirm = vi.fn().mockRejectedValueOnce(new Error('确认请求失败')).mockResolvedValue(undefined);
     const pending: AgentSession[] = [{ id: 'one', title: '工具确认', messages: [{ id: 'assistant', role: 'assistant', content: '', toolCalls: [{ id: 'write-call', appId: 'catalog', appName: '素材库', toolName: 'save', status: 'confirmation', input: { name: '新素材' } }] }] }];
@@ -66,6 +73,23 @@ describe('AgentSidebar', () => {
     editor.append(document.createTextNode('查一下客户')); fireEvent.input(editor);
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
     await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('查一下客户'), applicationIds: ['crm'], skillIds: ['summary'], modelId: 'model', reasoningEffort: '低' })));
+  });
+
+  it('以角色卡选择并切换主 Agent，不显示额外的主 Agent 占位项', async () => {
+    const onSend = vi.fn();
+    const agents = [{ id: 'art', name: '美术 Agent', description: '处理美术任务' }, { id: 'writer', name: '文案 Agent', description: '处理文案任务' }];
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" onSend={onSend} agents={agents} models={[{ id: 'model', name: '通用模型' }]} />);
+    fireEvent.click(screen.getByRole('button', { name: '选择 Agent' }));
+    expect(screen.queryByRole('button', { name: /主 Agent/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /美术 Agent/ }));
+    fireEvent.input(screen.getByRole('textbox', { name: '输入消息' }), { target: { textContent: '设计一个角色' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await waitFor(() => expect(onSend).toHaveBeenLastCalledWith(expect.objectContaining({ agentId: 'art' })));
+    fireEvent.click(screen.getByRole('button', { name: /美术 Agent/ }));
+    fireEvent.click(screen.getByRole('button', { name: /文案 Agent/ }));
+    fireEvent.input(screen.getByRole('textbox', { name: '输入消息' }), { target: { textContent: '写一段文案' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await waitFor(() => expect(onSend).toHaveBeenLastCalledWith(expect.objectContaining({ agentId: 'writer' })));
   });
 
   it('可以只发送图片并把图片编码交给宿主', async () => {

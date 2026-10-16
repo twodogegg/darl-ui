@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { AgentSidebar, AgentSettingsCard, DarlUIProvider, ModelSettingsCard, SettingsPage, type AgentApplication, type AgentAttachment, type AgentToolCall, type AgentModelConfig, type AgentSendRequest, type AgentSession, type AgentSkill, type ModelProvider } from '@darl/ui';
+import { AgentSidebar, AgentsSettingsCard, DarlUIProvider, ModelSettingsCard, SettingsPage, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentToolCall, type AgentModelConfig, type AgentSendRequest, type AgentSession, type AgentSkill, type ModelProvider } from '@darl/ui';
 import { ArrowLeft, BookOpen, Bot, MessageSquare, Settings2, Wrench } from 'lucide-react';
 import { lines } from '../stream';
 import { Guide } from './Guide';
+import { toolHistoryForModel } from './message-history';
 
 const storageKey = 'darl-agent-chat-v1';
 const persistedSessions = (sessions: AgentSession[]) => sessions.map((session) => ({ ...session, messages: session.messages.map((message) => ({ ...message, attachments: message.attachments?.map((attachment) => typeof attachment === 'string' ? attachment : { ...attachment, url: attachment.url?.startsWith('data:') ? undefined : attachment.url }), toolCalls: message.toolCalls?.map(({ output: _output, ...call }) => call) })) }));
@@ -36,14 +37,13 @@ export function App() {
   const [skills, setSkills] = useState(initial.skills);
   const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [applications, setApplications] = useState<AgentApplication[]>([]);
+  const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [applicationRevision, setApplicationRevision] = useState(0);
   const [applicationsLoading, setApplicationsLoading] = useState(false);
   const [applicationError, setApplicationError] = useState('');
   const [settingsSection, setSettingsSection] = useState('models');
-  const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
-  const [promptError, setPromptError] = useState('');
-  const [promptRevision, setPromptRevision] = useState(0);
   const [modelId, setModelId] = useState('');
+  const [agentId, setAgentId] = useState<string | undefined>();
   const [effort, setEffort] = useState<string | undefined>();
   const [open, setOpen] = useState(true);
   const [settings, setSettings] = useState(false);
@@ -61,13 +61,10 @@ export function App() {
     return () => { active = false; };
   }, []);
   useEffect(() => {
-    if (!settings || settingsSection !== 'agent') return;
     let active = true;
-    setSystemPrompt(null); setPromptError('');
-    api<{ systemPrompt: string }>('agent-settings').then((value) => { if (active) setSystemPrompt(value.systemPrompt); })
-      .catch((reason) => { if (active) setPromptError(reason.message); });
+    api<AgentConfig[]>('agents').then((value) => { if (active) { setAgents(value); setAgentId((current) => current || value.find((agent) => agent.isDefault)?.id); } }).catch((reason) => { if (active) setError(reason.message); });
     return () => { active = false; };
-  }, [settings, settingsSection, promptRevision]);
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
     setApplicationsLoading(true); setApplicationError('');
@@ -91,11 +88,11 @@ export function App() {
   const run = async (request: AgentSendRequest, previous?: AgentSession['messages']) => {
     if (running.current) throw new Error('请先停止当前生成');
     const selected = models.find((model) => model.id === request.modelId);
-    if (!selected) throw new Error('请先在模型设置中配置并启用文本模型');
+    if (!selected && !request.agentId) throw new Error('请先在模型设置中配置并启用文本模型');
     const source = sessions.find((session) => session.id === request.sessionId);
     if (!source) throw new Error('会话不存在');
     const userAttachments: AgentAttachment[] | undefined = request.attachments?.map((attachment) => ({ name: attachment.name, type: attachment.type, size: attachment.size, url: attachment.data }));
-    const user = { id: crypto.randomUUID(), role: 'user' as const, content: request.content, ...(userAttachments?.length ? { attachments: userAttachments } : {}) };
+    const user = { id: crypto.randomUUID(), role: 'user' as const, content: request.content, ...(request.agentId !== undefined ? { agentId: request.agentId } : {}), ...(userAttachments?.length ? { attachments: userAttachments } : {}) };
     const history = previous ?? [...source.messages, user];
     const answer = { id: crypto.randomUUID(), role: 'assistant' as const, content: '', streaming: true };
     const controller = new AbortController();
@@ -110,18 +107,21 @@ export function App() {
     try {
       const usedSkills = skills.filter((skill) => skill.enabled !== false && (request.skillIds.includes(skill.id) || history.some((message) => message.role === 'user' && message.content.includes(`(skill:${encodeURIComponent(skill.id)})`))));
       if (usedSkills.some((skill) => !skill.instructions?.trim())) throw new Error('选中的 Skill 没有指令，请先编辑');
-      const apiMessages = history.filter((message) => message.content || message.attachments?.length).map(({ role, content, attachments }) => {
+      const apiMessages = history.filter((message) => message.content || message.attachments?.length || ('toolCalls' in message && message.toolCalls?.length)).map((message) => {
+        const { role, content, attachments } = message;
+        const toolHistory = 'toolCalls' in message ? toolHistoryForModel(message) : '';
+        const modelText = [content, toolHistory].filter(Boolean).join('\n\n');
         const images = (attachments || []).flatMap((attachment) => {
           if (typeof attachment === 'string' || !attachment.url?.startsWith('data:image/')) return [];
           return [{ type: 'image' as const, name: attachment.name, mimeType: attachment.type || 'image/png', data: attachment.url, size: attachment.size }];
         });
-        return { role, content: images.length ? [{ type: 'text' as const, text: content }, ...images] : content };
+        return { role, content: images.length ? [{ type: 'text' as const, text: modelText }, ...images] : modelText };
       });
       let response: Response;
       try {
         response = await fetch('/api/chat', {
           method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ applicationIds: request.applicationIds, providerId: selected.providerId, modelId: decodeURIComponent(selected.id.slice(selected.id.indexOf('/') + 1)), effort: request.reasoningEffort, messages: apiMessages, skills: usedSkills.map(({ name, instructions }) => ({ name, instructions })) }),
+          body: JSON.stringify({ agentId: request.agentId, skillIds: usedSkills.map((skill) => skill.id), applicationIds: request.applicationIds, providerId: selected?.providerId, modelId: selected ? decodeURIComponent(selected.id.slice(selected.id.indexOf('/') + 1)) : undefined, effort: request.reasoningEffort, messages: apiMessages, skills: usedSkills.map(({ id, name, instructions }) => ({ id, name, instructions })) }),
         });
       } catch (reason) {
         if (controller.signal.aborted) throw reason;
@@ -172,7 +172,7 @@ export function App() {
         if (typeof attachment === 'string' || !attachment.url?.startsWith('data:image/')) return [];
         return [{ name: attachment.name, type: attachment.type || 'image/png', data: attachment.url, size: attachment.size }];
       });
-      void run({ sessionId: session.id, content: user.content, skillIds: [], applicationIds: [...user.content.matchAll(/\]\(app:([^)]*)\)/g)].flatMap((match) => { try { return [decodeURIComponent(match[1])]; } catch { return []; } }), modelId: availableModelId, reasoningEffort: models.find((model) => model.id === availableModelId)?.reasoningEfforts?.includes(effort || '') ? effort : undefined, attachments: imageAttachments }, history).catch((reason) => setError(reason.message));
+      void run({ sessionId: session.id, content: user.content, skillIds: [], applicationIds: [...user.content.matchAll(/\]\(app:([^)]*)\)/g)].flatMap((match) => { try { return [decodeURIComponent(match[1])]; } catch { return []; } }), modelId: availableModelId, agentId: user.agentId !== undefined ? user.agentId : agentId, reasoningEffort: models.find((model) => model.id === availableModelId)?.reasoningEfforts?.includes(effort || '') ? effort : undefined, attachments: imageAttachments }, history).catch((reason) => setError(reason.message));
   };
   const saveSkill = async (skill: AgentSkill) => {
     const next = [...skills.filter((item) => item.id !== skill.id), skill];
@@ -191,7 +191,7 @@ export function App() {
     <div className={`example-page ${open ? 'with-agent' : ''}`}>
       <header className="example-header"><a href="http://localhost:5188">Darl UI <span>/ Agent Chat</span></a><div><button className={buttonClass} onClick={showGuide}><BookOpen size={16} />开发说明</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />设置</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setOpen((value) => !value); }}><MessageSquare size={16} />聊天</button></div></header>
       {(error || storageError) && <p className="example-error" role="alert">{error || storageError}</p>}
-      {guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : settings ? <main className="example-settings"><button className={buttonClass} onClick={() => { setSettings(false); setOpen(true); }}><ArrowLeft size={15} />返回聊天</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'agent', label: 'Agent', icon: <Bot /> }, { id: 'applications', label: '应用 / MCP', icon: <Wrench /> }]}>{settingsSection === 'agent' ? systemPrompt !== null ? <AgentSettingsCard systemPrompt={systemPrompt} onSave={async (value) => { const saved = await api<{ systemPrompt: string }>('agent-settings', { systemPrompt: value }); setSystemPrompt(saved.systemPrompt); }} /> : <div>{promptError ? <><p role="alert">{promptError}</p><button className={buttonClass} onClick={() => setPromptRevision((value) => value + 1)}>重新加载提示词</button></> : <p role="status">正在加载提示词…</p>}</div> : settingsSection === 'applications' ? <section className="example-applications"><h2>应用 / MCP</h2><p>服务端配置连接，工具目录由 MCP 动态发现。在对话中 @ 引用一次应用，后续消息即可继续使用它的工具。</p><button className={buttonClass} disabled={applicationsLoading} onClick={() => setApplicationRevision((value) => value + 1)}>{applicationsLoading ? '正在连接…' : '重新连接'}</button>{applicationError && <p role="alert">{applicationError}</p>}{!applicationsLoading && !applications.length && <p>暂无应用，请在服务端配置 applications.json。</p>}{applications.map((app) => <article key={app.id}><h3>{app.name} · {app.status === 'connected' ? '已连接' : '未连接'}</h3><p>{app.description}</p><ul>{app.tools?.map((tool) => <li key={tool.name}><strong>{tool.title || tool.name}</strong><span>{tool.risk === 'read' ? '只读' : '执行前确认'}</span><p>{tool.description}</p></li>)}</ul></article>)}</section> : <ModelSettingsCard providers={providers}
+      {guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : settings ? <main className="example-settings"><button className={buttonClass} onClick={() => { setSettings(false); setOpen(true); }}><ArrowLeft size={15} />返回聊天</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'agents', label: 'Agents', icon: <Bot /> }, { id: 'applications', label: '应用 / MCP', icon: <Wrench /> }]}>{settingsSection === 'agents' ? <AgentsSettingsCard agents={agents} models={providers.flatMap((provider) => provider.models)} applications={applications} skills={skills} onSave={async (agent) => setAgents(await api<AgentConfig[]>('agents', { agent }))} onDelete={async (id) => setAgents(await api<AgentConfig[]>(`agents/${id}`, undefined, 'DELETE'))} /> : settingsSection === 'applications' ? <section className="example-applications"><h2>应用 / MCP</h2><p>服务端配置连接，工具目录由 MCP 动态发现。在对话中 @ 引用一次应用，后续消息即可继续使用它的工具。</p><button className={buttonClass} disabled={applicationsLoading} onClick={() => setApplicationRevision((value) => value + 1)}>{applicationsLoading ? '正在连接…' : '重新连接'}</button>{applicationError && <p role="alert">{applicationError}</p>}{!applicationsLoading && !applications.length && <p>暂无应用，请在服务端配置 applications.json。</p>}{applications.map((app) => <article key={app.id}><h3>{app.name} · {app.status === 'connected' ? '已连接' : '未连接'}</h3><p>{app.description}</p><ul>{app.tools?.map((tool) => <li key={tool.name}><strong>{tool.title || tool.name}</strong><span>{tool.risk === 'read' ? '只读' : '执行前确认'}</span><p>{tool.description}</p></li>)}</ul></article>)}</section> : <ModelSettingsCard providers={providers}
         onProviderSave={async (provider, apiKey) => setProviders(await api<ModelProvider[]>('providers', { provider, apiKey }))}
         onProviderDelete={async (id) => setProviders(await api<ModelProvider[]>(`providers/${id}`, undefined, 'DELETE'))}
         onTestConnection={async (provider) => setProviders(await api<ModelProvider[]>(`providers/${provider.id}/test`, {}))}
@@ -202,7 +202,7 @@ export function App() {
       onNewSession={() => { const session = newSession(); setSessions((current) => [session, ...current]); setActiveId(session.id); }}
       onSend={run} onStop={() => running.current?.abort()} isGenerating={generating} onRegenerate={regenerate}
       applications={applications} onToolConfirm={async (id, approved) => { await api(`tool-confirmations/${id}`, { approved }); }}
-      models={models} selectedModelId={availableModelId} onSelectedModelIdChange={setModelId} selectedReasoningEffort={effort} onSelectedReasoningEffortChange={setEffort}
+      agents={agents} selectedAgentId={agentId} onSelectedAgentIdChange={setAgentId} models={models} selectedModelId={availableModelId} onSelectedModelIdChange={setModelId} selectedReasoningEffort={effort} onSelectedReasoningEffortChange={setEffort}
       skills={skills} onSkillImport={saveSkill} onSkillSave={saveSkill}
       onSkillDelete={async (id) => { const next = skills.filter((skill) => skill.id !== id); localStorage.setItem(storageKey, JSON.stringify({ sessions: persistedSessions(sessions), activeId, skills: next })); setSkills(next); }}
       onSkillFavoriteChange={async (id, favorite) => { const skill = skills.find((item) => item.id === id); if (skill) await saveSkill({ ...skill, favorite }); }}

@@ -35,6 +35,35 @@ export interface AgentModelConfig {
   enabled?: boolean;
 }
 
+/** A server-managed assistant configuration. Credentials are kept on the host. */
+export interface AgentConfig {
+  id: string;
+  name: string;
+  builtIn?: boolean;
+  /** Emoji, short label, or a host-managed image URL. */
+  avatar?: string;
+  description?: string;
+  instructions: string;
+  providerId: string;
+  modelId: string;
+  reasoningEfforts?: string[];
+  skillIds?: string[];
+  applicationIds?: string[];
+  /** Optional per-application tool allow-list. Omitted means all discovered tools. */
+  applicationTools?: Record<string, string[]>;
+  enabled?: boolean;
+  isDefault?: boolean;
+}
+
+export interface AgentsSettingsCardProps {
+  agents: AgentConfig[];
+  models?: AgentModelConfig[];
+  applications?: Array<{ id: string; name: string; tools?: Array<{ name: string; title?: string }> }>;
+  skills?: Array<{ id: string; name: string; enabled?: boolean }>;
+  onSave?: (agent: AgentConfig) => void | Promise<void>;
+  onDelete?: (agentId: string) => void | Promise<void>;
+}
+
 export interface SettingsSection {
   id: string;
   label: string;

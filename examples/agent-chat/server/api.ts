@@ -3,10 +3,30 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
 import type { AgentSkill, AgentToolCall } from '../../../src/index';
 import { applicationCatalog, connectApplication, conversationApplications, loadApplications, toolRisk, ToolConfirmations } from './mcp';
-import { generate, listModels, publicProvider, safeError, validateProvider, type ChatImage, type ChatMessage, type StoredProvider } from './models';
+import { loadAgents, publicAgent, validateAgent, validateAgents, type StoredAgent } from './agents';
+import { generate, generateWithToolLoop, listModels, publicProvider, runToolLoopAgent, safeError, validateProvider, type AgentDelegation, type ChatImage, type ChatMessage, type StoredProvider, type ToolExecution } from './models';
 
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_DATA_URL_LENGTH = 64 + 4 * Math.ceil(MAX_IMAGE_BYTES / 3);
+
+async function connectApplicationWithRetry(app: Parameters<typeof connectApplication>[0], signal: AbortSignal) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try { return await connectApplication(app, signal); }
+    catch (error) {
+      lastError = error;
+      if (attempt === 2) break;
+      await new Promise<void>((resolve, reject) => {
+        let timer: ReturnType<typeof setTimeout>;
+        const abort = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); reject(signal.reason); };
+        const finish = () => { signal.removeEventListener('abort', abort); resolve(); };
+        timer = setTimeout(finish, 150 * (attempt + 1));
+        signal.addEventListener('abort', abort, { once: true });
+      });
+    }
+  }
+  throw lastError;
+}
 
 async function readBody(request: IncomingMessage) {
   const chunks: Buffer[] = [];
@@ -79,6 +99,16 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     queue = job.catch(() => {});
     return job;
   };
+  const saveAgents = (next: StoredAgent[]) => {
+    const file = resolve(directory, 'agents.json');
+    const job = queue.then(async () => {
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      await writeFile(`${file}.tmp`, JSON.stringify(next), { mode: 0o600 });
+      await rename(`${file}.tmp`, file);
+    });
+    queue = job.catch(() => {});
+    return job;
+  };
   return async (request: IncomingMessage, response: ServerResponse, next: () => void) => {
     if (!request.url?.startsWith('/api/')) return next();
     const send = (status: number, data: unknown) => {
@@ -96,6 +126,12 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     try {
       await queue;
       const providers = await load();
+      const configuredAgents = await loadAgents(directory);
+      const defaultProvider = providers.find((provider) => provider.models.some((model) => model.type === 'text' && model.enabled !== false)) || providers[0];
+      const defaultModel = defaultProvider?.models.find((model) => model.type === 'text' && model.enabled !== false);
+      const savedDefault = configuredAgents.find((agent) => agent.id === 'default' && agent.builtIn);
+      const defaultAgent: StoredAgent = { id: 'default', name: '网站助手', avatar: '/agent-default-avatar.png', description: '系统默认 Agent', instructions: await loadPrompt(), providerId: defaultProvider?.id || 'darl', modelId: defaultModel?.id || env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash', skillIds: [], applicationIds: [], applicationTools: {}, enabled: true, isDefault: !configuredAgents.some((agent) => agent.isDefault), builtIn: true, ...savedDefault };
+      const agents = [defaultAgent, ...configuredAgents.filter((agent) => agent.id !== defaultAgent.id)];
       const path = request.url.split('?')[0];
       if (path === '/api/agent-settings' && request.method === 'GET') return send(200, { systemPrompt: await loadPrompt() });
       if (path === '/api/agent-settings' && request.method === 'POST') {
@@ -118,6 +154,33 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         return send(200, { ok: true });
       }
       if (path === '/api/providers' && request.method === 'GET') return send(200, providers.map(publicProvider));
+      if (path === '/api/agents' && request.method === 'GET') return send(200, agents.map(publicAgent));
+      if (path === '/api/agents' && request.method === 'POST') {
+        const body = await readBody(request);
+        const incoming = body?.agent ?? body;
+        const existing = agents.find((item) => item.id === incoming?.id);
+        const agent = validateAgent(incoming, agents.filter((item) => item.id !== existing?.id));
+        const agentProvider = providers.find((provider) => provider.id === agent.providerId);
+        const agentModel = agentProvider?.models.find((model) => model.id === agent.modelId && model.type === 'text' && model.enabled !== false);
+        if (!agentProvider || !agentModel) throw new Error('Agent 选择的文本模型不存在或未启用');
+        if (agent.reasoningEfforts?.some((effort) => !agentModel.reasoningEfforts?.includes(effort))) throw new Error('Agent 推理强度不受模型支持');
+        const next = agents.some((item) => item.id === agent.id) ? agents.map((item) => item.id === agent.id ? agent : item) : [...agents, agent];
+        if (agent.isDefault) next.forEach((item) => { item.isDefault = item.id === agent.id; });
+        else {
+          const defaultIndex = next.findIndex((item) => item.isDefault);
+          next.forEach((item, index) => { item.isDefault = index === defaultIndex; });
+        }
+        const checked = validateAgents(next);
+        await saveAgents(checked);
+        return send(200, checked.map(publicAgent));
+      }
+      const agentRoute = path.match(/^\/api\/agents\/([\w-]+)$/);
+      if (agentRoute && request.method === 'DELETE') {
+        if (!agents.some((item) => item.id === agentRoute[1])) return send(404, { error: 'Agent 不存在' });
+        const next = agents.filter((item) => item.id !== agentRoute[1]);
+        await saveAgents(validateAgents(next));
+        return send(200, next.map(publicAgent));
+      }
       if (path === '/api/providers' && request.method === 'POST') {
         const { provider: value, apiKey } = await readBody(request);
         const provider = validateProvider(value);
@@ -135,6 +198,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         if (!provider) return send(404, { error: '提供方不存在' });
         secret = provider.apiKey;
         if (!route[2] && request.method === 'DELETE') {
+          if (agents.some((agent) => agent.providerId === provider.id)) throw new Error('请先移除使用此提供方的 Agent');
           await update((current) => current.filter((item) => item.id !== provider.id));
           return send(200, (await load()).map(publicProvider));
         }
@@ -154,12 +218,15 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       }
       if (path === '/api/chat' && request.method === 'POST') {
         const body = await readBody(request);
-        const provider = providers.find((item) => item.id === body.providerId);
+        const selectedAgent = body.agentId === undefined ? agents.find((item) => item.isDefault && item.enabled !== false) : body.agentId === null ? undefined : agents.find((item) => item.id === body.agentId);
+        if (body.agentId !== undefined && body.agentId !== null && (!selectedAgent || selectedAgent.enabled === false)) throw new Error('请选择已启用的 Agent');
+        const provider = providers.find((item) => item.id === (selectedAgent?.providerId || body.providerId));
         if (!provider) throw new Error('请选择已保存的模型提供方');
         secret = provider.apiKey;
-        const model = provider.models.find((item) => item.id === body.modelId && item.type === 'text' && item.enabled !== false);
+        const model = provider.models.find((item) => item.id === (selectedAgent?.modelId || body.modelId) && item.type === 'text' && item.enabled !== false);
         if (!model) throw new Error('请选择已启用的文本模型');
-        if (body.effort && !model.reasoningEfforts?.includes(body.effort)) throw new Error('模型不支持此推理强度');
+        const effort = selectedAgent?.reasoningEfforts?.[0] || body.effort;
+        if (effort && !model.reasoningEfforts?.includes(effort)) throw new Error('模型不支持此推理强度');
         if (!Array.isArray(body.messages) || !body.messages.length || body.messages.length > 200) throw new Error('对话消息数量无效');
         const messages: ChatMessage[] = body.messages.map((message: ChatMessage) => {
           if (!message || !['user', 'assistant'].includes(message.role)) throw new Error('消息格式无效');
@@ -185,20 +252,27 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           throw new Error('当前模型未启用视觉输入，请在模型设置中开启 vision 或选择支持图片的模型');
         }
         if (!Array.isArray(body.skills) || body.skills.length > 30) throw new Error('Skills 格式无效');
-        const instructions = [await loadPrompt(), ...body.skills.map((skill: AgentSkill) => {
+        const requestedSkillIds = body.skillIds ?? [];
+        if (!Array.isArray(requestedSkillIds) || requestedSkillIds.length > 30 || requestedSkillIds.some((id: unknown) => typeof id !== 'string')) throw new Error('Skills 格式无效');
+        if (selectedAgent?.skillIds && requestedSkillIds.some((id: string) => !selectedAgent.skillIds?.includes(id))) throw new Error('请求使用了当前 Agent 未授权的 Skill');
+        const instructions = [selectedAgent?.instructions || await loadPrompt(), ...body.skills.map((skill: AgentSkill) => {
           if (typeof skill?.name !== 'string' || typeof skill.instructions !== 'string' || skill.instructions.length > 100_000) throw new Error('Skill 指令格式无效');
           return `技能：${skill.name}\n${skill.instructions}`;
         })].join('\n\n');
-        const applicationIds = body.applicationIds ?? [];
-        if (!Array.isArray(applicationIds) || applicationIds.length > 20 || applicationIds.some((id: unknown) => typeof id !== 'string')) throw new Error('应用列表无效');
+        const requestedApplicationIds = body.applicationIds ?? [];
+        if (!Array.isArray(requestedApplicationIds) || requestedApplicationIds.length > 20 || requestedApplicationIds.some((id: unknown) => typeof id !== 'string')) throw new Error('应用列表无效');
+        const restrictedAgent = selectedAgent && (!selectedAgent.builtIn || configuredAgents.some((agent) => agent.id === selectedAgent.id)) ? selectedAgent : undefined;
+        const applicationIds = [...new Set(requestedApplicationIds)];
+        if (applicationIds.length > 20) throw new Error('应用列表无效');
         const configs = await loadApplications(directory);
         const selectedApps = conversationApplications(configs, applicationIds, messages);
+        if (restrictedAgent?.applicationIds && (body.applicationIds || []).some((id: string) => !restrictedAgent.applicationIds?.includes(id))) throw new Error('请求使用了当前 Agent 未授权的 MCP 应用');
+        const allowedApps = restrictedAgent ? new Set(restrictedAgent.applicationIds || []) : undefined;
+        const scopedApps = allowedApps ? selectedApps.filter((app) => allowedApps.has(app.id)) : selectedApps;
         const attachedImages = latestUserImages(messages);
-        for (const app of selectedApps) connections.push(await connectApplication(app, signal));
-        const functions = connections.flatMap((connection, appIndex) => connection.tools.map((tool, index) => ({ name: `mcp_${appIndex}_${index}`, connection, tool })));
-        if (functions.length > 128) throw new Error('所选应用合计超过 128 个工具，请减少应用数量');
+        const runId = crypto.randomUUID();
         const emitTool = (call: AgentToolCall) => {
-          if (!signal.aborted) response.write(`${JSON.stringify({ type: 'tool', call: { ...call, input: call.status === 'confirmation' ? call.input : undefined } })}\n`);
+          if (!signal.aborted) response.write(`${JSON.stringify({ type: 'tool', call: { ...call, input: call.appId.startsWith('agent:') || call.status === 'confirmation' ? call.input : undefined } })}\n`);
         };
         const emitImages = (value: unknown) => {
           if (!Array.isArray(value)) return;
@@ -209,14 +283,19 @@ export function createApi(directory: string, env: Record<string, string>, prompt
             response.write(`${JSON.stringify({ type: 'image', image: { name: `工具图片-${index + 1}`, type: image.mimeType, url: `data:${image.mimeType};base64,${image.data}` } })}\n`);
           });
         };
-        const execution = functions.length ? {
+        const createExecution = async (apps: typeof scopedApps, ownerAgentId?: string, images: ChatImage[] = [], applicationTools?: Record<string, string[]>, executionRunId = runId, parentRunId?: string) => {
+          const ownedConnections = [] as Awaited<ReturnType<typeof connectApplication>>[];
+          for (const app of apps) { const connection = await connectApplicationWithRetry(app, signal); connections.push(connection); ownedConnections.push(connection); }
+          const functions = ownedConnections.flatMap((connection, appIndex) => connection.tools.filter((tool) => !applicationTools?.[connection.app.id] || applicationTools[connection.app.id].includes(tool.name)).map((tool, index) => ({ name: `mcp_${appIndex}_${index}`, connection, tool })));
+          if (functions.length > 128) throw new Error('所选应用合计超过 128 个工具，请减少应用数量');
+          const execution: ToolExecution = {
           tools: functions.map(({ name, connection, tool }) => ({ name, description: `${connection.app.name} / ${tool.title || tool.name} (${tool.name}): ${tool.description || ''}`, parameters: tool.inputSchema })),
           execute: async (request: { name: string; arguments: string }, toolSignal = signal) => {
             const callSignal = AbortSignal.any([signal, toolSignal]);
             const selected = functions.find((item) => item.name === request.name);
             if (!selected) throw new Error('模型请求了未授权的工具');
             const { connection, tool } = selected;
-            const call: AgentToolCall = { id: crypto.randomUUID(), appId: connection.app.id, appName: connection.app.name, toolName: tool.name, toolTitle: tool.title || tool.annotations?.title, input: request.arguments, status: 'pending' };
+            const call: AgentToolCall = { id: crypto.randomUUID(), appId: connection.app.id, appName: connection.app.name, toolName: tool.name, toolTitle: tool.title || tool.annotations?.title, input: request.arguments, status: 'pending', runId: executionRunId, ...(ownerAgentId ? { agentId: ownerAgentId, ...(parentRunId ? { parentRunId } : {}) } : {}) };
             try {
               const args = JSON.parse(request.arguments || '{}');
               if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('工具参数必须为 JSON 对象');
@@ -230,7 +309,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
               callSignal.throwIfAborted();
               call.status = 'running';
               emitTool(call);
-              const attachedUpload = findAttachedImageForUpload(tool, args, attachedImages);
+              const attachedUpload = findAttachedImageForUpload(tool, args, images);
               const result = attachedUpload
                 ? await uploadAttachedImage((stepArgs, stepSignal) => connection.call(tool.name, stepArgs, stepSignal), attachedUpload.image, args, attachedUpload.fields, callSignal)
                 : await connection.call(tool.name, args, callSignal);
@@ -251,10 +330,41 @@ export function createApi(directory: string, env: Record<string, string>, prompt
               return JSON.stringify({ isError: true, error: call.error });
             }
           },
-        } : undefined;
+          };
+          return functions.length ? execution : undefined;
+        };
+        const execution = await createExecution(scopedApps, restrictedAgent?.id, attachedImages, restrictedAgent?.applicationTools);
+        const delegations: AgentDelegation[] = [];
+        for (const child of agents.filter((item) => item.id !== selectedAgent?.id && item.enabled !== false && !item.builtIn)) {
+          const childProvider = providers.find((item) => item.id === child.providerId);
+          const childModel = childProvider?.models.find((item) => item.id === child.modelId && item.type === 'text' && item.enabled !== false);
+          if (!childProvider || !childModel) continue;
+          const childApps = selectedApps.filter((app) => (child.applicationIds || []).includes(app.id));
+          delegations.push({
+            name: `ask_${child.id}`,
+            description: `委派任务给${child.name}。子 Agent 使用独立上下文，只返回最终摘要。`,
+            execute: async (task, childSignal) => {
+              const childRunId = crypto.randomUUID();
+              const delegationCall: AgentToolCall = { id: crypto.randomUUID(), appId: `agent:${child.id}`, appName: child.name, toolName: `ask_${child.id}`, toolTitle: `${child.name} 子任务`, input: { task }, status: 'pending', agentId: child.id, parentRunId: runId, runId: childRunId };
+              emitTool(delegationCall);
+              emitTool({ ...delegationCall, status: 'running' });
+              try {
+                const childExecution = await createExecution(childApps, child.id, [], child.applicationTools, childRunId, runId);
+                const childInstructions = [child.instructions, ...body.skills.filter((skill: AgentSkill) => typeof skill.id === 'string' && child.skillIds?.includes(skill.id)).map((skill: AgentSkill) => `技能：${skill.name}\n${skill.instructions}`)].join('\n\n');
+                const result = await runToolLoopAgent(childProvider, childModel, task, childInstructions, child.reasoningEfforts?.[0], childSignal, childExecution);
+                emitTool({ ...delegationCall, status: 'success', output: result });
+                return result.slice(0, 80_000);
+              } catch (error) {
+                const message = safeError(error, childProvider.apiKey);
+                emitTool({ ...delegationCall, status: 'error', error: message });
+                throw error;
+              }
+            },
+          });
+        }
         response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
         response.flushHeaders();
-        for await (const text of generate(provider, model, messages, instructions, body.effort, signal, execution)) {
+        for await (const text of (restrictedAgent || delegations.length ? generateWithToolLoop(provider, model, messages, instructions, effort, signal, execution, delegations) : generate(provider, model, messages, instructions, effort, signal, execution))) {
           if (!response.write(`${JSON.stringify({ type: 'text', text })}\n`)) await new Promise<void>((done) => {
             const resume = () => { response.off('drain', resume); response.off('close', resume); done(); };
             response.once('drain', resume);
