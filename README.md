@@ -357,3 +357,38 @@ const [open, setOpen] = useState(false);
 - 切换模型时应用该模型默认参数；返回已有步骤保留用户有效的手动选择。宿主替换模型列表后，失效模型/参数自动回退到有效选项。
 
 Playground：`/#default-models`。
+
+
+## InteractiveConfirmDialog｜通用 Agent 交互确认弹窗
+
+可以在任意 React Agent 宿主中显示一组可配置问题，用户确认后返回结构化答案。组件仅处理本地交互，继续执行 Agent、记录会话或发送 API 由宿主负责。
+
+```tsx
+import { InteractiveConfirmDialog } from '@darl/ui';
+
+<InteractiveConfirmDialog
+  open={open}
+  onOpenChange={setOpen}
+  title="确认本次改编方案"
+  confirmText="确认方案，开始正式剧本写作"
+  cancelText="返回修改"
+  questions={[
+    { id: 'duration', label: '目标成片时长', type: 'single', required: true,
+      defaultValue: '6m', options: [{ value: '6m', label: '6 分钟' }, { value: '10m', label: '10 分钟' }] },
+    { id: 'notes', label: '其他修改要求（可选）', type: 'textarea' },
+  ]}
+  onConfirm={async (answers) => {
+    // answers: { duration: '6m', notes: '...' }
+    await resumeAgentWithAnswers(answers);
+    setOpen(false);
+  }}
+/>
+```
+
+- `open/onOpenChange`：受控弹窗开关；`title/description`：标题与描述；`questions`：按顺序展示的问题数组（`id` 必须唯一）。
+- `type`：`single` 单选、`multiple` 多选、`text` 单行文本、`textarea` 多行文本；选择题使用 `options: { value, label, description?, disabled? }[]`。
+- `required` 默认为否，`defaultValue` 提供初始答案；`placeholder` 设置输入提示。
+- `confirmText/cancelText/showCancel` 可配置按钮；`onCancel` 响应所有关闭方式，包括 Esc 与遮罩；`accentColor/className` 可覆盖样式。
+- `onConfirm(answers)` 返回 `Record<questionId, string | string[]>`；多选始终是数组，输入题始终是字符串。支持 Promise：处理中禁用按钮，失败保留答案并显示错误；成功后由宿主关闭弹窗并恢复 Agent。
+
+Playground：`/#confirm-dialog`（含原著改编确认示例及模拟提交失败）。
