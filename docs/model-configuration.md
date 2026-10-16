@@ -2,7 +2,7 @@
 
 > 状态：设计规范 / 待按关联 Issues 实现。本文描述目标行为，不代表当前代码已实现。
 >
-> 适用项目：`@darl/ui` 通用组件库及其宿主示例。第一期以实际接入 API 文档为准，禁止按品牌名臆测渠道能力。
+> 适用项目：`@darl/ui` 通用组件库及其宿主示例。第一期以实际接入渠道能力为准，禁止按品牌名臆测。**2026-10-17 用户已补充网关最新能力：`minimax-h3-flash` 支持文生视频、首尾帧生成，`resolution` 仅为 `480` / `768`。Apifox 旧文档部分字段未更新，以这些用户确认的规则为准。**
 
 ## 1. 目标与边界
 
@@ -80,9 +80,9 @@ DeepSeek 官方将请求 `medium` 映射到实际 `high`，因此不在 UI 中�
 
 - **生成方式**需要逐项声明：纯文生、仅首帧、仅尾帧、首尾帧、多模态参考。拥有普通参考图片字段**不等于**支持专门的首/尾帧角色。
 - `maxReferenceImages`、`maxReferenceVideos`、`maxReferenceAudios`；可选素材总数上限和不允许的混合组合。视频/音频的数量及长度限制需按渠道确认。
-- 画幅列表；实际 API 的分辨率控制（可能是 `resolution`，也可能是 `megapixels`）；生成时长离散值或区间；默认值；是否可控制音频生成（若无参数，不出现开关）。
+- 画幅列表、分辨率可选值、生成时长离散值或区间、默认值；是否可控制音频生成（若无参数，不出现开关）。分辨率选项以各渠道实际可用值为准，H3 Flash 当前仅 `480`、`768`。
 - 模式级别的输入/输出约束应能覆盖总体模板。缺少模式声明时不得自动推断支持。
-- 像素总量 `megapixels` 不等于输出短边 `720p`；不要将 MP 数值伪装成固定 `720p / 1080p` 列表。
+- 不把过时的 `megapixels` 或其他分辨率单位当作本期 H3 Flash 的接口选项；其 UI 只允许 `480`、`768`，并校验默认值属于这个集合。
 
 ### 模板与覆盖规则
 
@@ -116,7 +116,7 @@ DeepSeek 官方将请求 `medium` 映射到实际 `high`，因此不在 UI 中�
 
 ## 7. `minimax-h3-flash`：第一期**唯一视频接入合同**
 
-**权威接口：** [Apifox · MiniMax H3 Flash（RunningHub）](https://fwr0187eq6.apifox.cn/9534525m0)（以及其[创建接口](https://fwr0187eq6.apifox.cn/523019890e0)、[上传接口](https://fwr0187eq6.apifox.cn/523019889e0)）。
+**接口基础文档（部分字段尚未更新）：** [Apifox · MiniMax H3 Flash（RunningHub）](https://fwr0187eq6.apifox.cn/9534525m0)（以及其[创建接口](https://fwr0187eq6.apifox.cn/523019890e0)、[上传接口](https://fwr0187eq6.apifox.cn/523019889e0)）。**用户确认的当前网关行为优先：文生视频 + 首尾帧生成；`resolution` 仅支持 `480` / `768`。** 首尾帧的实际请求字段及素材上传/引用形式在最新版文档或真实请求中核对，不能直接复用其他 H3 协议。
 
 **注意重名：** Apifox 还存在[「MiniMax H3 调用说明」](https://fwr0187eq6.apifox.cn/9532072m0)和[「MiniMax H3 视频 API 使用说明」](https://fwr0187eq6.apifox.cn/9352472m0)；它们描述不同的接入方式及不同参数，**不得混用**。本期 `protocolKey` 建议命名 `darl-runninghub-h3-flash`，避免与本地 H3、官方 H3 或其他统一视频协议混淆。
 
@@ -127,7 +127,7 @@ DeepSeek 官方将请求 `medium` 映射到实际 `high`，因此不在 UI 中�
 | `model` | `minimax-h3-flash` | 必传 |
 | `prompt` | 必传非空字符串；图片按顺序对应 `<Picture 1>` 等编号 | 无 |
 | `seconds` | 整数 4–15 | 10 |
-| `megapixels` | 0.1–1 MP | 1 |
+| `resolution` | **仅 `480` 或 `768`**（当前用户确认的有效值；字段类型按实际网关校验） | 建议 `768`，可按渠道覆盖 |
 | `aspect_ratio` | `1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`9:16`、`16:9`、`21:9` | `9:16` |
 | `reference_images` | 最多 9 个 **网关上传素材 ID** | [] |
 | `reference_audio` | 最多 3 个 **网关上传素材 ID** | [] |
@@ -136,8 +136,8 @@ DeepSeek 官方将请求 `medium` 映射到实际 `high`，因此不在 UI 中�
 | `instance_type` | `default` / `plus` / `ultra`，取决于账号、费用及工作流支持 | `default` |
 | `use_personal_queue` | Boolean | false |
 
-- 只传明确列出的字段；**不支持** `resolution`、`upscale`、`seed`、`generate_audio`、`webhookUrl`、`retainSeconds`、`webappId`、`nodeInfoList`、客户端 `apiKey` 等额外字段。实例类型与队列设置本期可以由宿主固定默认，不强迫用户配置。
-- **首帧/尾帧/首尾帧独立角色未在该专用 API 文档提供。** 通用 UI 的这三类模式可以保留在类型定义中，但此绑定的模板不得开启；仅启用文生和普通多模态参考。
+- **以当前网关能力为准使用 `resolution`（480 / 768），不再使用过期的 `megapixels`。** 其他未验证的 `upscale`、`seed`、`generate_audio`、`webhookUrl`、`retainSeconds`、`webappId`、`nodeInfoList` 等字段不得擅自发送。实例类型与队列设置本期可由宿主固定默认，不强迫用户配置。
+- **当前已确认支持文生视频与首尾帧生成**：为本渠道开启 `text-to-video` 与 `first-last-frame`（两帧角色）。首帧、尾帧的实际请求字段以及其是否必须同时提供，按新网关接口验证；**「仅首帧」「仅尾帧」是否单独支持尚未确认，先不启用。** 多模态参考输入继续按当前渠道的素材上限配置。
 - 本专用接口并非“直接输入 URL 的通用视频接口”。`reference_*` 使用上传返回的 `task_*` 素材 ID（兼容 `fileName`，但不作为默认安全路径），不可直接传 HTTP URL、Base64 或本地文件路径。
 - 图片 9 / 音频 3 / 视频 3 是**各类型上限**，此文档没有证明所有类型极限值可以同时组合提交；不要自行添加未证实的全局混合总数上限或声称所有组合必然成功。
 
@@ -145,12 +145,12 @@ DeepSeek 官方将请求 `medium` 映射到实际 `high`，因此不在 UI 中�
 
 1. 在路由阶段先选定**具体绑定/渠道**，确定将使用的网关凭据与素材归属。
 2. 有参考素材时，逐文件执行 `POST /runninghub/v1/uploads`，`multipart/form-data`，字段 `model=minimax-h3-flash` + `file`，保存响应 `id` 和媒体类型；素材与所属渠道/供应商密钥绑定，不跨渠道复用。
-3. `POST /v1/videos`（JSON），带 `model`、`prompt`、`seconds`、`megapixels`、`aspect_ratio`、相应 `reference_*` 的素材 ID 数组；保存返回的公开 `id`。
+3. `POST /v1/videos`（JSON），带 `model`、`prompt`、`seconds`、**`resolution`（480/768）**、`aspect_ratio`、相应 `reference_*` 素材 ID。首尾帧模式额外传入独立首/尾帧素材角色，**字段名与该模式是否复用上传接口待对最新网关验证**，不得假造请求键；保存返回的公开 `id`。
 4. `GET /v1/videos/{id}` 查询：`queued` / `in_progress` / `completed` / `failed`；统一映射到组件任务状态。完成后读取 `video_url`。
 5. `GET /v1/videos/{id}/content` 下载带鉴权的产物并交由宿主持久保存；供应商生成 URL、上传链接约 24 小时有效，**不能把短效 URL 当永久素材地址**。
 6. 未公开专用接口的取消、续接、独立二次采样；组件不得提供冒充可用的动作。涉及重试或切渠道时，需要重新选择绑定、检查并按目标渠道重新上传素材，不能复用原渠道的上传 ID。
 
-**验收必须走真实网关 API**：上传 → 创建 → 查询 → 下载；包括错误的素材 ID / 错误渠道 / 超出上限 / 错误参数 / 有效期和失败状态。组件 Playground 不应擅自上传用户文件；真实验证放宿主示例并由操作者提供凭据。
+**验收必须走真实网关 API**：文生视频、首尾帧分别验证上传（如需要）→ 创建 → 查询 → 下载；确认首尾帧入参及角色、`resolution=480` / `768` 成功，其他值被阻止；还包括错误素材 ID / 错误渠道 / 超限 / 有效期和失败状态。组件 Playground 不应擅自上传用户文件；真实验证放宿主示例并由操作者提供凭据。
 
 ## 8. 分期与实施依赖
 
