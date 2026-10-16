@@ -59,6 +59,8 @@ export function Studio({ startGeneration }: {
 
 示例能力由宿主定义，不代表真实模型的官方能力。宿主在发起请求时追加批次、创建等待中的结果，并通过更新 `tasks` 回传状态；`startGeneration` 应在提交被接受后返回，不需要等待生成完成。
 
+单用户本地宿主可以直接使用 Agent Chat 的 SQLite API 持久化任务：读取 `GET /api/media-tasks`，生成、重试、取消或收藏后把完整任务数组提交到 `POST /api/media-tasks` 的 `{ tasks }` 字段。组件本身仍保持受控，不直接打开数据库。
+
 ## Props
 
 | 参数 | 类型 / 行为 |

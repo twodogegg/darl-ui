@@ -5,7 +5,6 @@ import { lines } from '../stream';
 import { Guide } from './Guide';
 import { toolHistoryForModel } from './message-history';
 
-const storageKey = 'darl-agent-chat-v1';
 const persistedSessions = (sessions: AgentSession[]) => sessions.map((session) => ({ ...session, messages: session.messages.map((message) => ({ ...message, attachments: message.attachments?.map((attachment) => typeof attachment === 'string' ? attachment : { ...attachment, url: attachment.url?.startsWith('data:') ? undefined : attachment.url }), toolCalls: message.toolCalls?.map(({ output: _output, ...call }) => call) })) }));
 const interruptedExecutionStatuses = new Set<AgentExecutionEvent['status']>(['pending', 'started', 'running', 'retrying', 'confirmation']);
 const terminalExecutionStatuses = new Set<AgentExecutionEvent['status']>(['success', 'error', 'cancelled', 'timeout']);
@@ -30,19 +29,6 @@ function recoverTimeline(timeline: AgentExecutionEvent[] | undefined) {
   });
 }
 const newSession = (): AgentSession => ({ id: crypto.randomUUID(), title: '新对话', messages: [] });
-function restore(): { sessions: AgentSession[]; activeId: string; skills: AgentSkill[]; error?: string } {
-  let error: string | undefined;
-  try {
-    const raw = localStorage.getItem(storageKey);
-    const value = JSON.parse(raw || 'null');
-    if (raw) error = '历史记录格式异常，未能恢复。';
-    if (value && Array.isArray(value.sessions) && value.sessions.length && value.sessions.every((session: AgentSession) => typeof session.id === 'string' && Array.isArray(session.messages)) && Array.isArray(value.skills)) {
-      return { ...value, activeId: value.sessions.some((session: AgentSession) => session.id === value.activeId) ? value.activeId : value.sessions[0].id, sessions: value.sessions.map((session: AgentSession) => ({ ...session, messages: session.messages.map((message) => ({ ...message, toolCalls: message.toolCalls?.map((call) => ['pending', 'running', 'retrying', 'confirmation'].includes(call.status) ? { ...call, status: 'error' as const, error: '运行已中断，请重新发起请求。' } : call), timeline: recoverTimeline(message.timeline), streaming: false, content: message.content || (message.streaming ? '生成已中断，请重新生成。' : '') })) })) };
-    }
-  } catch { error = '浏览器存储不可用或历史记录无法读取。'; }
-  const session = newSession();
-  return { sessions: [session], activeId: session.id, skills: [], error };
-}
 async function api<T>(path: string, body?: unknown, method = body ? 'POST' : 'GET'): Promise<T> {
   let response: Response;
   try { response = await fetch(`/api/${path}`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, ...(body ? { body: JSON.stringify(body) } : {}) }); }
@@ -53,10 +39,9 @@ async function api<T>(path: string, body?: unknown, method = body ? 'POST' : 'GE
 }
 
 export function App() {
-  const [initial] = useState(restore);
-  const [sessions, setSessions] = useState(initial.sessions);
-  const [activeId, setActiveId] = useState(initial.activeId);
-  const [skills, setSkills] = useState(initial.skills);
+  const [sessions, setSessions] = useState<AgentSession[]>(() => [newSession()]);
+  const [activeId, setActiveId] = useState(() => sessions[0].id);
+  const [skills, setSkills] = useState<AgentSkill[]>([]);
   const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [modelConfiguration, setModelConfiguration] = useState<ModelConfiguration>(() => defaultModelConfiguration());
   const [applications, setApplications] = useState<AgentApplication[]>([]);
@@ -73,8 +58,8 @@ export function App() {
   const [settings, setSettings] = useState(false);
   const [guide, setGuide] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [error, setError] = useState(initial.error || '');
-  const [storageError, setStorageError] = useState('');
+  const [error, setError] = useState('');
+  const [hydrated, setHydrated] = useState(false);
   const running = useRef<AbortController | null>(null);
   const configuredModels = toAgentModels(modelConfiguration, providers).filter((model) => model.type === 'text' && model.enabled !== false && providers.find((provider) => provider.id === model.providerId)?.models.some((item) => item.id === model.upstreamModelId && item.enabled !== false));
   const models = configuredModels.length ? configuredModels : providers.flatMap((provider) => provider.models.filter((model) => model.type === 'text' && model.enabled !== false).map((model) => ({ ...model, id: `${provider.id}/${encodeURIComponent(model.id)}` })));
@@ -83,6 +68,18 @@ export function App() {
   useEffect(() => {
     let active = true;
     api<ModelProvider[]>('providers').then((value) => { if (active) setProviders(value); }).catch((reason) => { if (active) setError(reason.message); });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    let active = true;
+    api<{ sessions: AgentSession[]; activeId?: string; skills: AgentSkill[] }>('state').then((value) => {
+      if (!active) return;
+      const restored = (value.sessions.length ? value.sessions.map((session) => ({ ...session, messages: session.messages.map((message) => ({ ...message, toolCalls: message.toolCalls?.map((call) => ['pending', 'running', 'retrying', 'confirmation'].includes(call.status) ? { ...call, status: 'error' as const, error: '运行已中断，请重新发起请求。' } : call), timeline: recoverTimeline(message.timeline), streaming: false, content: message.content || (message.streaming ? '生成已中断，请重新生成。' : '') })) })) : [newSession()]) as AgentSession[];
+      setSessions(restored);
+      setActiveId(restored.some((session) => session.id === value.activeId) ? value.activeId! : restored[0].id);
+      setSkills(Array.isArray(value.skills) ? value.skills : []);
+      setHydrated(true);
+    }).catch((reason) => { if (active) { setError(reason.message); setHydrated(true); } });
     return () => { active = false; };
   }, []);
   useEffect(() => {
@@ -120,9 +117,10 @@ export function App() {
     return () => controller.abort();
   }, [applications, applicationToolsLoaded, settingsSection]);
   useEffect(() => {
-    try { localStorage.setItem(storageKey, JSON.stringify({ sessions: persistedSessions(sessions), activeId, skills })); setStorageError(''); }
-    catch { setStorageError('浏览器存储已满或不可用，当前更改无法在刷新后恢复。'); }
-  }, [sessions, activeId, skills]);
+    if (!hydrated) return;
+    const timer = window.setTimeout(() => { void api('state', { sessions: persistedSessions(sessions), activeId, skills }).catch((reason) => setError(reason.message)); }, 250);
+    return () => window.clearTimeout(timer);
+  }, [sessions, activeId, skills, hydrated]);
   useEffect(() => () => running.current?.abort(), []);
 
   const patchMessage = (sessionId: string, messageId: string, content: (previous: string) => string, streaming: boolean, error?: AgentErrorInfo) => {
@@ -269,8 +267,7 @@ export function App() {
   };
   const saveSkill = async (skill: AgentSkill) => {
     const next = [...skills.filter((item) => item.id !== skill.id), skill];
-    // Fail before the component reports success if persistence is unavailable.
-    localStorage.setItem(storageKey, JSON.stringify({ sessions: persistedSessions(sessions), activeId, skills: next }));
+    await api('state', { sessions: persistedSessions(sessions), activeId, skills: next });
     setSkills(next);
   };
   const showSettings = () => { setOpen(false); setGuide(false); setSettings(true); };
@@ -283,13 +280,13 @@ export function App() {
   return <DarlUIProvider theme={{ mode: 'dark', primaryColor: '#8ba4c5' }} className="chat-example">
     <div className={`example-page ${open ? 'with-agent' : ''}`}>
       <header className="example-header"><a href="http://localhost:5188">Darl UI <span>/ Agent Chat</span></a><div><button className={buttonClass} onClick={showGuide}><BookOpen size={16} />开发说明</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />设置</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setOpen((value) => !value); }}><MessageSquare size={16} />聊天</button></div></header>
-      {(error || storageError) && <p className="example-error" role="alert">{error || storageError}</p>}
-      {guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : settings ? <main className="example-settings"><button className={buttonClass} onClick={() => { setSettings(false); setOpen(true); }}><ArrowLeft size={15} />返回聊天</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'agents', label: 'Agents', icon: <Bot /> }, { id: 'applications', label: '应用 / MCP', icon: <Wrench /> }]}>{settingsSection === 'agents' ? <AgentsSettingsCard agents={agents} models={providers.flatMap((provider) => provider.models)} applications={applications} skills={skills} onSave={async (agent) => setAgents(await api<AgentConfig[]>('agents', { agent }))} onDelete={async (id) => setAgents(await api<AgentConfig[]>(`agents/${id}`, undefined, 'DELETE'))} /> : settingsSection === 'applications' ? <section className="example-applications"><h2>应用 / MCP</h2><p>服务端配置连接，工具目录由 MCP 动态发现。在对话中 @ 引用一次应用，后续消息即可继续使用它的工具。</p><button className={buttonClass} disabled={applicationsLoading} onClick={() => setApplicationRevision((value) => value + 1)}>{applicationsLoading ? '正在连接…' : '重新连接'}</button>{applicationError && <p role="alert">{applicationError}</p>}{!applicationsLoading && !applications.length && <p>暂无应用，请在服务端配置 applications.json。</p>}{applications.map((app) => <article key={app.id}><h3>{app.name} · {app.status === 'connected' ? '已连接' : '未连接'}</h3><p>{app.description}</p><ul>{app.tools?.map((tool) => <li key={tool.name}><strong>{tool.title || tool.name}</strong><span>{tool.risk === 'read' ? '只读' : '执行前确认'}</span><p>{tool.description}</p></li>)}</ul></article>)}</section> : <ModelManagementCard configuration={modelConfiguration} providers={providers}
+      {error && <p className="example-error" role="alert">{error}</p>}
+      {guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : settings ? <main className="example-settings"><button className={buttonClass} onClick={() => { setSettings(false); setOpen(true); }}><ArrowLeft size={15} />返回聊天</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'agents', label: 'Agents', icon: <Bot /> }, { id: 'applications', label: '应用 / MCP', icon: <Wrench /> }]}>{settingsSection === 'agents' ? <AgentsSettingsCard agents={agents} models={providers.flatMap((provider) => provider.models)} applications={applications} skills={skills} onSave={async (agent) => setAgents(await api<AgentConfig[]>('agents', { agent }))} onDelete={async (id) => setAgents(await api<AgentConfig[]>(`agents/${id}`, undefined, 'DELETE'))} /> : settingsSection === 'applications' ? <section className="example-applications"><h2>应用 / MCP</h2><p>服务端配置连接，工具目录由 MCP 动态发现。在对话中 @ 引用一次应用，后续消息即可继续使用它的工具。</p><button className={buttonClass} disabled={applicationsLoading} onClick={() => setApplicationRevision((value) => value + 1)}>{applicationsLoading ? '正在连接…' : '重新连接'}</button>{applicationError && <p role="alert">{applicationError}</p>}{!applicationsLoading && !applications.length && <p>暂无应用，请在服务端配置 MCP 应用。</p>}{applications.map((app) => <article key={app.id}><h3>{app.name} · {app.status === 'connected' ? '已连接' : '未连接'}</h3><p>{app.description}</p><ul>{app.tools?.map((tool) => <li key={tool.name}><strong>{tool.title || tool.name}</strong><span>{tool.risk === 'read' ? '只读' : '执行前确认'}</span><p>{tool.description}</p></li>)}</ul></article>)}</section> : <ModelManagementCard configuration={modelConfiguration} providers={providers}
         onSave={async (configuration) => setModelConfiguration(await api<ModelConfiguration>('model-config', { configuration }))}
         onProviderSave={async (provider, apiKey) => setProviders(await api<ModelProvider[]>('providers', { provider, apiKey }))}
         onProviderDelete={async (id) => setProviders(await api<ModelProvider[]>(`providers/${id}`, undefined, 'DELETE'))}
         onTestConnection={async (provider) => setProviders(await api<ModelProvider[]>(`providers/${provider.id}/test`, {}))}
-      />}</SettingsPage></main> : <main className="example-home"><span className="example-eyebrow">AGENT CHAT EXAMPLE</span><h1>让网站助手<br />真正开始工作。</h1><p>使用现有聊天 UI，连接真实模型。对话、历史和 Skills 保存在当前浏览器。</p><div className="example-actions"><button className="darl-button darl-button--default darl-button-size--default" onClick={() => setOpen(true)}><MessageSquare size={16} />打开助手</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />模型设置</button></div><div className="example-info"><div><span>模型</span><strong>{models.find((model) => model.id === availableModelId)?.name || '尚未配置'}</strong></div><div><span>会话</span><strong>{sessions.length}</strong></div><div><span>Skills</span><strong>{skills.length}</strong></div></div><small>支持文本和图片消息与 MCP 工具调用。用 @ 引用一次即可在本对话持续使用；写入或未知工具执行前需要确认。Skill 指令会发送给模型，图片由支持视觉输入的模型处理。</small></main>}
+      />}</SettingsPage></main> : <main className="example-home"><span className="example-eyebrow">AGENT CHAT EXAMPLE</span><h1>让网站助手<br />真正开始工作。</h1><p>使用现有聊天 UI，连接真实模型。对话、历史和 Skills 保存在本机 SQLite。</p><div className="example-actions"><button className="darl-button darl-button--default darl-button-size--default" onClick={() => setOpen(true)}><MessageSquare size={16} />打开助手</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />模型设置</button></div><div className="example-info"><div><span>模型</span><strong>{models.find((model) => model.id === availableModelId)?.name || '尚未配置'}</strong></div><div><span>会话</span><strong>{sessions.length}</strong></div><div><span>Skills</span><strong>{skills.length}</strong></div></div><small>支持文本和图片消息与 MCP 工具调用。用 @ 引用一次即可在本对话持续使用；写入或未知工具执行前需要确认。Skill 指令会发送给模型，图片由支持视觉输入的模型处理。</small></main>}
     </div>
     <AgentSidebar open={open} onOpenChange={setOpen} sessions={sessions} activeSessionId={activeId} onSessionChange={setActiveId} onSessionRename={renameSession}
       onNewSession={() => { const session = newSession(); setSessions((current) => [session, ...current]); setActiveId(session.id); }}
@@ -297,7 +294,7 @@ export function App() {
       applications={applications} onToolConfirm={async (id, approved) => { await api(`tool-confirmations/${id}`, { approved }); }}
       agents={agents} selectedAgentId={agentId} onSelectedAgentIdChange={setAgentId} models={models} selectedModelId={availableModelId} onSelectedModelIdChange={setModelId} selectedReasoningEffort={effort} onSelectedReasoningEffortChange={setEffort}
       skills={skills} onSkillImport={saveSkill} onSkillSave={saveSkill}
-      onSkillDelete={async (id) => { const next = skills.filter((skill) => skill.id !== id); localStorage.setItem(storageKey, JSON.stringify({ sessions: persistedSessions(sessions), activeId, skills: next })); setSkills(next); }}
+      onSkillDelete={async (id) => { const next = skills.filter((skill) => skill.id !== id); await api('state', { sessions: persistedSessions(sessions), activeId, skills: next }); setSkills(next); }}
       onSkillFavoriteChange={async (id, favorite) => { const skill = skills.find((item) => item.id === id); if (skill) await saveSkill({ ...skill, favorite }); }}
     />
   </DarlUIProvider>;

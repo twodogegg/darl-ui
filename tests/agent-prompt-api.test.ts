@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
 import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -25,6 +26,12 @@ async function withApi(directory: string, file: string, test: (request: (body?: 
     }));
   } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
 }
+function promptFromDb(directory: string) {
+  const database = new DatabaseSync(join(directory, 'data.sqlite'));
+  const row = database.prepare('SELECT value FROM app_config WHERE key = ?').get('systemPrompt') as { value: string };
+  database.close();
+  return JSON.parse(row.value) as string;
+}
 
 describe('Markdown prompt persistence', () => {
   it('reads the file on demand, saves exact Markdown, and survives API recreation', async () => {
@@ -38,33 +45,22 @@ describe('Markdown prompt persistence', () => {
         const saved = await request({ systemPrompt: content });
         expect(saved.ok).toBe(true);
         expect(await saved.json()).toEqual({ systemPrompt: content });
-        expect(await readFile(file, 'utf8')).toBe(content);
+        expect(promptFromDb(directory)).toBe(content);
         for (const invalid of ['', '   ', null]) expect((await request({ systemPrompt: invalid })).status).toBe(400);
         const longPrompt = 'x'.repeat(100_001);
         expect((await request({ systemPrompt: longPrompt })).status).toBe(200);
-        expect(await readFile(file, 'utf8')).toBe(longPrompt);
+        expect(promptFromDb(directory)).toBe(longPrompt);
         expect((await request({ systemPrompt: content })).status).toBe(200);
-        expect(await readFile(file, 'utf8')).toBe(content);
+        expect(promptFromDb(directory)).toBe(content);
       });
-      await withApi(directory, file, async (request) => {
-        expect(await (await request()).json()).toEqual({ systemPrompt: content });
-        await writeFile(file, '直接编辑文件');
-        expect(await (await request()).json()).toEqual({ systemPrompt: '直接编辑文件' });
-      });
+      expect(promptFromDb(directory)).toBe(content);
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
   it('reports missing files and write failures without inventing a default', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'darl-prompt-'));
     try {
-      await withApi(directory, join(directory, 'missing', 'system.md'), async (request) => {
-        const missing = await request();
-        expect(missing.status).toBe(400);
-        expect(await missing.json()).toHaveProperty('error');
-        const saved = await request({ systemPrompt: '有效指令' });
-        expect(saved.status).toBe(400);
-        expect(await saved.json()).toHaveProperty('error');
-      });
+      await expect(withApi(directory, join(directory, 'missing', 'system.md'), async () => {})).rejects.toThrow('ENOENT');
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 });

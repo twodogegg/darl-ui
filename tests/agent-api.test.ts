@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
 import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -24,6 +25,12 @@ async function withApi(directory: string, promptFile: string, test: (request: (p
       req.end(body ? JSON.stringify(body) : undefined);
     }));
   } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
+}
+function dbJson<T>(directory: string, key: string): T {
+  const database = new DatabaseSync(join(directory, 'data.sqlite'));
+  const row = database.prepare('SELECT value FROM app_config WHERE key = ?').get(key) as { value: string };
+  database.close();
+  return JSON.parse(row.value) as T;
 }
 
 describe('Agent configuration API', () => {
@@ -82,7 +89,7 @@ describe('Agent configuration API', () => {
         const savedBody = await saved.json();
         expect(savedBody).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'art', isDefault: true })]));
         expect(JSON.stringify(savedBody)).not.toContain('apiKey');
-        expect(JSON.parse(await readFile(join(directory, 'agents.json'), 'utf8')).find((item: { id: string }) => item.id === 'art')).toMatchObject(agent);
+        expect(dbJson<Array<{ id: string }>>(directory, 'agents').find((item) => item.id === 'art')).toMatchObject(agent);
         const updated = await request('agents', { agent: { ...agent, name: '美术 Agent v2', enabled: false } });
         expect((await updated.json()).find((item: { id: string }) => item.id === 'art')).toMatchObject({ name: '美术 Agent v2', enabled: false });
         const removed = await request('agents/art', undefined, 'DELETE');
@@ -120,7 +127,26 @@ describe('Agent configuration API', () => {
         expect(invalid.status).toBe(400);
         const valid = await request('model-config', { configuration: await (await request('model-config')).json() });
         expect(valid.status).toBe(200);
-        expect(await readFile(join(directory, 'model-config.json'), 'utf8')).not.toContain('apiKey');
+        expect(JSON.stringify(dbJson(directory, 'modelConfiguration'))).not.toContain('apiKey');
+      });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
+  it('persists chat state and media tasks in the local database', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'darl-local-state-'));
+    const promptFile = join(directory, 'system.md');
+    await writeFile(promptFile, '默认提示词');
+    try {
+      await withApi(directory, promptFile, async (request) => {
+        const state = { sessions: [{ id: 's1', title: '小说', messages: [] }], activeId: 's1', skills: [{ id: 'skill-1', name: '编剧', instructions: '按场次输出' }] };
+        expect((await request('state', state)).status).toBe(200);
+        expect(await (await request('state')).json()).toEqual(state);
+        const tasks = [{ id: 'task-1', title: '第一集', batches: [] }];
+        expect((await request('media-tasks', { tasks })).status).toBe(200);
+        expect(await (await request('media-tasks')).json()).toEqual(tasks);
+        const database = new DatabaseSync(join(directory, 'data.sqlite'));
+        expect((database.prepare('SELECT COUNT(*) AS count FROM media_tasks').get() as { count: number }).count).toBe(1);
+        database.close();
       });
     } finally { await rm(directory, { recursive: true, force: true }); }
   });

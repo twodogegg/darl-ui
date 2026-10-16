@@ -1,6 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { resolve } from 'node:path';
 import type { AgentExecutionEvent, AgentSkill, AgentToolCall } from '../../../src/index';
 import { defaultModelConfiguration, effectiveCapabilities, enabledBindings, validateModelConfiguration, type ModelConfiguration } from '../../../src/components/settings/model-config';
 import { applicationCatalog, connectApplication, conversationApplications, loadApplications, McpConnectionManager, toolRisk, ToolConfirmations } from './mcp';
@@ -8,6 +7,7 @@ import { loadAgents, publicAgent, validateAgent, validateAgents, type StoredAgen
 import { generate, generateWithToolLoop, listModels, publicProvider, runToolLoopAgent, safeError, validateProvider, type AgentDelegation, type ChatImage, type ChatMessage, type StoredProvider, type ToolExecution } from './models';
 import { AgentFailure, createAgentError, failure } from './errors';
 import { compactContextMessages, contextCharBudget, normalizeContextPolicy, selectedContext } from './context';
+import { LocalStorage, validateClientState, type ClientState } from './storage';
 
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_DATA_URL_LENGTH = 64 + 4 * Math.ceil(MAX_IMAGE_BYTES / 3);
@@ -132,52 +132,29 @@ export function findAttachedImageForUpload(tool: McpToolDescriptor, args: Record
 }
 
 export function createApi(directory: string, env: Record<string, string>, promptFile: string) {
-  const file = resolve(directory, 'providers.json');
-  const modelConfigFile = resolve(directory, 'model-config.json');
-  let queue: Promise<void> = Promise.resolve();
+  const storage = new LocalStorage(directory);
   const confirmations = new ToolConfirmations();
   const connectionManager = new McpConnectionManager(connectApplicationWithRetry);
   const validatePrompt = (value: unknown): string => {
     if (typeof value !== 'string' || !value.trim()) throw new Error('系统提示词不能为空');
     return value;
   };
-  const loadPrompt = async () => validatePrompt(await readFile(promptFile, 'utf8'));
 
   const initial: StoredProvider[] = [{ id: 'darl', name: 'Darl', baseUrl: env.AGENT_CHAT_BASE_URL || 'https://api.darl.cn/v1', protocol: 'openai-completions', apiKey: env.AGENT_CHAT_API_KEY || '', status: 'unknown', models: [{ id: env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash', name: env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash', providerId: 'darl', type: 'text', enabled: true }] }];
-  const load = async (): Promise<StoredProvider[]> => {
-    try { return JSON.parse(await readFile(file, 'utf8')); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return initial; throw error; }
-  };
+  if (!storage.getConfig<StoredProvider[]>('providers')) storage.setConfig('providers', initial);
+  if (!storage.getConfig<ModelConfiguration>('modelConfiguration')) storage.setConfig('modelConfiguration', defaultModelConfiguration());
+  if (!storage.getConfig<string>('systemPrompt')) {
+    storage.setConfig('systemPrompt', validatePrompt(readFileSync(promptFile, 'utf8')));
+  }
+  const loadPrompt = async () => validatePrompt(storage.getConfig<string>('systemPrompt'));
+  const load = async (): Promise<StoredProvider[]> => storage.getConfig<StoredProvider[]>('providers') || initial;
   const loadModelConfiguration = async (): Promise<ModelConfiguration> => {
-    try {
-      const value = JSON.parse(await readFile(modelConfigFile, 'utf8')) as ModelConfiguration;
-      if (validateModelConfiguration(value).length) return defaultModelConfiguration();
-      return value;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return defaultModelConfiguration();
-      throw error;
-    }
+    const value = storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration();
+    if (validateModelConfiguration(value).length) throw new Error('模型配置已损坏，请重新保存模型配置');
+    return value;
   };
-  const update = (mutate: (providers: StoredProvider[]) => StoredProvider[]) => {
-    const job = queue.then(async () => {
-      const providers = mutate(await load());
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      await writeFile(`${file}.tmp`, JSON.stringify(providers), { mode: 0o600 });
-      await rename(`${file}.tmp`, file);
-    });
-    queue = job.catch(() => {});
-    return job;
-  };
-  const saveAgents = (next: StoredAgent[]) => {
-    const file = resolve(directory, 'agents.json');
-    const job = queue.then(async () => {
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      await writeFile(`${file}.tmp`, JSON.stringify(next), { mode: 0o600 });
-      await rename(`${file}.tmp`, file);
-    });
-    queue = job.catch(() => {});
-    return job;
-  };
+  const update = async (mutate: (providers: StoredProvider[]) => StoredProvider[]) => storage.setConfig('providers', mutate(await load()));
+  const saveAgents = async (next: StoredAgent[]) => storage.setConfig('agents', next);
   return async (request: IncomingMessage, response: ServerResponse, next: () => void) => {
     if (!request.url?.startsWith('/api/')) return next();
     const send = (status: number, data: unknown) => {
@@ -200,26 +177,33 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     let rootStartedAt = '';
     let rootStartedMs = 0;
     try {
-      await queue;
       const providers = await load();
       const modelConfiguration = await loadModelConfiguration();
-      const configuredAgents = await loadAgents(directory);
+      const configuredAgents = loadAgents(storage);
       const defaultProvider = providers.find((provider) => provider.models.some((model) => model.type === 'text' && model.enabled !== false)) || providers[0];
       const defaultModel = defaultProvider?.models.find((model) => model.type === 'text' && model.enabled !== false);
       const savedDefault = configuredAgents.find((agent) => agent.id === 'default' && agent.builtIn);
       const defaultAgent: StoredAgent = { id: 'default', name: '网站助手', avatar: '/agent-default-avatar.png', description: '系统默认 Agent', instructions: await loadPrompt(), providerId: defaultProvider?.id || 'darl', modelId: defaultModel?.id || env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash', skillIds: [], applicationIds: [], applicationTools: {}, contextPolicy: { childContext: 'task-only', historyMode: 'summary', toolResultMode: 'standard' }, enabled: true, isDefault: !configuredAgents.some((agent) => agent.isDefault), builtIn: true, ...savedDefault };
       const agents = [defaultAgent, ...configuredAgents.filter((agent) => agent.id !== defaultAgent.id)];
       const path = request.url.split('?')[0];
+      if (path === '/api/state' && request.method === 'GET') return send(200, storage.getConfig<ClientState>('clientState') || { sessions: [], skills: [] });
+      if (path === '/api/state' && request.method === 'POST') {
+        const state = validateClientState(await readBody(request));
+        storage.setConfig('clientState', state);
+        return send(200, state);
+      }
+      if (path === '/api/media-tasks' && request.method === 'GET') return send(200, storage.getMediaTasks<unknown>());
+      if (path === '/api/media-tasks' && request.method === 'POST') {
+        const body = await readBody(request);
+        if (!Array.isArray(body?.tasks)) throw new Error('媒体任务格式无效');
+        storage.setMediaTasks(body.tasks);
+        return send(200, storage.getMediaTasks<unknown>());
+      }
       if (path === '/api/agent-settings' && request.method === 'GET') return send(200, { systemPrompt: await loadPrompt() });
       if (path === '/api/agent-settings' && request.method === 'POST') {
         const { systemPrompt: value } = await readBody(request);
         const systemPrompt = validatePrompt(value);
-        const job = queue.then(async () => {
-          await writeFile(`${promptFile}.tmp`, systemPrompt, { mode: 0o600 });
-          await rename(`${promptFile}.tmp`, promptFile);
-        });
-        queue = job.catch(() => {});
-        await job;
+        storage.setConfig('systemPrompt', systemPrompt);
         return send(200, { systemPrompt });
       }
       if (path === '/api/applications' && request.method === 'GET') {
@@ -258,13 +242,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const errors = validateModelConfiguration(incoming as ModelConfiguration);
         if (errors.length) throw new Error(errors[0].message);
         const next = incoming as ModelConfiguration;
-        const job = queue.then(async () => {
-          await mkdir(directory, { recursive: true, mode: 0o700 });
-          await writeFile(`${modelConfigFile}.tmp`, JSON.stringify(next), { mode: 0o600 });
-          await rename(`${modelConfigFile}.tmp`, modelConfigFile);
-        });
-        queue = job.catch(() => {});
-        await job;
+        storage.setConfig('modelConfiguration', next);
         return send(200, next);
       }
       if (path === '/api/agents' && request.method === 'GET') return send(200, agents.map(publicAgent));

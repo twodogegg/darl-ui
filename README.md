@@ -32,11 +32,11 @@ npm run dev
 复制 `.env.example` 为 `.env.local`，配置服务端 `AGENT_CHAT_API_KEY`；默认地址 `https://api.darl.cn/v1`，默认模型 `deepseek-v4.1-flash`。也可直接在示例的「设置 → 模型」中管理提供方、API 协议、模型类型和推理强度。推理强度填写模型实际支持的值，如 `low, medium, high`；留空则不发送此参数。
 
 - 支持 OpenAI Chat Completions / Responses 流式文本协议、多轮对话、停止、重新生成、新对话和历史搜索。
-- 示例服务端使用 AI SDK Core 和 OpenAI-compatible Provider 运行模型与工具循环；MCP 通过已有 SDK 动态转换为 AI SDK 工具，执行确认仍由宿主处理。每次请求从传入的聊天历史重建模型上下文，不启用 coding CLI、本机文件工具或额外的会话存储；这些依赖仅用于宿主示例，不进入组件库浏览器产物。
+- 示例服务端使用 AI SDK Core 和 OpenAI-compatible Provider 运行模型与工具循环；MCP 通过已有 SDK 动态转换为 AI SDK 工具，执行确认仍由宿主处理。每次请求从本地 SQLite 恢复并重建模型上下文，不启用 coding CLI、本机文件工具；这些依赖仅用于宿主示例，不进入组件库浏览器产物。
 - Markdown 使用开源的 `react-markdown`、`remark-gfm` 和 `rehype-sanitize` 渲染；回复中的 `md` / `markdown` 代码块会显示为编译后的内容，复制按钮仍复制原始 Markdown。
-- 系统提示词保存在 `examples/agent-chat/prompts/system.md`，是默认 Agent 的唯一来源；服务端每次聊天和连接测试重新读取文件，修改后下次请求生效。缺失、空白或过长时报错，代码没有内置默认值；专业 Agent 的提示词在 Agents 编辑器中单独配置。选中的 Skill 指令在发送时追加。
-- 对话和 Skills 保存在当前浏览器的 localStorage；Skill 指令通过 `/` 引用后发送给模型，资源脚本不会执行。
-- 提供方和 Key 保存到 Git 忽略的 `.local/agent-chat/providers.json`，前端只获取是否已配置 Key。环境变量只用于首次初始化；后续以已保存设置为准。连接测试会实际调用已启用的文本模型。
+- 系统提示词首次从 `examples/agent-chat/prompts/system.md` 写入本地 SQLite，之后由数据库管理；缺失、空白或过长时报错，代码没有内置默认值。专业 Agent 的提示词在 Agents 编辑器中单独配置。选中的 Skill 指令在发送时追加。
+- 对话、Skills、提供方、模型配置和 Agent 配置保存在 Git 忽略的 `.local/agent-chat/data.sqlite`；浏览器只负责调用本机 API，不保存聊天历史。
+- MediaWorkspace 宿主可通过 `/api/media-tasks` 保存单用户任务、批次和结果；协议凭据与生成结果仍由宿主 API 管理。
 - 获取模型目录后需确认模型类型、启用状态并保存；新发现的模型默认禁用，接口返回的 ID 无法证明其媒体或推理能力。
 - 支持通过 Streamable HTTP 接入 MCP 应用和真实多步工具调用；AgentSidebar 支持图片附件预览、发送到支持视觉输入的文本模型，以及 MCP 图片结果回传；模型目录仍可设置图片 / 视频 / 音频类型，聊天仅列出启用的文本模型。
 - 聊天请求不设置固定的 100000 字符文本上限；上下文预算按模型 `contextWindow` 能力计算，未声明时按 1M token 的默认预算处理。累计上下文超过预算 50% 后主动压缩较早历史，当前消息和最近上下文优先保留；工具结果仍按 Agent 上下文策略控制。
@@ -283,7 +283,7 @@ import '@darl/ui/styles.css';
 
 `examples/agent-chat` 的设置中心提供独立的 Agents 页面。每个 Agent 在服务端保存名称、系统提示词、文本模型、推理强度、允许的 Skills 和 MCP 应用 / 工具；API Key 仍只保存在服务端。设置默认 Agent 后，聊天可以直接选择专业 Agent，也可以由主 Agent 通过 AI SDK 7 `ToolLoopAgent` 按需委派给其他已启用的 Agent。
 
-每次委派只把任务说明传给子 Agent，子 Agent 使用自己的模型、提示词和工具权限，完成后只返回最终摘要。MCP 写操作继续复用宿主的 `ToolConfirmations`，因此允许、拒绝、停止和超时都在服务端生效；NDJSON 工具事件包含 `runId`、`parentRunId` 和 `agentId`，现有侧栏会显示委派、执行和审批状态。Agent 配置保存于 `.local/agent-chat/agents.json`，不会写入浏览器存储。
+每次委派只把任务说明传给子 Agent，子 Agent 使用自己的模型、提示词和工具权限，完成后只返回最终摘要。MCP 写操作继续复用宿主的 `ToolConfirmations`，因此允许、拒绝、停止和超时都在服务端生效；NDJSON 工具事件包含 `runId`、`parentRunId` 和 `agentId`，现有侧栏会显示委派、执行和审批状态。Agent 配置保存在 `.local/agent-chat/data.sqlite`，不会写入浏览器存储。
 
 ## StyleSelector｜风格选择弹窗
 

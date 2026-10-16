@@ -1,6 +1,5 @@
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import type { AgentConfig } from '../../../src/index';
+import type { LocalStorage } from './storage';
 
 export type StoredAgent = AgentConfig;
 
@@ -65,9 +64,9 @@ export function validateAgents(value: unknown): StoredAgent[] {
   return agents;
 }
 
-export async function loadAgents(directory: string): Promise<StoredAgent[]> {
-  try { return validateAgents(JSON.parse(await readFile(resolve(directory, 'agents.json'), 'utf8'))); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
+export function loadAgents(store: LocalStorage): StoredAgent[] {
+  const value = store.getConfig<StoredAgent[]>('agents');
+  return value ? validateAgents(value) : [];
 }
 
 export function publicAgent(agent: StoredAgent): AgentConfig { return { ...agent, skillIds: [...(agent.skillIds || [])], applicationIds: [...(agent.applicationIds || [])], applicationTools: Object.fromEntries(Object.entries(agent.applicationTools || {}).map(([key, value]) => [key, [...value]])) }; }
