@@ -161,9 +161,12 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       response.end(JSON.stringify(data));
     };
-    // Local development example: never expose a credential-management endpoint on the LAN.
-    const allowed = new Set(['localhost:5197', '127.0.0.1:5197', '[::1]:5197']);
-    if (!allowed.has(request.headers.host || '') || (request.headers.origin && !['http://localhost:5197', 'http://127.0.0.1:5197', 'http://[::1]:5197'].includes(request.headers.origin))) return send(403, { error: '仅允许本机同源访问' });
+    // 本示例服务端持有真实模型密钥，已按需求开放局域网访问：仅按端口 5197 做同源校验，
+    // 同一局域网的任何设备都能消耗凭据，请勿在不可信网络中运行。
+    const portOf = (value: string) => value.match(/:(\d+)$/)?.[1];
+    const host = request.headers.host || '';
+    const origin = request.headers.origin;
+    if (portOf(host) !== '5197' || (origin && portOf(origin) !== '5197')) return send(403, { error: '仅允许本服务端口同源访问' });
     const controller = new AbortController();
     response.on('close', () => controller.abort());
     const requestId = crypto.randomUUID();

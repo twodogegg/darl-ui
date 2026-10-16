@@ -18,6 +18,6 @@ export default defineConfig(({ mode }) => ({
     { find: '@darl/ui/styles.css', replacement: resolve(root, 'src/styles.css') },
     { find: '@darl/ui', replacement: resolve(root, 'src/index.ts') },
   ] },
-  server: { host: '127.0.0.1', port: 5197, strictPort: true, fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/.local/**'] } },
+  server: { host: '0.0.0.0', port: 5197, strictPort: true, fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/.local/**'] } },
   build: { outDir: resolve(root, 'dist/agent-chat'), emptyOutDir: true },
 }));
