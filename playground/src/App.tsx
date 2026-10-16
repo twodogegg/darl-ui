@@ -20,6 +20,7 @@ import { AgentSidebarDemo } from './AgentSidebarDemo';
 import { SettingsDemo } from './SettingsDemo';
 import { DefaultModelSelectorDemo } from './DefaultModelSelectorDemo';
 import { StyleSelectorDemo } from './StyleSelectorDemo';
+import { InteractiveConfirmDialogDemo } from './InteractiveConfirmDialogDemo';
 
 type Format = 'all' | 'images' | 'videos' | 'mixed' | 'documents';
 type Log = { id: number; status: 'success' | 'error' | 'rejected'; message: string };
@@ -30,7 +31,7 @@ const formatOptions: Record<Format, { label: string; accept: string[] }> = {
   mixed: { label: '图片 + 视频', accept: ['image/*', 'video/*'] },
   documents: { label: '文档', accept: ['.pdf', '.docx', '.txt'] },
 };
-const hashes: Record<Page, string> = { intro: 'intro', theme: 'theme', uploader: '', video: 'video-compare', media: 'media-workspace', styles: 'styles', agent: 'agent-sidebar', settings: 'settings', 'default-models': 'default-models' };
+const hashes: Record<Page, string> = { intro: 'intro', theme: 'theme', uploader: '', video: 'video-compare', media: 'media-workspace', styles: 'styles', agent: 'agent-sidebar', settings: 'settings', 'default-models': 'default-models', 'confirm-dialog': 'confirm-dialog' };
 const currentPage = (): Page => (Object.keys(hashes) as Page[]).find((page) => hashes[page] === location.hash.slice(1)) ?? 'uploader';
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 function mockUpload(shouldFail: boolean): UploadFn<{ fileId: string; url: string }> {
@@ -83,7 +84,8 @@ export function App() {
   const reset = () => { setColor(''); setFormat('mixed'); setMultiple(true); setPasteEnabled(true); setDragEnabled(true); setAutoUpload(false); setShowPreview(true); setShowProgress(true); setFail(false); setMaxSize(100); setMaxFiles(20); setConcurrency(3); setLogs([]); };
 
   return <DemoLayout selected={selected} onNavigate={navigate} mode={mode} onModeChange={setMode}>
-    {selected === 'agent' ? <AgentSidebarDemo />
+    {selected === 'confirm-dialog' ? <InteractiveConfirmDialogDemo />
+      : selected === 'agent' ? <AgentSidebarDemo />
       : selected === 'settings' ? <SettingsDemo />
       : selected === 'default-models' ? <DefaultModelSelectorDemo />
       : selected === 'media' ? <MediaWorkspaceDemo mode={mode} color={color} onColorChange={setColor} />
