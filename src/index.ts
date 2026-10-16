@@ -10,7 +10,7 @@ export type { BaseCapabilities, BaseDefaults, ImageModel, VideoModel, MediaModel
 export { AgentSidebar } from './components/agent-sidebar/AgentSidebar';
 export { SkillManager } from './components/agent-sidebar/SkillManager';
 export { importSkillPackage, parseSkillMarkdown, skillMarkdown, newSkillDraft } from './components/agent-sidebar/skill-package';
-export type { AgentSidebarProps, AgentApplication, AgentAttachment, AgentErrorInfo, AgentErrorStage, AgentImageAttachment, AgentMessage, AgentModel, AgentSession, AgentSkill, AgentSkillDraft, AgentSkillResource, AgentTool, AgentToolCall, AgentSendRequest, AgentMessageRole, AgentToolStatus } from './components/agent-sidebar/types';
+export type { AgentSidebarProps, AgentApplication, AgentAttachment, AgentErrorInfo, AgentErrorStage, AgentExecutionEvent, AgentExecutionSource, AgentExecutionStatus, AgentImageAttachment, AgentMessage, AgentModel, AgentSession, AgentSkill, AgentSkillDraft, AgentSkillResource, AgentTool, AgentToolCall, AgentSendRequest, AgentMessageRole, AgentToolStatus } from './components/agent-sidebar/types';
 export { SettingsPage } from './components/settings/SettingsPage';
 export { AgentsSettingsCard } from './components/settings/AgentsSettingsCard';
 export { ModelSettingsCard } from './components/settings/ModelSettingsCard';

@@ -43,8 +43,12 @@ describe('Agent configuration API', () => {
       .mockResolvedValueOnce({ content: [], isError: false });
     const readConnection = { app: { id: 'catalog', name: 'Catalog', url: 'https://example.test/mcp', readOnlyTools: ['read'] }, call: readCall } as never;
     const readTool = { name: 'read', inputSchema: { type: 'object' as const } };
-    expect((await callMcpToolWithRetry(readConnection, readTool, {}, new AbortController().signal)).isError).toBe(false);
+    const attempts: number[] = [];
+    const retries: number[] = [];
+    expect((await callMcpToolWithRetry(readConnection, readTool, {}, new AbortController().signal, { onAttempt: (attempt) => attempts.push(attempt), onRetry: (attempt) => retries.push(attempt) })).isError).toBe(false);
     expect(readCall).toHaveBeenCalledTimes(2);
+    expect(attempts).toEqual([1, 2]);
+    expect(retries).toEqual([2]);
 
     const writeCall = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'failure' }], isError: true });
     const writeConnection = { app: { id: 'catalog', name: 'Catalog', url: 'https://example.test/mcp' }, call: writeCall } as never;

@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
-import type { AgentSkill, AgentToolCall } from '../../../src/index';
+import type { AgentExecutionEvent, AgentSkill, AgentToolCall } from '../../../src/index';
 import { applicationCatalog, connectApplication, conversationApplications, loadApplications, toolRisk, ToolConfirmations } from './mcp';
 import { loadAgents, publicAgent, validateAgent, validateAgents, type StoredAgent } from './agents';
 import { generate, generateWithToolLoop, listModels, publicProvider, runToolLoopAgent, safeError, validateProvider, type AgentDelegation, type ChatImage, type ChatMessage, type StoredProvider, type ToolExecution } from './models';
@@ -50,16 +50,18 @@ export function isRetryableMcpError(reason: unknown) {
   return /(?:network error|failed to fetch|fetch failed|econnreset|etimedout|enotfound|socket hang up|timeout|timed out|temporar(?:y|ily)|\b5\d{2}\b)/i.test(message);
 }
 
-export async function callMcpToolWithRetry(connection: Awaited<ReturnType<typeof connectApplication>>, tool: Parameters<typeof toolRisk>[1], args: Record<string, unknown>, signal: AbortSignal) {
+export async function callMcpToolWithRetry(connection: Awaited<ReturnType<typeof connectApplication>>, tool: Parameters<typeof toolRisk>[1], args: Record<string, unknown>, signal: AbortSignal, hooks?: { onAttempt?: (attempt: number) => void; onRetry?: (attempt: number) => void }) {
   const attempts = toolRisk(connection.app, tool) === 'read' ? 2 : 1;
   let lastResult: Awaited<ReturnType<typeof connection.call>> | undefined;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    hooks?.onAttempt?.(attempt);
     try {
       lastResult = await connection.call(tool.name, args, signal);
       if (!lastResult.isError || attempt === attempts || !isRetryableMcpResult(lastResult)) return lastResult;
     } catch (error) {
       if (attempt === attempts || !isRetryableMcpError(error)) throw error;
     }
+    hooks?.onRetry?.(attempt + 1);
     await retryPause(signal, attempt);
   }
   return lastResult!;
@@ -178,6 +180,11 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     const signal = AbortSignal.any([controller.signal, timeoutSignal]);
     let secret = '';
     const connections: Awaited<ReturnType<typeof connectApplication>>[] = [];
+    let emitExecution: ((event: AgentExecutionEvent, force?: boolean) => void) | undefined;
+    let rootRunId = '';
+    let rootName = 'Agent';
+    let rootStartedAt = '';
+    let rootStartedMs = 0;
     try {
       await queue;
       const providers = await load();
@@ -327,9 +334,19 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const scopedApps = allowedApps ? selectedApps.filter((app) => allowedApps.has(app.id)) : selectedApps;
         const attachedImages = latestUserImages(messages);
         const runId = crypto.randomUUID();
+        rootRunId = runId;
+        rootStartedAt = new Date().toISOString();
+        rootStartedMs = Date.now();
         response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Request-Id': requestId });
         response.flushHeaders();
         response.write(`${JSON.stringify({ type: 'meta', requestId, runId })}\n`);
+        emitExecution = (event, force = false) => {
+          if ((force || !signal.aborted) && response.headersSent) {
+            try { response.write(`${JSON.stringify({ type: 'execution', ...event })}\n`); } catch { /* The client may have disconnected. */ }
+          }
+        };
+        rootName = selectedAgent?.name || 'Agent';
+        emitExecution({ id: crypto.randomUUID(), source: 'agent', status: 'started', name: rootName, timestamp: rootStartedAt, startedAt: rootStartedAt, runId, requestId });
         const emitTool = (call: AgentToolCall) => {
           if (!signal.aborted) response.write(`${JSON.stringify({ type: 'tool', call: { ...call, requestId, input: call.appId.startsWith('agent:') || call.status === 'confirmation' ? call.input : undefined } })}\n`);
         };
@@ -364,43 +381,78 @@ export function createApi(directory: string, env: Record<string, string>, prompt
             const selected = functions.find((item) => item.name === request.name);
             if (!selected) throw failure('tool-validation', 'TOOL_NOT_AUTHORIZED', '模型请求了未授权的工具', false);
             const { connection, tool } = selected;
-            const call: AgentToolCall = { id: crypto.randomUUID(), appId: connection.app.id, appName: connection.app.name, toolName: tool.name, toolTitle: tool.title || tool.annotations?.title, input: request.arguments, status: 'pending', runId: executionRunId, ...(ownerAgentId ? { agentId: ownerAgentId, ...(parentRunId ? { parentRunId } : {}) } : {}) };
+            const call: AgentToolCall = { id: crypto.randomUUID(), appId: connection.app.id, appName: connection.app.name, toolName: tool.name, toolTitle: tool.title || tool.annotations?.title, input: request.arguments, status: 'pending', attempt: 1, runId: executionRunId, ...(ownerAgentId ? { agentId: ownerAgentId, ...(parentRunId ? { parentRunId } : {}) } : {}) };
+            const emitToolExecution = (status: AgentExecutionEvent['status'], extra: Partial<AgentExecutionEvent> = {}) => {
+              const timestamp = new Date().toISOString();
+              emitExecution?.({ id: crypto.randomUUID(), source: 'tool', status, name: tool.title || tool.name, timestamp, startedAt: call.startedAt, runId: executionRunId, parentRunId: executionRunId, agentId: ownerAgentId, toolCallId: call.id, requestId, attempt: call.attempt, ...extra });
+            };
             try {
               const args = JSON.parse(request.arguments || '{}');
               if (!args || typeof args !== 'object' || Array.isArray(args)) throw failure('tool-validation', 'TOOL_ARGUMENT_INVALID', '工具参数必须为 JSON 对象', false);
               call.input = args;
+              emitToolExecution('started');
+              emitTool(call);
               if (toolRisk(connection.app, tool) !== 'read') {
                 call.status = 'confirmation';
                 const decision = confirmations.wait(call.id, callSignal);
+                emitToolExecution('confirmation');
                 emitTool(call);
                 if (!await decision) throw new Error('用户拒绝了本次工具调用，不要再次尝试相同操作');
               }
               callSignal.throwIfAborted();
+              call.startedAt ||= new Date().toISOString();
+              const startedMs = Date.parse(call.startedAt);
               call.status = 'running';
+              emitToolExecution('running', { startedAt: call.startedAt });
               emitTool(call);
               const attachedUpload = findAttachedImageForUpload(tool, args, images);
               const result = attachedUpload
                 ? await uploadAttachedImage((stepArgs, stepSignal) => connection.call(tool.name, stepArgs, stepSignal), attachedUpload.image, args, attachedUpload.fields, callSignal)
-                : await callMcpToolWithRetry(connection, tool, args, callSignal);
+                : await callMcpToolWithRetry(connection, tool, args, callSignal, {
+                  onAttempt: (attempt) => {
+                    call.attempt = attempt;
+                    if (attempt > 1) {
+                      call.status = 'running';
+                      emitTool(call);
+                      emitToolExecution('running', { startedAt: call.startedAt, attempt });
+                    }
+                  },
+                  onRetry: (attempt) => {
+                    call.attempt = attempt;
+                    call.status = 'retrying';
+                    emitTool(call);
+                    emitToolExecution('retrying', { startedAt: call.startedAt, attempt });
+                  },
+                });
               callSignal.throwIfAborted();
+              call.endedAt = new Date().toISOString();
+              call.durationMs = Number.isFinite(startedMs) ? Math.max(0, Date.now() - startedMs) : undefined;
               call.status = result.isError ? 'error' : 'success';
               if (result.isError) {
                 call.error = mcpResultError(result, connection.app.apiKey);
                 call.errorInfo = createAgentError('mcp-tool', new Error(call.error), { requestId, runId: executionRunId, parentRunId, key: connection.app.apiKey, code: 'MCP_TOOL_FAILED', message: call.error });
               }
               emitImages(result.content);
+              emitToolExecution(result.isError ? 'error' : 'success', { endedAt: call.endedAt, durationMs: call.durationMs, ...(call.errorInfo ? { error: call.errorInfo } : {}) });
               emitTool(call);
               return JSON.stringify(result);
             } catch (error) {
               call.status = 'error';
+              call.endedAt = new Date().toISOString();
+              const startedMs = call.startedAt ? Date.parse(call.startedAt) : NaN;
+              call.durationMs = Number.isFinite(startedMs) ? Math.max(0, Date.now() - startedMs) : undefined;
               if (callSignal.aborted) {
                 call.error = '工具调用已取消';
-                call.errorInfo = createAgentError('cancellation', error, { requestId, runId: executionRunId, parentRunId, key: connection.app.apiKey, code: 'REQUEST_CANCELLED', retryable: false });
+                const timedOut = timeoutSignal.aborted && !controller.signal.aborted;
+                call.error = timedOut ? '工具调用已超时' : '工具调用已取消';
+                call.errorInfo = createAgentError(timedOut ? 'timeout' : 'cancellation', error, { requestId, runId: executionRunId, parentRunId, key: connection.app.apiKey, code: timedOut ? 'REQUEST_TIMEOUT' : 'REQUEST_CANCELLED', retryable: false });
+                emitToolExecution(timedOut ? 'timeout' : 'cancelled', { endedAt: call.endedAt, durationMs: call.durationMs, error: call.errorInfo });
                 emitTool(call);
                 throw error;
               }
               call.error = error instanceof AgentFailure ? error.message : 'MCP 工具调用失败，请检查应用状态后重试';
               call.errorInfo = createAgentError(error instanceof AgentFailure ? error.stage : 'mcp-tool', error, { requestId, runId: executionRunId, parentRunId, key: connection.app.apiKey, ...(error instanceof AgentFailure ? { code: error.code, retryable: error.retryable, suggestion: error.suggestion } : {}) });
+              emitToolExecution('error', { endedAt: call.endedAt, durationMs: call.durationMs, error: call.errorInfo });
               emitTool(call);
               if (callSignal.aborted) throw error;
               return JSON.stringify({ isError: true, error: call.error });
@@ -421,18 +473,28 @@ export function createApi(directory: string, env: Record<string, string>, prompt
             description: `委派任务给${child.name}。子 Agent 使用独立上下文，只返回最终摘要。`,
             execute: async (task, childSignal) => {
               const childRunId = crypto.randomUUID();
+              const childStartedAt = new Date().toISOString();
+              const childStartedMs = Date.now();
               const delegationCall: AgentToolCall = { id: crypto.randomUUID(), appId: `agent:${child.id}`, appName: child.name, toolName: `ask_${child.id}`, toolTitle: `${child.name} 子任务`, input: { task }, status: 'pending', agentId: child.id, parentRunId: runId, runId: childRunId };
               emitTool(delegationCall);
+              emitExecution?.({ id: crypto.randomUUID(), source: 'agent', status: 'started', name: child.name, summary: task, timestamp: childStartedAt, startedAt: childStartedAt, runId: childRunId, parentRunId: runId, agentId: child.id, toolCallId: delegationCall.id, requestId });
+              emitExecution?.({ id: crypto.randomUUID(), source: 'agent', status: 'running', name: child.name, summary: task, timestamp: new Date().toISOString(), startedAt: childStartedAt, runId: childRunId, parentRunId: runId, agentId: child.id, toolCallId: delegationCall.id, requestId });
               emitTool({ ...delegationCall, status: 'running' });
               try {
                 const childExecution = await createExecution(childApps, child.id, [], child.applicationTools, childRunId, runId);
                 const childInstructions = [child.instructions, ...body.skills.filter((skill: AgentSkill) => typeof skill.id === 'string' && child.skillIds?.includes(skill.id)).map((skill: AgentSkill) => `技能：${skill.name}\n${skill.instructions}`)].join('\n\n');
                 const result = await runToolLoopAgent(childProvider, childModel, task, childInstructions, child.reasoningEfforts?.[0], childSignal, childExecution);
+                const childEndedAt = new Date().toISOString();
+                const childDurationMs = Math.max(0, Date.now() - childStartedMs);
+                emitExecution?.({ id: crypto.randomUUID(), source: 'agent', status: 'success', name: child.name, summary: task, timestamp: childEndedAt, startedAt: childStartedAt, endedAt: childEndedAt, durationMs: childDurationMs, runId: childRunId, parentRunId: runId, agentId: child.id, toolCallId: delegationCall.id, requestId });
                 emitTool({ ...delegationCall, status: 'success', output: result });
                 return result.slice(0, 80_000);
               } catch (error) {
                 const cause = childSignal.aborted && !signal.aborted ? failure('delegation', 'DELEGATION_TIMEOUT', '子 Agent 请求超时', true, '稍后重试，或直接让当前 Agent 完成任务。') : error;
                 const info = createAgentError('delegation', cause, { requestId, runId: childRunId, parentRunId: runId, key: childProvider.apiKey, code: cause instanceof AgentFailure ? cause.code : 'DELEGATION_FAILED', ...(cause instanceof AgentFailure ? { retryable: cause.retryable, suggestion: cause.suggestion } : {}) });
+                const childEndedAt = new Date().toISOString();
+                const childStatus: AgentExecutionEvent['status'] = info.stage === 'timeout' ? 'timeout' : info.stage === 'cancellation' ? 'cancelled' : 'error';
+                emitExecution?.({ id: crypto.randomUUID(), source: 'agent', status: childStatus, name: child.name, summary: task, timestamp: childEndedAt, startedAt: childStartedAt, endedAt: childEndedAt, durationMs: Math.max(0, Date.now() - childStartedMs), runId: childRunId, parentRunId: runId, agentId: child.id, toolCallId: delegationCall.id, requestId, error: info }, true);
                 emitTool({ ...delegationCall, status: 'error', error: info.message, errorInfo: info });
                 throw cause;
               }
@@ -447,14 +509,25 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           });
           if (signal.aborted) break;
         }
-        if (!signal.aborted) response.end(`${JSON.stringify({ type: 'done' })}\n`);
+        if (!signal.aborted) {
+          const endedAt = new Date().toISOString();
+          emitExecution({ id: crypto.randomUUID(), source: 'agent', status: 'success', name: rootName, timestamp: endedAt, startedAt: rootStartedAt, endedAt, durationMs: Math.max(0, Date.now() - rootStartedMs), runId, requestId });
+          response.end(`${JSON.stringify({ type: 'done' })}\n`);
+        }
         return;
       }
       send(404, { error: '接口不存在' });
     } catch (error) {
-      if (controller.signal.aborted && !timeoutSignal.aborted) return;
+      if (controller.signal.aborted && !timeoutSignal.aborted) {
+        emitExecution?.({ id: crypto.randomUUID(), source: 'agent', status: 'cancelled', name: rootName, timestamp: new Date().toISOString(), startedAt: rootStartedAt || undefined, endedAt: new Date().toISOString(), durationMs: rootStartedMs ? Math.max(0, Date.now() - rootStartedMs) : undefined, runId: rootRunId || undefined, requestId, error: createAgentError('cancellation', error, { requestId, runId: rootRunId, code: 'REQUEST_CANCELLED', retryable: true }) }, true);
+        return;
+      }
       const stage = error instanceof AgentFailure ? error.stage : timeoutSignal.aborted ? 'timeout' : response.headersSent ? 'model' : 'validation';
       const info = createAgentError(stage, error, { requestId, key: secret, ...(error instanceof AgentFailure ? { code: error.code, retryable: error.retryable, suggestion: error.suggestion } : {}) });
+      if (response.headersSent && rootStartedAt) {
+        const endedAt = new Date().toISOString();
+        emitExecution?.({ id: crypto.randomUUID(), source: 'agent', status: info.stage === 'timeout' ? 'timeout' : info.stage === 'cancellation' ? 'cancelled' : 'error', name: rootName, timestamp: endedAt, startedAt: rootStartedAt, endedAt, durationMs: Math.max(0, Date.now() - rootStartedMs), runId: rootRunId || undefined, requestId, error: info }, true);
+      }
       if (response.headersSent) response.end(`${JSON.stringify({ type: 'error', error: info })}\n`);
       else send(400, { error: info });
     } finally {

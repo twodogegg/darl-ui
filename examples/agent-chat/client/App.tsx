@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AgentSidebar, AgentsSettingsCard, DarlUIProvider, ModelSettingsCard, SettingsPage, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentErrorInfo, type AgentToolCall, type AgentModelConfig, type AgentSendRequest, type AgentSession, type AgentSkill, type ModelProvider } from '@darl/ui';
+import { AgentSidebar, AgentsSettingsCard, DarlUIProvider, ModelSettingsCard, SettingsPage, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentErrorInfo, type AgentExecutionEvent, type AgentToolCall, type AgentModelConfig, type AgentSendRequest, type AgentSession, type AgentSkill, type ModelProvider } from '@darl/ui';
 import { ArrowLeft, BookOpen, Bot, MessageSquare, Settings2, Wrench } from 'lucide-react';
 import { lines } from '../stream';
 import { Guide } from './Guide';
@@ -7,6 +7,28 @@ import { toolHistoryForModel } from './message-history';
 
 const storageKey = 'darl-agent-chat-v1';
 const persistedSessions = (sessions: AgentSession[]) => sessions.map((session) => ({ ...session, messages: session.messages.map((message) => ({ ...message, attachments: message.attachments?.map((attachment) => typeof attachment === 'string' ? attachment : { ...attachment, url: attachment.url?.startsWith('data:') ? undefined : attachment.url }), toolCalls: message.toolCalls?.map(({ output: _output, ...call }) => call) })) }));
+const interruptedExecutionStatuses = new Set<AgentExecutionEvent['status']>(['pending', 'started', 'running', 'retrying', 'confirmation']);
+const terminalExecutionStatuses = new Set<AgentExecutionEvent['status']>(['success', 'error', 'cancelled', 'timeout']);
+function recoverTimeline(timeline: AgentExecutionEvent[] | undefined) {
+  if (!timeline?.length) return timeline;
+  const recoveredAt = new Date().toISOString();
+  const cleaned = timeline.filter((event, index) => {
+    if (event.status !== 'cancelled') return true;
+    const key = event.toolCallId || event.runId || event.id;
+    return !timeline.slice(index + 1).some((candidate) => (candidate.toolCallId || candidate.runId || candidate.id) === key && candidate.status === 'success');
+  });
+  return cleaned.map((event, index) => {
+    if (!interruptedExecutionStatuses.has(event.status)) return event;
+    const key = event.toolCallId || event.runId || event.id;
+    let latestIndex = -1;
+    for (let candidateIndex = timeline.length - 1; candidateIndex >= 0; candidateIndex -= 1) {
+      const candidate = timeline[candidateIndex];
+      if ((candidate.toolCallId || candidate.runId || candidate.id) === key) { latestIndex = candidateIndex; break; }
+    }
+    if (latestIndex !== index || terminalExecutionStatuses.has(timeline[latestIndex]?.status)) return event;
+    return { ...event, status: 'cancelled' as const, endedAt: recoveredAt, error: { code: 'REQUEST_CANCELLED', stage: 'cancellation', message: '运行已中断，请重新发起请求。', retryable: true, suggestion: '可以点击“重新生成”继续请求。', runId: event.runId, parentRunId: event.parentRunId } };
+  });
+}
 const newSession = (): AgentSession => ({ id: crypto.randomUUID(), title: '新对话', messages: [] });
 function restore(): { sessions: AgentSession[]; activeId: string; skills: AgentSkill[]; error?: string } {
   let error: string | undefined;
@@ -15,7 +37,7 @@ function restore(): { sessions: AgentSession[]; activeId: string; skills: AgentS
     const value = JSON.parse(raw || 'null');
     if (raw) error = '历史记录格式异常，未能恢复。';
     if (value && Array.isArray(value.sessions) && value.sessions.length && value.sessions.every((session: AgentSession) => typeof session.id === 'string' && Array.isArray(session.messages)) && Array.isArray(value.skills)) {
-      return { ...value, activeId: value.sessions.some((session: AgentSession) => session.id === value.activeId) ? value.activeId : value.sessions[0].id, sessions: value.sessions.map((session: AgentSession) => ({ ...session, messages: session.messages.map((message) => ({ ...message, toolCalls: message.toolCalls?.map((call) => ['pending', 'running', 'confirmation'].includes(call.status) ? { ...call, status: 'error' as const, error: '运行已中断，请重新发起请求。' } : call), streaming: false, content: message.content || (message.streaming ? '生成已中断，请重新生成。' : '') })) })) };
+      return { ...value, activeId: value.sessions.some((session: AgentSession) => session.id === value.activeId) ? value.activeId : value.sessions[0].id, sessions: value.sessions.map((session: AgentSession) => ({ ...session, messages: session.messages.map((message) => ({ ...message, toolCalls: message.toolCalls?.map((call) => ['pending', 'running', 'retrying', 'confirmation'].includes(call.status) ? { ...call, status: 'error' as const, error: '运行已中断，请重新发起请求。' } : call), timeline: recoverTimeline(message.timeline), streaming: false, content: message.content || (message.streaming ? '生成已中断，请重新生成。' : '') })) })) };
     }
   } catch { error = '浏览器存储不可用或历史记录无法读取。'; }
   const session = newSession();
@@ -85,6 +107,26 @@ export function App() {
   const patchMessage = (sessionId: string, messageId: string, content: (previous: string) => string, streaming: boolean, error?: AgentErrorInfo) => {
     setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, updatedAt: new Date().toLocaleString(), messages: session.messages.map((message) => message.id === messageId ? { ...message, content: content(message.content), streaming, ...(error ? { error } : {}) } : message) } : session));
   };
+  const appendTimeline = (sessionId: string, messageId: string, event: AgentExecutionEvent) => {
+    setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, messages: session.messages.map((message) => message.id === messageId ? { ...message, timeline: [...(message.timeline || []), event] } : message) } : session));
+  };
+  const finishTimeline = (sessionId: string, messageId: string, status: AgentExecutionEvent['status'], runId: string, requestId: string, error?: AgentErrorInfo, completed = false) => {
+    setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, messages: session.messages.map((message) => {
+      if (message.id !== messageId || !message.timeline?.length) return message;
+      const now = new Date().toISOString();
+      const active = message.timeline.filter((event) => {
+        if (!interruptedExecutionStatuses.has(event.status)) return false;
+        const key = event.toolCallId || event.runId || event.id;
+        const latest = [...message.timeline!].reverse().find((candidate) => (candidate.toolCallId || candidate.runId || candidate.id) === key);
+        return latest?.id === event.id;
+      });
+      const next = [...message.timeline];
+      active.forEach((event) => next.push({ ...event, id: crypto.randomUUID(), status, timestamp: now, endedAt: now, durationMs: event.startedAt ? Math.max(0, Date.now() - Date.parse(event.startedAt)) : undefined, ...(error ? { error } : {}) }));
+      const root = next.find((event) => event.source === 'agent' && event.runId === runId);
+      if (completed && !next.some((event) => event.source === 'agent' && event.runId === runId && ['success', 'error', 'cancelled', 'timeout'].includes(event.status))) next.push({ id: crypto.randomUUID(), source: 'agent', status: 'success', name: root?.name || 'Agent', timestamp: now, startedAt: root?.startedAt, endedAt: now, durationMs: root?.startedAt ? Math.max(0, Date.now() - Date.parse(root.startedAt)) : undefined, runId, requestId: requestId || undefined });
+      return { ...message, timeline: next };
+    }) } : session));
+  };
   const run = async (request: AgentSendRequest, previous?: AgentSession['messages']) => {
     if (running.current) throw new Error('请先停止当前生成');
     const selected = models.find((model) => model.id === request.modelId);
@@ -99,12 +141,15 @@ export function App() {
     let requestId = '';
     let runId = '';
     let streamError: AgentErrorInfo | undefined;
+    let streamDone = false;
     running.current = controller;
     setGenerating(true); setError('');
     setSessions((current) => current.map((session) => session.id === source.id ? { ...session, title: history.find((message) => message.role === 'user')?.content.replace(/\[([^\]]+)\]\((?:skill|app):[^)]+\)/g, '$1').slice(0, 32) || '新对话', messages: [...history, answer] } : session));
-    const finish = (errorInfo?: AgentErrorInfo) => {
-      setSessions((current) => current.map((session) => session.id === source.id ? { ...session, messages: session.messages.map((message) => message.id === answer.id ? { ...message, toolCalls: message.toolCalls?.map((call) => ['pending', 'running', 'confirmation'].includes(call.status) ? { ...call, status: 'error' as const, error: '工具调用已中断，请重新发起请求。' } : call) } : message) } : session));
+    const finish = (errorInfo?: AgentErrorInfo, completed = streamDone) => {
+      setSessions((current) => current.map((session) => session.id === source.id ? { ...session, messages: session.messages.map((message) => message.id === answer.id ? { ...message, toolCalls: message.toolCalls?.map((call) => ['pending', 'running', 'retrying', 'confirmation'].includes(call.status) ? { ...call, status: 'error' as const, error: '工具调用已中断，请重新发起请求。' } : call) } : message) } : session));
       const cancelled = controller.signal.aborted && !errorInfo ? { code: 'REQUEST_CANCELLED', stage: 'cancellation' as const, message: '生成已停止', requestId: requestId || undefined, runId: runId || undefined, retryable: true, suggestion: '可以点击“重新生成”继续请求。' } : errorInfo;
+      const timelineStatus: AgentExecutionEvent['status'] = cancelled?.stage === 'timeout' ? 'timeout' : cancelled?.stage === 'cancellation' ? 'cancelled' : cancelled ? 'error' : 'success';
+      finishTimeline(source.id, answer.id, timelineStatus, runId, requestId, cancelled, completed);
       patchMessage(source.id, answer.id, (value) => value || (cancelled ? '' : '生成已停止。'), false, cancelled);
       if (running.current === controller) { running.current = null; setGenerating(false); }
     };
@@ -154,15 +199,23 @@ export function App() {
               continue;
             }
             if (event.type === 'error') { streamError = typeof event.error === 'object' ? event.error as AgentErrorInfo : { code: 'MODEL_REQUEST_FAILED', stage: 'model', message: String(event.error || '请求失败'), requestId: requestId || undefined, runId: runId || undefined, retryable: true, suggestion: '检查模型、提供方和网络设置后重试。' }; break; }
+            if (event.type === 'execution') {
+              appendTimeline(source.id, answer.id, (event.event || event) as AgentExecutionEvent);
+            }
             if (event.type === 'tool') {
               const call = event.call as AgentToolCall;
-              setSessions((current) => current.map((session) => session.id === source.id ? { ...session, messages: session.messages.map((message) => message.id === answer.id ? { ...message, toolCalls: [...(message.toolCalls || []).filter((item) => item.id !== call.id), call] } : message) } : session));
+              setSessions((current) => current.map((session) => session.id === source.id ? { ...session, messages: session.messages.map((message) => {
+                if (message.id !== answer.id) return message;
+                const previous = message.toolCalls?.find((item) => item.id === call.id);
+                const merged = { ...previous, ...call, ...(call.input === undefined && previous?.input !== undefined ? { input: previous.input } : {}) } as AgentToolCall;
+                return { ...message, toolCalls: [...(message.toolCalls || []).filter((item) => item.id !== call.id), merged] };
+              }) } : session));
             }
             if (event.type === 'image' && event.image) {
               setSessions((current) => current.map((session) => session.id === source.id ? { ...session, messages: session.messages.map((message) => message.id === answer.id ? { ...message, attachments: [...(message.attachments || []), event.image] } : message) } : session));
             }
             if (event.type === 'text') patchMessage(source.id, answer.id, (value) => value + event.text, true);
-            if (event.type === 'done') done = true;
+            if (event.type === 'done') { done = true; streamDone = true; }
           }
           if (!done && !controller.signal.aborted && !streamError) throw new Error('连接中断，请重新生成');
         } catch (reason) {

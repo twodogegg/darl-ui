@@ -1,7 +1,31 @@
 import type { AgentModelCapabilities, AgentModelType } from '../settings/types';
 
 export type AgentMessageRole = 'user' | 'assistant';
-export type AgentToolStatus = 'pending' | 'running' | 'success' | 'error' | 'confirmation';
+export type AgentToolStatus = 'pending' | 'running' | 'retrying' | 'success' | 'error' | 'confirmation';
+
+/** Fixed streaming protocol values used to render generic Agent activity. */
+export type AgentExecutionSource = 'agent' | 'tool';
+export type AgentExecutionStatus = 'pending' | 'started' | 'running' | 'retrying' | 'confirmation' | 'success' | 'error' | 'cancelled' | 'timeout';
+
+export interface AgentExecutionEvent {
+  id: string;
+  source: AgentExecutionSource;
+  status: AgentExecutionStatus;
+  /** Dynamic Agent / tool display name supplied by the host. */
+  name: string;
+  summary?: string;
+  timestamp: string;
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  runId?: string;
+  parentRunId?: string;
+  agentId?: string | null;
+  toolCallId?: string;
+  requestId?: string;
+  attempt?: number;
+  error?: AgentErrorInfo;
+}
 
 export type AgentErrorStage = 'model' | 'mcp-connection' | 'mcp-tool' | 'delegation' | 'tool-validation' | 'validation' | 'cancellation' | 'timeout';
 
@@ -86,6 +110,10 @@ export interface AgentToolCall {
   runId?: string;
   requestId?: string;
   errorInfo?: AgentErrorInfo;
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  attempt?: number;
 }
 
 export interface AgentAttachment {
@@ -114,6 +142,8 @@ export interface AgentMessage {
   requestId?: string;
   runId?: string;
   error?: AgentErrorInfo;
+  /** Ordered execution events. Raw tool inputs/results are deliberately excluded. */
+  timeline?: AgentExecutionEvent[];
 }
 
 export interface AgentSession {

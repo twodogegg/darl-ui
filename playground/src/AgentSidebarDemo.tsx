@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Bot, CheckCircle2, ExternalLink, PanelRight, ShieldCheck } from 'lucide-react';
-import { AgentSidebar, type AgentToolCall, type AgentSendRequest, type AgentApplication, type AgentModel, type AgentSession, type AgentSkill } from '../../src';
+import { AgentSidebar, type AgentExecutionEvent, type AgentToolCall, type AgentSendRequest, type AgentApplication, type AgentModel, type AgentSession, type AgentSkill } from '../../src';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -21,7 +21,12 @@ const models: AgentModel[] = [
 const firstSession: AgentSession = {
   id: 'welcome', title: '订单状态查询', updatedAt: '今天', messages: [
     { id: 'welcome-1', role: 'user', content: '帮我查一下订单 #1024 的状态。' },
-    { id: 'welcome-tool', role: 'assistant', content: '我查到了订单信息。', toolCalls: [{ id: 'call-1', appId: 'orders', appName: '订单系统', toolName: 'get_order', toolTitle: '查询订单', status: 'success', input: { orderId: '1024' }, output: { status: '待发货', logisticsCompany: '顺丰' } }] },
+    { id: 'welcome-tool', role: 'assistant', content: '我查到了订单信息。', timeline: [
+      { id: 'welcome-run-start', source: 'agent', status: 'started', name: '网站助手', timestamp: '2026-10-17T00:00:00.000Z', runId: 'welcome-run' },
+      { id: 'welcome-tool-start', source: 'tool', status: 'started', name: '查询订单', timestamp: '2026-10-17T00:00:00.100Z', runId: 'welcome-run', toolCallId: 'call-1' },
+      { id: 'welcome-tool-done', source: 'tool', status: 'success', name: '查询订单', timestamp: '2026-10-17T00:00:00.200Z', durationMs: 100, runId: 'welcome-run', toolCallId: 'call-1' },
+      { id: 'welcome-run-done', source: 'agent', status: 'success', name: '网站助手', timestamp: '2026-10-17T00:00:00.300Z', durationMs: 300, runId: 'welcome-run' },
+    ] satisfies AgentExecutionEvent[], toolCalls: [{ id: 'call-1', appId: 'orders', appName: '订单系统', toolName: 'get_order', toolTitle: '查询订单', status: 'success', input: { orderId: '1024' }, output: { status: '待发货', logisticsCompany: '顺丰' } }] },
     { id: 'welcome-2', role: 'assistant', content: '订单 **#1024** 当前状态是“待发货”，物流公司为顺丰。' },
   ],
 };

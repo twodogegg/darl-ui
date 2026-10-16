@@ -1,12 +1,12 @@
 import { AgentComposerInput, ReferenceText, referenceIds } from './AgentComposerInput';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { AlertCircle, ArrowDown, ArrowLeft, ArrowUp, Bot, Check, ChevronDown, Clipboard, Copy, History, LoaderCircle, Maximize2, Minimize2, Paperclip, Pencil, Plus, RefreshCw, Search, Send, Sparkles, Square, Upload, Wrench, X } from 'lucide-react';
+import { AlertCircle, ArrowDown, ArrowLeft, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Clipboard, Clock3, Copy, History, LoaderCircle, Maximize2, Minimize2, Paperclip, Pencil, Plus, RefreshCw, Search, Send, Sparkles, Square, Upload, Wrench, X } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
 import { Button } from '../ui/Button';
-import type { AgentApplication, AgentAttachment, AgentErrorInfo, AgentImageAttachment, AgentSession, AgentSidebarProps, AgentSkill, AgentToolCall } from './types';
+import type { AgentApplication, AgentAttachment, AgentErrorInfo, AgentExecutionEvent, AgentImageAttachment, AgentSession, AgentSidebarProps, AgentSkill, AgentToolCall } from './types';
 import { SkillManager } from './SkillManager';
 import { importSkillPackage } from './skill-package';
 
@@ -113,12 +113,12 @@ function ToolCallCard({ call, onConfirm }: { call: AgentToolCall; onConfirm?: Ag
     try { await onConfirm(call.id, approved); }
     catch (reason) { setError(reason instanceof Error ? reason.message : '确认失败，请重试'); setPending(false); }
   };
-  const status = { pending: '等待调用', running: '执行中', success: '已完成', error: '调用失败', confirmation: '等待确认' }[call.status];
-  const StatusIcon = call.status === 'running' ? LoaderCircle : call.status === 'error' ? AlertCircle : call.status === 'success' ? Check : Wrench;
+  const status = { pending: '等待调用', running: '执行中', retrying: '重试中', success: '已完成', error: '调用失败', confirmation: '等待确认' }[call.status];
+  const StatusIcon = call.status === 'running' || call.status === 'retrying' ? LoaderCircle : call.status === 'error' ? AlertCircle : call.status === 'success' ? Check : Wrench;
   const delegationTask = call.appId.startsWith('agent:') && call.input && typeof call.input === 'object' && 'task' in call.input && typeof call.input.task === 'string' ? call.input.task : '';
   return <article className={`darl-agent-tool-call darl-agent-tool-call--${call.status}`}>
     <div className="darl-agent-tool-summary">
-      <span className="darl-agent-tool-icon"><StatusIcon size={14} className={call.status === 'running' ? 'darl-agent-spin' : undefined} /></span>
+      <span className="darl-agent-tool-icon"><StatusIcon size={14} className={call.status === 'running' || call.status === 'retrying' ? 'darl-agent-spin' : undefined} /></span>
       <span className="darl-agent-tool-title"><strong>{call.agentId ? `子 Agent · ${call.appName}` : call.appName}</strong><span>{call.toolTitle || call.toolName}</span></span>
       <span className="darl-agent-tool-status">{status}</span>
     </div>
@@ -138,6 +138,79 @@ function ToolCallCard({ call, onConfirm }: { call: AgentToolCall; onConfirm?: Ag
 function AgentErrorCard({ error }: { error: AgentErrorInfo }) {
   const stage = { model: '模型请求', 'mcp-connection': 'MCP 连接', 'mcp-tool': 'MCP 工具', delegation: '子 Agent 委派', 'tool-validation': '工具参数', validation: '请求校验', cancellation: '已取消', timeout: '请求超时' }[error.stage];
   return <div className="darl-agent-error-card" role="alert"><div className="darl-agent-error-card-head"><AlertCircle size={15} /><strong>{stage}失败</strong><span>{error.retryable ? '可以重试' : '请修改后重试'}</span></div><p>{error.message}</p><div className="darl-agent-error-card-meta"><span>错误码：{error.code}</span>{error.requestId && <span>requestId：{error.requestId}</span>}{error.runId && <span>runId：{error.runId}</span>}</div><small>{error.suggestion}</small></div>;
+}
+
+const executionStatusText: Record<AgentExecutionEvent['status'], string> = {
+  pending: '等待调用', started: '已开始', running: '执行中', retrying: '重试中', confirmation: '等待确认', success: '已完成', error: '失败', cancelled: '已取消', timeout: '已超时',
+};
+
+function executionSourceText(event: AgentExecutionEvent) {
+  return event.source === 'tool' ? 'MCP 工具' : event.agentId ? '子 Agent' : '主 Agent';
+}
+
+function executionDuration(event: AgentExecutionEvent, now: number, events: AgentExecutionEvent[] = []) {
+  if (typeof event.durationMs === 'number' && Number.isFinite(event.durationMs)) return event.durationMs;
+  const key = event.toolCallId || event.runId || event.id;
+  const terminal = [...events].reverse().find((candidate) => (candidate.toolCallId || candidate.runId || candidate.id) === key && ['success', 'error', 'cancelled', 'timeout'].includes(candidate.status) && typeof candidate.durationMs === 'number');
+  if (terminal?.durationMs !== undefined) return terminal.durationMs;
+  const start = Date.parse(event.startedAt || event.timestamp);
+  if (!Number.isFinite(start)) return 0;
+  return Math.max(0, now - start);
+}
+
+function formatDuration(milliseconds: number) {
+  const seconds = Math.floor(milliseconds / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`;
+}
+
+function ExecutionTimeline({ events, calls = [], onConfirm }: { events: AgentExecutionEvent[]; calls?: AgentToolCall[]; onConfirm?: AgentSidebarProps['onToolConfirm'] }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasLiveEvents = events.some((event) => ['pending', 'started', 'running', 'retrying', 'confirmation'].includes(event.status));
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!hasLiveEvents) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [hasLiveEvents]);
+  if (!events.length) return null;
+  const activityMap = new Map<string, AgentExecutionEvent[]>();
+  events.forEach((event) => {
+    const key = event.toolCallId || event.runId || event.id;
+    activityMap.set(key, [...(activityMap.get(key) || []), event]);
+  });
+  const activities = [...activityMap.entries()].map(([key, activityEvents]) => ({ key, events: activityEvents, first: activityEvents[0], latest: activityEvents.at(-1)! }));
+  const runDepth = new Map<string, number>();
+  events.filter((event) => event.source === 'agent').forEach((event) => {
+    if (!event.runId || runDepth.has(event.runId)) return;
+    const parentDepth = event.parentRunId ? runDepth.get(event.parentRunId) : undefined;
+    runDepth.set(event.runId, Math.min(3, (parentDepth ?? -1) + 1));
+  });
+  const current = events.at(-1)!;
+  return <section className={`darl-agent-execution${expanded ? ' is-expanded' : ''}`} aria-label="Agent 执行时间线">
+    <button type="button" className="darl-agent-execution-summary" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
+      <span className="darl-agent-execution-icon"><Clock3 size={14} /></span>
+      <span className="darl-agent-execution-heading"><strong>执行时间线</strong><small>{activities.length} 个活动 · {executionStatusText[current.status]}</small></span>
+      <span className="darl-agent-execution-duration">{formatDuration(executionDuration(current, now, events))}</span><ChevronDown size={14} className={expanded ? 'is-open' : undefined} />
+    </button>
+    {expanded && <ol className="darl-agent-execution-list">
+      {activities.map((activity) => {
+        const { first, latest, events: activityEvents } = activity;
+        const call = latest.toolCallId ? calls.find((item) => item.id === latest.toolCallId) : undefined;
+        const confirmation = latest.status === 'confirmation' && call ? { ...call, status: 'confirmation' as const } : undefined;
+        const isLive = ['pending', 'started', 'running', 'retrying', 'confirmation'].includes(latest.status);
+        const transitions = activityEvents.map((event) => executionStatusText[event.status]).filter((label, index, values) => index === 0 || label !== values[index - 1]);
+        const retryCount = activityEvents.filter((event) => event.status === 'retrying').length;
+        const hasDetails = Boolean(first.summary || latest.error || confirmation || transitions.length > 1);
+        const depth = Math.min(3, (runDepth.get(latest.runId || '') || 0) + (latest.source === 'tool' ? 1 : 0));
+        return <li key={activity.key} className={`darl-agent-execution-item darl-agent-execution-item--${latest.status}${isLive ? '' : ' is-history'}`} style={{ '--darl-agent-depth': depth } as CSSProperties}>
+          <div className="darl-agent-execution-row"><span className="darl-agent-execution-dot">{isLive && (latest.status === 'running' || latest.status === 'retrying') ? <LoaderCircle size={12} className="darl-agent-spin" /> : latest.status === 'success' ? <Check size={12} /> : latest.status === 'error' || latest.status === 'cancelled' || latest.status === 'timeout' ? <AlertCircle size={12} /> : <ChevronRight size={12} />}</span><span className="darl-agent-execution-copy"><strong>{executionSourceText(latest)}</strong><span>{latest.name}</span></span>{retryCount > 0 && <span className="darl-agent-execution-retry">重试 {retryCount}</span>}<span className="darl-agent-execution-state">{executionStatusText[latest.status]}</span><time>{formatDuration(executionDuration(latest, now, events))}</time></div>
+          {hasDetails && <details className="darl-agent-execution-details"><summary>查看详情</summary>{first.summary && <p>{first.summary}</p>}{transitions.length > 1 && <small className="darl-agent-execution-transitions">{transitions.join(' → ')}</small>}{latest.error && <div className="darl-agent-execution-error"><strong>{latest.error.message}</strong><small>{latest.error.code} · {latest.error.suggestion}</small></div>}{confirmation && <ToolCallCard call={confirmation} onConfirm={onConfirm} />}</details>}
+        </li>;
+      })}
+    </ol>}
+  </section>;
 }
 
 function Picker({ title, children, onClose, className = '' }: { title: string; children: ReactNode; onClose: () => void; className?: string }) {
@@ -340,7 +413,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
         {!activeMessages.length && <div className="darl-agent-empty-state"><span className="darl-agent-empty-icon"><Sparkles size={22} /></span><h2>需要我帮你做什么？</h2><p>选择应用和 Skill，把它们插入消息中。</p></div>}
         {activeMessages.map((message) => <article key={message.id} className={`darl-agent-message darl-agent-message--${message.role}`}>
           <div className="darl-agent-message-label">{message.role === 'user' ? '你' : 'Agent'}</div>
-          <div className="darl-agent-message-body">{message.streaming && !message.content && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{message.error && <AgentErrorCard error={message.error} />}{message.attachments?.map((attachment, index) => { const name = attachmentName(attachment); const url = typeof attachment === 'string' ? undefined : attachment.url; return url?.startsWith('data:image/') || url?.startsWith('http') ? <figure className="darl-agent-image-attachment" key={`${name}-${index}`}><button type="button" className="darl-agent-image-trigger" onClick={() => openImagePreview({ src: url, alt: name })} title="点击放大预览"><img src={url} alt={name} loading="lazy" /></button><figcaption><Paperclip size={12} />{name}</figcaption></figure> : <span className="darl-agent-chip" key={`${name}-${index}`}><Paperclip size={12} />{name}</span>; })}{message.toolCalls?.map((call) => <ToolCallCard key={call.id} call={call} onConfirm={onToolConfirm} />)}</div>
+          <div className="darl-agent-message-body">{message.streaming && !message.content && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{message.timeline?.length ? <ExecutionTimeline events={message.timeline} calls={message.toolCalls} onConfirm={onToolConfirm} /> : message.toolCalls?.map((call) => <ToolCallCard key={call.id} call={call} onConfirm={onToolConfirm} />)}{message.error && <AgentErrorCard error={message.error} />}{message.attachments?.map((attachment, index) => { const name = attachmentName(attachment); const url = typeof attachment === 'string' ? undefined : attachment.url; return url?.startsWith('data:image/') || url?.startsWith('http') ? <figure className="darl-agent-image-attachment" key={`${name}-${index}`}><button type="button" className="darl-agent-image-trigger" onClick={() => openImagePreview({ src: url, alt: name })} title="点击放大预览"><img src={url} alt={name} loading="lazy" /></button><figcaption><Paperclip size={12} />{name}</figcaption></figure> : <span className="darl-agent-chip" key={`${name}-${index}`}><Paperclip size={12} />{name}</span>; })}</div>
           {message.role === 'assistant' && !message.streaming && <div className="darl-agent-message-actions"><Button variant="ghost" size="sm" onClick={() => void copy(message.content, message.id)}><Clipboard size={13} />{copyState === message.id ? '已复制' : '复制'}</Button>{onRegenerate && <Button variant="ghost" size="sm" disabled={isGenerating} onClick={() => onRegenerate(message.id)}><RefreshCw size={13} />重新生成</Button>}</div>}
         </article>)}
         <div className="darl-agent-scroll-controls" aria-label="消息导航"><Button variant="ghost" size="icon" aria-label="滚动到顶部" title="滚动到顶部" onClick={() => scrollMessages('top')}><ArrowUp size={15} /></Button><Button variant="ghost" size="icon" aria-label="滚动到底部" title="滚动到底部" onClick={() => scrollMessages('bottom')}><ArrowDown size={15} /></Button></div>
