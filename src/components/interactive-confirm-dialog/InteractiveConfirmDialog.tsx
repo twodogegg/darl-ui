@@ -109,10 +109,12 @@ export function InteractiveConfirmDialog({
     }
   };
 
-  const vars = accentColor ? {
-    '--darl-confirm-accent': accentColor,
-    '--darl-confirm-accent-foreground': readableForeground(accentColor),
-  } as CSSProperties : undefined;
+  const vars = {
+    '--darl-confirm-accent': accentColor ?? theme?.theme.primaryColor ?? (theme?.resolvedMode === 'dark' ? '#f1f5f9' : '#18181b'),
+    '--darl-confirm-accent-foreground': readableForeground(accentColor ?? theme?.theme.primaryColor ?? (theme?.resolvedMode === 'dark' ? '#f1f5f9' : '#18181b')),
+    ...(theme?.theme.radius !== undefined ? { '--darl-radius': theme.theme.radius + 'px' } : {}),
+    ...(theme?.resolvedMode === 'dark' ? { '--darl-confirm-bg': '#111827', '--darl-confirm-text': '#f1f5f9', '--darl-confirm-muted': '#94a3b8', '--darl-confirm-border': '#344155' } : {}),
+  } as CSSProperties;
 
   return <Dialog.Root open={open} onOpenChange={requestOpen}>
     <Dialog.Portal>
