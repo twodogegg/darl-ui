@@ -1,4 +1,4 @@
-import type { GenerateRequest, MediaModel, MediaReferences } from './types';
+import type { GenerateRequest, MediaGenerationMode, MediaModel, MediaReferences } from './types';
 
 export function outputLimit(model: MediaModel): number {
   const value = model.capabilities.maxOutputs;
@@ -37,6 +37,30 @@ export type MediaInputMode = 'references' | 'frames';
 export function supportsFrames(model?: MediaModel): boolean {
   return model?.type === 'video' && model.capabilities.firstLastFrame === true;
 }
+export function generationModes(model?: MediaModel): MediaGenerationMode[] {
+  return model?.capabilities.generationModes ? [...model.capabilities.generationModes] : [];
+}
+export function selectedGenerationMode(model: MediaModel | undefined, inputMode: MediaInputMode, references: MediaReferences): MediaGenerationMode | undefined {
+  const modes = generationModes(model);
+  if (!model || !modes.length) return undefined;
+  if (model.type === 'video') {
+    if (inputMode === 'frames' && supportsFrames(model) && modes.includes('first-last-frame')) return 'first-last-frame';
+    if (inputMode === 'references' && (references.images?.length || references.videos?.length || references.audios?.length) && modes.includes('reference')) return 'reference';
+    if (modes.includes('text-to-video')) return 'text-to-video';
+    return modes[0];
+  }
+  const hasImages = Boolean(references.images?.length);
+  if (hasImages && modes.includes('reference-edit')) return 'reference-edit';
+  if (modes.includes('text-to-image')) return 'text-to-image';
+  return modes[0];
+}
+export const generationModeLabels: Record<MediaGenerationMode, string> = {
+  'text-to-image': '文生图',
+  'reference-edit': '参考图编辑',
+  'text-to-video': '文生视频',
+  'first-last-frame': '首尾帧',
+  reference: '参考素材',
+};
 export function filterReferences(model: MediaModel, references: MediaReferences, inputMode: MediaInputMode = references.firstFrame || references.lastFrame ? 'frames' : 'references'): MediaReferences | undefined {
   const result: MediaReferences = {};
   if (supportsFrames(model) && inputMode === 'frames') {

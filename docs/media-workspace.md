@@ -22,9 +22,9 @@ const models: MediaModel[] = [
     defaults: { aspectRatio: '9:16', resolution: '2K', count: 2 },
   },
   {
-    id: 'video-a', name: '视频模型 A', type: 'video',
+    id: 'video-a', logicalModelId: 'video-generation', bindingId: 'video-darl', providerId: 'darl', protocolKey: 'darl-runninghub-h3-flash', name: '视频模型 A', type: 'video',
     capabilities: {
-      images: 30, videos: 2, audios: 1, firstLastFrame: true,
+      images: 30, videos: 2, audios: 1, generationModes: ['text-to-video', 'first-last-frame', 'reference'], firstLastFrame: true,
       aspectRatios: ['16:9', '9:16'], resolutions: ['720p', '1080p'],
       durations: { min: 4, max: 15 }, generateAudio: true, maxOutputs: 4,
     },
@@ -65,6 +65,7 @@ export function Studio({ startGeneration }: {
 | --- | --- |
 | `models` | `MediaModel[]`，必填；可动态更新 |
 | `tasks` | `MediaTask[]`，必填；组件只展示数据 |
+| `routingStrategy` | `'selected-binding' | 'auto'`；默认选择当前模型绑定，`auto` 交给宿主按逻辑模型路由 |
 | `activeTaskId` | 可选受控任务 ID；不传时组件内部维护选择，默认第一项 |
 | `onTaskChange` | `(taskId) => void`，切换任务通知 |
 | `onCreateTask` | `() => void`；不传时隐藏新建入口 |
@@ -81,7 +82,7 @@ export function Studio({ startGeneration }: {
 
 ## 能力和默认值
 
-图片模型只提供通用能力和 `images`；视频模型另支持 `videos`、`audios`、`firstLastFrame`、`durations`、`generateAudio`。未配置、`0` 或 `false` 表示不提供相应功能。
+图片模型只提供通用能力和 `images`；需要编辑能力时声明 `generationModes: ['text-to-image', 'reference-edit']`。视频模型另支持 `videos`、`audios`、`generationModes`、`firstLastFrame`、`durations`、`generateAudio`。模型可附带 `logicalModelId`、`bindingId`、`providerId`、`upstreamModelId` 和 `protocolKey`，组件会在提交事件中原样交给宿主路由。未配置、`0` 或 `false` 表示不提供相应功能。
 
 - `maxOutputs` 缺省为 1。只有大于 1 时显示数量选择；请求始终带 `count`。
 - 比例、分辨率和时长候选为空时隐藏控件，提交不带相应字段。
@@ -105,6 +106,17 @@ export function Studio({ startGeneration }: {
 type GenerateRequest = {
   taskId: string;
   modelId: string;
+  logicalModelId?: string;
+  bindingId?: string;
+  providerId?: string;
+  upstreamModelId?: string;
+  protocolKey?: string;
+  route?: {
+    strategy: 'selected-binding' | 'auto';
+    bindingId?: string;
+    providerId?: string;
+  };
+  mode?: 'text-to-image' | 'reference-edit' | 'text-to-video' | 'first-last-frame' | 'reference';
   prompt: string;
   references?: {
     images?: MediaInput[]; videos?: MediaInput[]; audios?: MediaInput[];
@@ -117,6 +129,8 @@ type GenerateRequest = {
 };
 ```
 
+`mode` 由当前模型能力、输入方式和素材角色自动规范化：无参考图时使用文生图 / 文生视频，有图片编辑素材时使用 `reference-edit` / `reference`，选择首尾帧时使用 `first-last-frame`。有绑定元数据时，默认 `route.strategy` 为 `selected-binding`；传入 `routingStrategy="auto"` 后交给宿主按逻辑模型选择渠道。宿主仍负责凭据、上传、协议适配、轮询和错误映射，组件不会拼接供应商原生请求体。
+
 `onGenerate` 只在提示词非空、任务与模型存在且参考数量合法时触发。等待提交 Promise 期间禁止重复提交；抛错显示在输入区，保留草稿方便重试。长期运行状态由宿主更新，不用提交 Promise 模拟轮询。
 
 ## 批次和结果
@@ -124,6 +138,7 @@ type GenerateRequest = {
 `MediaTask` 含 `id`、`title`、`batches`。批次含 `id`、`modelId`、`prompt`、`options`、`results`，另可保存：
 
 - `type?: 'image' | 'video'`：建议保存，以便历史模型从配置中删除后仍可播放结果。
+- `logicalModelId?`、`bindingId?`、`providerId?`、`upstreamModelId?`、`protocolKey?`、`route?`、`mode?`：建议保存，使历史批次能够复用原始逻辑模型和渠道路由。
 - `references?: MediaReferences`：历史复用时恢复素材；缺省恢复为空。跨会话保存前应由宿主将本地文件转成远程素材对象。
 
 结果含 `id`、`status`、可选 `url`、`error` 和 `favorited?: boolean`。状态为 `queued | running | completed | failed | cancelled`。每次生成由宿主追加批次，组件按 `batches` 原顺序展示；结果失败互不影响。

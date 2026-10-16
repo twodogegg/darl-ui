@@ -3,11 +3,11 @@ import { Button } from '../ui/Button';
 import { readableForeground } from '../../theme/DarlUIProvider';
 import { MediaComposer } from './MediaComposer';
 import { MediaResults } from './MediaResults';
-import { filterReferences, normalizeOptions, referenceLimit, supportsFrames, type MediaInputMode } from './model';
+import { filterReferences, normalizeOptions, referenceLimit, selectedGenerationMode, supportsFrames, type MediaInputMode } from './model';
 import { useReferences } from './useReferences';
 import type { GenerateRequest, MediaBatch, MediaModel, MediaResult, MediaWorkspaceProps } from './types';
 
-export function MediaWorkspace({ models, tasks, activeTaskId, onTaskChange, onCreateTask, onRenameTask, onGenerate, onRetry, onCancel, onRegenerate, onFavoriteChange, accentColor, className = '' }: MediaWorkspaceProps) {
+export function MediaWorkspace({ models, tasks, routingStrategy = 'selected-binding', activeTaskId, onTaskChange, onCreateTask, onRenameTask, onGenerate, onRetry, onCancel, onRegenerate, onFavoriteChange, accentColor, className = '' }: MediaWorkspaceProps) {
   const [localTaskId, setLocalTaskId] = useState(tasks[0]?.id);
   const activeId = activeTaskId ?? localTaskId;
   const task = tasks.find((item) => item.id === activeId) ?? (activeTaskId === undefined ? tasks[0] : undefined);
@@ -58,7 +58,13 @@ export function MediaWorkspace({ models, tasks, activeTaskId, onTaskChange, onCr
     if (!canGenerate || !model || !task || submitting.current) return;
     submitting.current = true; setPending(true); setError('');
     const references = filterReferences(model, draft.references, inputMode);
-    try { await onGenerate({ taskId: task.id, modelId: model.id, prompt: prompt.trim(), options: normalizeOptions(model, options), ...(references ? { references } : {}) }); }
+    const mode = selectedGenerationMode(model, inputMode, references || {});
+    const route = routingStrategy === 'auto'
+      ? { strategy: 'auto' as const, ...(model.providerId ? { providerId: model.providerId } : {}) }
+      : model.bindingId
+        ? { strategy: 'selected-binding' as const, bindingId: model.bindingId, ...(model.providerId ? { providerId: model.providerId } : {}) }
+        : undefined;
+    try { await onGenerate({ taskId: task.id, modelId: model.id, prompt: prompt.trim(), options: normalizeOptions(model, options), ...(model.logicalModelId ? { logicalModelId: model.logicalModelId } : {}), ...(model.bindingId ? { bindingId: model.bindingId } : {}), ...(model.providerId ? { providerId: model.providerId } : {}), ...(model.upstreamModelId ? { upstreamModelId: model.upstreamModelId } : {}), ...(model.protocolKey ? { protocolKey: model.protocolKey } : {}), ...(route ? { route } : {}), ...(mode ? { mode } : {}), ...(references ? { references } : {}) }); }
     catch (reason) { if (mounted.current) setError(reason instanceof Error ? reason.message : '提交失败，请重试'); }
     finally { submitting.current = false; if (mounted.current) setPending(false); }
   };

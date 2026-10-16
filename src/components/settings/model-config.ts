@@ -221,7 +221,19 @@ export function mediaCapabilities(value: CapabilityValues): AgentModelCapabiliti
     } as AgentModelCapabilities;
   }
   if ('maxReferenceImages' in value) {
-    return { referenceImages: value.maxReferenceImages, aspectRatios: value.aspectRatios, resolutions: value.sizes, qualities: value.qualities, maxOutputs: value.maxOutputs, referenceEdit: value.supportsReferenceEdit, textToImage: value.supportsTextToImage } as AgentModelCapabilities;
+    return {
+      referenceImages: value.maxReferenceImages,
+      aspectRatios: value.aspectRatios,
+      resolutions: value.sizes,
+      qualities: value.qualities,
+      maxOutputs: value.maxOutputs,
+      referenceEdit: value.supportsReferenceEdit,
+      textToImage: value.supportsTextToImage,
+      generationModes: [
+        ...(value.supportsTextToImage ? ['text-to-image'] : []),
+        ...(value.supportsReferenceEdit ? ['reference-edit'] : []),
+      ],
+    } as AgentModelCapabilities;
   }
   return {};
 }
@@ -234,13 +246,16 @@ export function toMediaModels(configuration: ModelConfiguration, includeUnimplem
     const capabilities = effectiveCapabilities(configuration, model, binding);
     if (!capabilities) return [];
     if (model.type === 'image' && 'maxReferenceImages' in capabilities && 'sizes' in capabilities) return [{
-      id: model.id, logicalModelId: model.id, bindingId: binding.id, upstreamModelId: binding.upstreamModelId, name: model.displayName, type: 'image',
-      capabilities: { images: capabilities.maxReferenceImages, ...(capabilities.sizes ? { resolutions: capabilities.sizes } : {}), ...(capabilities.aspectRatios ? { aspectRatios: capabilities.aspectRatios } : {}), ...(capabilities.maxOutputs !== undefined ? { maxOutputs: capabilities.maxOutputs } : {}) },
+      id: model.id, logicalModelId: model.id, bindingId: binding.id, providerId: binding.providerId, upstreamModelId: binding.upstreamModelId, protocolKey: binding.protocolKey, name: model.displayName, type: 'image',
+      capabilities: { images: capabilities.maxReferenceImages, generationModes: [
+        ...('supportsTextToImage' in capabilities && capabilities.supportsTextToImage ? ['text-to-image' as const] : []),
+        ...('supportsReferenceEdit' in capabilities && capabilities.supportsReferenceEdit ? ['reference-edit' as const] : []),
+      ], ...(capabilities.sizes ? { resolutions: capabilities.sizes } : {}), ...(capabilities.aspectRatios ? { aspectRatios: capabilities.aspectRatios } : {}), ...(capabilities.maxOutputs !== undefined ? { maxOutputs: capabilities.maxOutputs } : {}) },
       ...(modelTemplateDefaults(configuration, model) ? { defaults: modelTemplateDefaults(configuration, model) } : {}),
     }];
     if (model.type === 'video' && 'maxReferenceVideos' in capabilities && 'modes' in capabilities && Array.isArray(capabilities.modes)) return [{
-      id: model.id, logicalModelId: model.id, bindingId: binding.id, upstreamModelId: binding.upstreamModelId, name: model.displayName, type: 'video',
-      capabilities: { images: capabilities.maxReferenceImages, videos: capabilities.maxReferenceVideos, audios: capabilities.maxReferenceAudios, firstLastFrame: capabilities.firstLastFrame === 'supported', aspectRatios: capabilities.aspectRatios, resolutions: capabilities.resolutions, durations: capabilities.durations, ...(capabilities.generateAudio !== undefined ? { generateAudio: capabilities.generateAudio } : {}), ...(capabilities.maxOutputs !== undefined ? { maxOutputs: capabilities.maxOutputs } : {}) },
+      id: model.id, logicalModelId: model.id, bindingId: binding.id, providerId: binding.providerId, upstreamModelId: binding.upstreamModelId, protocolKey: binding.protocolKey, name: model.displayName, type: 'video',
+      capabilities: { images: capabilities.maxReferenceImages, videos: capabilities.maxReferenceVideos, audios: capabilities.maxReferenceAudios, generationModes: capabilities.modes, firstLastFrame: capabilities.firstLastFrame === 'supported', aspectRatios: capabilities.aspectRatios, resolutions: capabilities.resolutions, durations: capabilities.durations, ...(capabilities.generateAudio !== undefined ? { generateAudio: capabilities.generateAudio } : {}), ...(capabilities.maxOutputs !== undefined ? { maxOutputs: capabilities.maxOutputs } : {}) },
       ...(modelTemplateDefaults(configuration, model) ? { defaults: modelTemplateDefaults(configuration, model) } : {}),
     }];
     return [];

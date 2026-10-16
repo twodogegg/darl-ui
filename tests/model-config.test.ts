@@ -45,7 +45,7 @@ describe('model configuration', () => {
     const configuration = defaultModelConfiguration();
     const models = toMediaModels(configuration, true);
     const h3 = models.find((model) => model.id === 'minimax-h3-flash');
-    expect(h3).toMatchObject({ type: 'video', capabilities: { images: 9, videos: 3, audios: 3, resolutions: ['480', '768'], aspectRatios: ['16:9', '9:16'], firstLastFrame: false } });
+    expect(h3).toMatchObject({ type: 'video', bindingId: 'h3-darl', providerId: 'darl', protocolKey: 'darl-h3-flash-unified', capabilities: { images: 9, videos: 3, audios: 3, generationModes: ['text-to-video', 'first-last-frame', 'reference'], resolutions: ['480', '768'], aspectRatios: ['16:9', '9:16'], firstLastFrame: false } });
   });
 
   it('does not mutate the template when resolving overrides', () => {

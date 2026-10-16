@@ -11,14 +11,14 @@ import type { Mode } from './usePlaygroundTheme';
 
 const media = (name: string) => `${import.meta.env.BASE_URL}media-workspace/${name}`;
 const studioModels: MediaModel[] = [
-  { id: 'image-a', name: '图片模型 A', type: 'image', capabilities: { images: 10, aspectRatios: ['1:1', '2:3', '3:2', '9:16', '16:9'], resolutions: ['1K', '2K', '4K'], maxOutputs: 4 }, defaults: { aspectRatio: '9:16', resolution: '2K', count: 2 } },
-  { id: 'image-b', name: '图片模型 B', type: 'image', capabilities: { images: 1, aspectRatios: ['1:1', '16:9'], resolutions: ['1024x1024', '1536x1024'], maxOutputs: 1 }, defaults: { aspectRatio: '1:1', resolution: '1024x1024' } },
-  { id: 'video-a', name: '视频模型 A', type: 'video', capabilities: { images: 30, videos: 2, audios: 1, firstLastFrame: true, aspectRatios: ['16:9', '9:16'], resolutions: ['720p', '1080p'], durations: { min: 4, max: 15 }, generateAudio: true, maxOutputs: 4 }, defaults: { aspectRatio: '9:16', resolution: '1080p', duration: 10, count: 1, generateAudio: true } },
-  { id: 'video-b', name: '视频模型 B', type: 'video', capabilities: { images: 9, firstLastFrame: true, aspectRatios: ['16:9', '9:16'], resolutions: ['720p'], durations: [4, 8, 12, 15], maxOutputs: 1 }, defaults: { aspectRatio: '16:9', resolution: '720p', duration: 8, count: 1 } },
+  { id: 'image-a', name: '图片模型 A', type: 'image', capabilities: { images: 10, generationModes: ['text-to-image', 'reference-edit'], aspectRatios: ['1:1', '2:3', '3:2', '9:16', '16:9'], resolutions: ['1K', '2K', '4K'], maxOutputs: 4 }, defaults: { aspectRatio: '9:16', resolution: '2K', count: 2 } },
+  { id: 'image-b', name: '图片模型 B', type: 'image', capabilities: { images: 1, generationModes: ['text-to-image'], aspectRatios: ['1:1', '16:9'], resolutions: ['1024x1024', '1536x1024'], maxOutputs: 1 }, defaults: { aspectRatio: '1:1', resolution: '1024x1024' } },
+  { id: 'video-a', name: '视频模型 A', type: 'video', capabilities: { images: 30, videos: 2, audios: 1, generationModes: ['text-to-video', 'first-last-frame', 'reference'], firstLastFrame: true, aspectRatios: ['16:9', '9:16'], resolutions: ['720p', '1080p'], durations: { min: 4, max: 15 }, generateAudio: true, maxOutputs: 4 }, defaults: { aspectRatio: '9:16', resolution: '1080p', duration: 10, count: 1, generateAudio: true } },
+  { id: 'video-b', name: '视频模型 B', type: 'video', capabilities: { images: 9, generationModes: ['text-to-video', 'first-last-frame'], firstLastFrame: true, aspectRatios: ['16:9', '9:16'], resolutions: ['720p'], durations: [4, 8, 12, 15], maxOutputs: 1 }, defaults: { aspectRatio: '16:9', resolution: '720p', duration: 8, count: 1 } },
 ];
 const campaignModels: MediaModel[] = [
-  { id: 'campaign-image', name: '商品海报', type: 'image', capabilities: { images: 2, aspectRatios: ['1:1', '3:4'], resolutions: ['2K'], maxOutputs: 2 }, defaults: { aspectRatio: '3:4', count: 1 } },
-  { id: 'campaign-video', name: '宣传短片', type: 'video', capabilities: { aspectRatios: ['16:9'], durations: [5, 10], maxOutputs: 1 }, defaults: { duration: 5 } },
+  { id: 'campaign-image', name: '商品海报', type: 'image', capabilities: { images: 2, generationModes: ['text-to-image', 'reference-edit'], aspectRatios: ['1:1', '3:4'], resolutions: ['2K'], maxOutputs: 2 }, defaults: { aspectRatio: '3:4', count: 1 } },
+  { id: 'campaign-video', name: '宣传短片', type: 'video', capabilities: { generationModes: ['text-to-video'], aspectRatios: ['16:9'], durations: [5, 10], maxOutputs: 1 }, defaults: { duration: 5 } },
 ];
 
 function initialTasks(campaign: boolean): MediaTask[] {
@@ -57,7 +57,7 @@ function DemoHost({ campaign, mode, color, fail, reject }: { campaign: boolean; 
     if (reject) return Promise.reject(new Error('模拟提交失败，请关闭「模拟提交失败」后重试'));
     setLastRequest(request);
     const model = models.find((item) => item.id === request.modelId)!;
-    const batch: MediaBatch = { id: crypto.randomUUID(), modelId: model.id, type: model.type, prompt: request.prompt, options: request.options, references: request.references, results: Array.from({ length: request.options.count }, () => ({ id: crypto.randomUUID(), status: 'queued' })) };
+    const batch: MediaBatch = { id: crypto.randomUUID(), modelId: model.id, type: model.type, logicalModelId: request.logicalModelId, bindingId: request.bindingId, providerId: request.providerId, upstreamModelId: request.upstreamModelId, protocolKey: request.protocolKey, mode: request.mode, route: request.route, prompt: request.prompt, options: request.options, references: request.references, results: Array.from({ length: request.options.count }, () => ({ id: crypto.randomUUID(), status: 'queued' })) };
     setTasks((prev) => prev.map((task) => task.id === request.taskId ? { ...task, batches: [...task.batches, batch] } : task));
     batch.results.forEach((result, index) => schedule(batch.id, result.id, model.type, fail && index === batch.results.length - 1, index));
   };

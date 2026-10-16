@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MediaWorkspace, type MediaModel, type MediaTask } from '../src';
-import { durations, filterReferences, normalizeOptions } from '../src/components/media-workspace/model';
+import { durations, filterReferences, normalizeOptions, selectedGenerationMode } from '../src/components/media-workspace/model';
 
 const models: MediaModel[] = [
   { id: 'image', name: '图片 A', type: 'image', capabilities: { images: 3, aspectRatios: ['1:1', '16:9'], resolutions: ['1K', '2K'], maxOutputs: 4 }, defaults: { aspectRatio: '16:9', resolution: '2K', count: 2 } },
@@ -50,6 +50,22 @@ describe('MediaWorkspace', () => {
     expect(screen.queryByRole('button', { name: '时长' })).toBeNull();
     prompt(); submit();
     await waitFor(() => expect(onGenerate).toHaveBeenCalledWith({ taskId: 't1', modelId: 'image', prompt: '生成测试画面', options: { aspectRatio: '16:9', resolution: '2K', count: 2 } }));
+  });
+  it('提交逻辑模型、绑定和规范化生成模式', async () => {
+    const routedVideo: MediaModel = {
+      ...models[2], logicalModelId: 'h3-flash', bindingId: 'h3-binding', providerId: 'darl', upstreamModelId: 'minimax-h3-flash', protocolKey: 'darl-runninghub-h3-flash',
+      capabilities: { ...models[2].capabilities, generationModes: ['text-to-video', 'first-last-frame', 'reference'] },
+    };
+    expect(selectedGenerationMode(routedVideo, 'frames', {})).toBe('first-last-frame');
+    expect(selectedGenerationMode(routedVideo, 'references', { images: [file('reference.png')] })).toBe('reference');
+    const onGenerate = vi.fn();
+    render(<MediaWorkspace models={[models[0], routedVideo]} tasks={tasks} onGenerate={onGenerate}/>);
+    switchType('视频');
+    expect(screen.getByLabelText('生成方式：首尾帧')).toBeInTheDocument();
+    prompt(); submit();
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith(expect.objectContaining({
+      modelId: 'video', logicalModelId: 'h3-flash', bindingId: 'h3-binding', providerId: 'darl', upstreamModelId: 'minimax-h3-flash', protocolKey: 'darl-runninghub-h3-flash', mode: 'first-last-frame', route: { strategy: 'selected-binding', bindingId: 'h3-binding', providerId: 'darl' },
+    })));
   });
   it('默认生成图片，类型切换后模型列表只保留同类模型', () => {
     render(<MediaWorkspace models={models} tasks={tasks} onGenerate={vi.fn()}/>);

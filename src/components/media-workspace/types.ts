@@ -2,15 +2,26 @@ export interface BaseCapabilities {
   aspectRatios?: string[];
   resolutions?: string[];
   maxOutputs?: number;
+  generationModes?: MediaGenerationMode[];
 }
 export interface BaseDefaults { aspectRatio?: string; resolution?: string; count?: number }
+export type MediaGenerationMode = 'text-to-image' | 'reference-edit' | 'text-to-video' | 'first-last-frame' | 'reference';
+export type MediaRouteStrategy = 'selected-binding' | 'auto';
+export interface MediaRoute {
+  strategy: MediaRouteStrategy;
+  bindingId?: string;
+  providerId?: string;
+}
 export interface ImageModel {
   id: string;
   name: string;
   type: 'image';
   logicalModelId?: string;
   bindingId?: string;
+  providerId?: string;
+  providerName?: string;
   upstreamModelId?: string;
+  protocolKey?: string;
   capabilities: BaseCapabilities & { images?: number };
   defaults?: BaseDefaults;
 }
@@ -20,7 +31,10 @@ export interface VideoModel {
   type: 'video';
   logicalModelId?: string;
   bindingId?: string;
+  providerId?: string;
+  providerName?: string;
   upstreamModelId?: string;
+  protocolKey?: string;
   capabilities: BaseCapabilities & {
     images?: number;
     videos?: number;
@@ -43,6 +57,15 @@ export interface MediaReferences {
 export interface GenerateRequest {
   taskId: string;
   modelId: string;
+  /** Stable logical model identity, when supplied by the host model registry. */
+  logicalModelId?: string;
+  /** Selected channel metadata; the host resolves the actual credentials. */
+  bindingId?: string;
+  providerId?: string;
+  upstreamModelId?: string;
+  protocolKey?: string;
+  route?: MediaRoute;
+  mode?: MediaGenerationMode;
   prompt: string;
   references?: MediaReferences;
   options: { aspectRatio?: string; resolution?: string; duration?: number; count: number; generateAudio?: boolean };
@@ -57,6 +80,13 @@ export interface MediaResult {
 export interface MediaBatch {
   id: string;
   modelId: string;
+  logicalModelId?: string;
+  bindingId?: string;
+  providerId?: string;
+  upstreamModelId?: string;
+  protocolKey?: string;
+  route?: MediaRoute;
+  mode?: MediaGenerationMode;
   /** Save the output type if a historical model may be removed from the model list. */
   type?: MediaModel['type'];
   prompt: string;
@@ -68,6 +98,8 @@ export interface MediaTask { id: string; title: string; batches: MediaBatch[] }
 export interface MediaWorkspaceProps {
   models: MediaModel[];
   tasks: MediaTask[];
+  /** How the host should select a channel when a model has binding metadata. */
+  routingStrategy?: MediaRouteStrategy;
   activeTaskId?: string;
   onTaskChange?: (taskId: string) => void;
   onCreateTask?: () => void;

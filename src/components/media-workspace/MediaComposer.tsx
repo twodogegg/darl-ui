@@ -1,7 +1,7 @@
 import { useId, useRef, type KeyboardEvent } from 'react';
 import { Button } from '../ui/Button';
 import { Alert, Choice, Popover } from './WorkspaceUI';
-import { durations, outputLimit, referenceLimit, supportsFrames, type MediaInputMode } from './model';
+import { durations, filterReferences, generationModeLabels, outputLimit, referenceLimit, selectedGenerationMode, supportsFrames, type MediaInputMode } from './model';
 import type { GenerateRequest, MediaModel } from './types';
 import type { ReferenceDraft } from './useReferences';
 
@@ -21,6 +21,7 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
   const frameRole = useRef<'firstFrame' | 'lastFrame'>('firstFrame');
   const modelTypes = (['image', 'video'] as const).filter((type) => models.some((item) => item.type === type));
   const accept = model ? (['images', 'videos', 'audios'] as const).filter((kind) => referenceLimit(model, kind)).map((kind) => kind === 'images' ? 'image/*' : kind === 'videos' ? 'video/*' : 'audio/*') : [];
+  const selectedMode = model ? selectedGenerationMode(model, inputMode, filterReferences(model, draft.references, inputMode) || {}) : undefined;
   const add = (files: File[]) => {
     if (!model) return;
     onError('');
@@ -68,6 +69,7 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
     <div className="darl-mw-controls">
       {supportsFrames(model) && !!accept.length && <Choice label="素材方式" value={inputMode === 'frames' ? '首尾帧' : '参考素材'} choices={['首尾帧', '参考素材']} onChange={(value) => onInputModeChange(value === '首尾帧' ? 'frames' : 'references')}/>}
       {inputMode === 'references' && !!accept.length && <Button variant="secondary" size="sm" onClick={chooseFiles} aria-label="添加参考素材">＋ 素材</Button>}
+      {selectedMode && <span className="darl-mw-mode" aria-label={`生成方式：${generationModeLabels[selectedMode]}`}>生成方式 · {generationModeLabels[selectedMode]}</span>}
       {inputMode === 'references' && model && <span className="darl-mw-capacity">{(['images', 'videos', 'audios'] as const).filter((kind) => referenceLimit(model, kind)).map((kind) => `${labels[kind]} ${draft.references[kind]?.length ?? 0}/${referenceLimit(model, kind)}`).join(' · ')}</span>}
       <Popover label="选择模型" trigger={model ? `${model.type === 'image' ? '▧' : '▷'} ${model.name}` : '无可用模型'}>{(close) => <div className="darl-mw-models">{models.filter((item) => item.type === mediaType).map((item) => <Button key={item.id} variant={item.id === model?.id ? 'secondary' : 'ghost'} size="sm" onClick={() => { onModelChange(item.id); close(); }} aria-pressed={item.id === model?.id}>{item.name}</Button>)}</div>}</Popover>
       {!!model?.capabilities.aspectRatios?.length && <Choice label="比例" choices={model.capabilities.aspectRatios} value={options.aspectRatio} onChange={(aspectRatio) => onOptionsChange({ ...options, aspectRatio: String(aspectRatio) })}/>}
