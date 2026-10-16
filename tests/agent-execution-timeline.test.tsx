@@ -28,17 +28,15 @@ describe('Agent execution timeline', () => {
     expect(container).not.toHaveTextContent('hidden');
   });
 
-  it('reuses the confirmation action without exposing raw parameters before expansion', () => {
+  it('keeps ordinary tool confirmation as a tool card without adding a main-agent timeline', () => {
     const onToolConfirm = vi.fn().mockResolvedValue(undefined);
     const timeline: AgentExecutionEvent[] = [event({ id: 'confirmation', source: 'tool', status: 'confirmation', name: '保存素材', runId: 'root', toolCallId: 'write-1' })];
     const session: AgentSession = { id: 'confirmation', title: '确认', messages: [{ id: 'answer', role: 'assistant', content: '', timeline, toolCalls: [{ id: 'write-1', appId: 'catalog', appName: '素材库', toolName: 'save', status: 'confirmation', input: { name: '新素材' } }] }] };
     render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[session]} activeSessionId="confirmation" onToolConfirm={onToolConfirm} />);
-    expect(screen.queryByText(/"name": "新素材"/)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /执行时间线/ }));
-    fireEvent.click(screen.getByText('查看详情'));
     expect(screen.getByText(/"name": "新素材"/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '允许执行' }));
     expect(onToolConfirm).toHaveBeenCalledWith('write-1', true);
+    expect(screen.queryByRole('button', { name: /执行时间线/ })).toBeNull();
   });
 
   it('keeps cancellation and timeout as terminal states instead of success', () => {
@@ -48,9 +46,6 @@ describe('Agent execution timeline', () => {
     ];
     const session: AgentSession = { id: 'cancelled', title: '取消', messages: [{ id: 'answer', role: 'assistant', content: '', timeline }] };
     render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[session]} activeSessionId="cancelled" />);
-    expect(screen.getByRole('button', { name: /执行时间线.*已取消/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /执行时间线/ }));
-    expect(screen.getAllByText('已取消').length).toBeGreaterThan(0);
-    expect(screen.queryByText('已完成')).toBeNull();
+    expect(screen.queryByRole('button', { name: /执行时间线/ })).toBeNull();
   });
 });
