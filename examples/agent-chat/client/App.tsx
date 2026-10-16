@@ -59,6 +59,7 @@ export function App() {
   const [skills, setSkills] = useState(initial.skills);
   const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [applications, setApplications] = useState<AgentApplication[]>([]);
+  const [applicationToolsLoaded, setApplicationToolsLoaded] = useState(false);
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [applicationRevision, setApplicationRevision] = useState(0);
   const [applicationsLoading, setApplicationsLoading] = useState(false);
@@ -90,14 +91,27 @@ export function App() {
   useEffect(() => {
     const controller = new AbortController();
     setApplicationsLoading(true); setApplicationError('');
-    fetch('/api/applications', { signal: controller.signal }).then(async (response) => {
+    fetch(`/api/applications${applicationRevision ? '?refresh=1' : ''}`, { signal: controller.signal }).then(async (response) => {
       const value = await response.json();
       if (!response.ok) throw new Error(value.error || '应用加载失败');
-      if (!controller.signal.aborted) setApplications(value);
+      if (!controller.signal.aborted) { setApplications(value); setApplicationToolsLoaded(false); }
     }).catch((reason) => { if (!controller.signal.aborted) setApplicationError(reason.message); })
       .finally(() => { if (!controller.signal.aborted) setApplicationsLoading(false); });
     return () => controller.abort();
   }, [applicationRevision]);
+  useEffect(() => {
+    if (settingsSection !== 'agents' || !applications.length || applicationToolsLoaded) return;
+    const controller = new AbortController();
+    Promise.all(applications.map(async (application) => {
+      const response = await fetch(`/api/applications/${encodeURIComponent(application.id)}/tools`, { signal: controller.signal, headers: { 'X-Darl-Session-Id': 'settings' } });
+      const value = await response.json();
+      if (!response.ok) throw new Error(value.error || '工具目录加载失败');
+      return value as AgentApplication;
+    })).then((catalogs) => {
+      if (!controller.signal.aborted) { setApplications((current) => current.map((application) => catalogs.find((catalog) => catalog.id === application.id) || application)); setApplicationToolsLoaded(true); }
+    }).catch((reason) => { if (!controller.signal.aborted) setApplicationError(reason.message); });
+    return () => controller.abort();
+  }, [applications, applicationToolsLoaded, settingsSection]);
   useEffect(() => {
     try { localStorage.setItem(storageKey, JSON.stringify({ sessions: persistedSessions(sessions), activeId, skills })); setStorageError(''); }
     catch { setStorageError('浏览器存储已满或不可用，当前更改无法在刷新后恢复。'); }
@@ -170,7 +184,7 @@ export function App() {
       try {
         response = await fetch('/api/chat', {
           method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ agentId: request.agentId, skillIds: usedSkills.map((skill) => skill.id), applicationIds: request.applicationIds, providerId: selected?.providerId, modelId: selected ? decodeURIComponent(selected.id.slice(selected.id.indexOf('/') + 1)) : undefined, effort: request.reasoningEffort, messages: apiMessages, skills: usedSkills.map(({ id, name, instructions }) => ({ id, name, instructions })) }),
+          body: JSON.stringify({ sessionId: request.sessionId, agentId: request.agentId, skillIds: usedSkills.map((skill) => skill.id), applicationIds: request.applicationIds, providerId: selected?.providerId, modelId: selected ? decodeURIComponent(selected.id.slice(selected.id.indexOf('/') + 1)) : undefined, effort: request.reasoningEffort, messages: apiMessages, skills: usedSkills.map(({ id, name, instructions }) => ({ id, name, instructions })) }),
         });
       } catch (reason) {
         if (controller.signal.aborted) throw reason;

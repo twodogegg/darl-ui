@@ -35,6 +35,16 @@ export interface AgentModelConfig {
   enabled?: boolean;
 }
 
+export type AgentChildContextMode = 'task-only' | 'selected-context';
+export type AgentHistoryMode = 'recent' | 'summary' | 'full';
+export type AgentToolResultMode = 'brief' | 'standard' | 'detailed';
+
+export interface AgentContextPolicy {
+  childContext: AgentChildContextMode;
+  historyMode: AgentHistoryMode;
+  toolResultMode: AgentToolResultMode;
+}
+
 /** A server-managed assistant configuration. Credentials are kept on the host. */
 export interface AgentConfig {
   id: string;
@@ -51,6 +61,7 @@ export interface AgentConfig {
   applicationIds?: string[];
   /** Optional per-application tool allow-list. Omitted means all discovered tools. */
   applicationTools?: Record<string, string[]>;
+  contextPolicy?: AgentContextPolicy;
   enabled?: boolean;
   isDefault?: boolean;
 }

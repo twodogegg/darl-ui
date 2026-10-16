@@ -4,6 +4,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import { dynamicTool, jsonSchema, stepCountIs, streamText, ToolLoopAgent, type LanguageModel, type ModelMessage } from 'ai';
 import { failure } from './errors';
+import { sourceBoundMessage, structuredAgentResult, type StructuredAgentResult } from './context';
 
 export interface StoredProvider extends ModelProvider { apiKey: string }
 export interface ChatImage { type: 'image'; name: string; mimeType: string; data: string; size?: number }
@@ -73,7 +74,7 @@ export interface ToolExecution {
 export interface AgentDelegation {
   name: string;
   description: string;
-  execute: (task: string, signal: AbortSignal) => Promise<string>;
+  execute: (task: string, context: Array<Record<string, unknown>>, signal: AbortSignal) => Promise<StructuredAgentResult>;
 }
 
 /** Hold only a possible protocol prefix, so split markers never reach the UI. */
@@ -145,7 +146,7 @@ export async function* generate(provider: StoredProvider, model: AgentModelConfi
   const result = streamText({
     model: languageModel(provider, model),
     system: instructions,
-    messages: modelMessages(messages),
+    messages: modelMessages(messages.map(sourceBoundMessage)),
     tools: aiTools(execution, signal),
     stopWhen: stepCountIs(8),
     toolCallConcurrency: 1,
@@ -169,11 +170,12 @@ function loopTools(execution: ToolExecution | undefined, delegations: AgentDeleg
   for (const delegation of delegations || []) {
     tools[delegation.name] = dynamicTool({
       description: delegation.description,
-      inputSchema: jsonSchema({ type: 'object', properties: { task: { type: 'string', description: '只包含完成任务所需的说明，不要复制主 Agent 的完整历史' } }, required: ['task'], additionalProperties: false }),
+      inputSchema: jsonSchema({ type: 'object', properties: { task: { type: 'string', description: '只包含完成任务所需的说明，不要复制主 Agent 的完整历史' }, context: { type: 'array', maxItems: 20, items: { type: 'object', additionalProperties: true }, description: '仅在明确需要时传递的结构化资料引用' } }, required: ['task'], additionalProperties: false }),
       execute: async (input, options) => {
         const task = (input as { task?: unknown })?.task;
         if (typeof task !== 'string' || !task.trim()) throw new Error('子任务说明不能为空');
-        return delegation.execute(task.slice(0, 50_000), options.abortSignal ? AbortSignal.any([signal, options.abortSignal]) : signal);
+        const context = (input as { context?: unknown }).context;
+        return delegation.execute(task.slice(0, 50_000), Array.isArray(context) ? context as Array<Record<string, unknown>> : [], options.abortSignal ? AbortSignal.any([signal, options.abortSignal]) : signal);
       },
     });
   }
@@ -199,7 +201,7 @@ export async function* generateWithToolLoop(provider: StoredProvider, model: Age
   signal.throwIfAborted();
   if (!messages.length) throw new Error('对话消息不能为空');
   const agent = createToolLoopAgent(provider, model, instructions, effort, signal, execution, delegations);
-  const result = await agent.stream({ messages: modelMessages(messages), abortSignal: signal });
+  const result = await agent.stream({ messages: modelMessages(messages.map(sourceBoundMessage)), abortSignal: signal });
   let hasText = false;
   for await (const text of checkedText(result.textStream)) { hasText = true; yield text; }
   signal.throwIfAborted();
@@ -213,5 +215,5 @@ export async function runToolLoopAgent(provider: StoredProvider, model: AgentMod
   const agent = createToolLoopAgent(provider, model, instructions, effort, signal, execution);
   const result = await agent.generate({ prompt: task, abortSignal: signal });
   signal.throwIfAborted();
-  return result.text;
+  return structuredAgentResult(result.text);
 }

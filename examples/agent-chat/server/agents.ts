@@ -5,6 +5,7 @@ import type { AgentConfig } from '../../../src/index';
 export type StoredAgent = AgentConfig;
 
 const idPattern = /^[a-zA-Z0-9_-]{1,80}$/;
+const defaultContextPolicy = { childContext: 'task-only' as const, historyMode: 'summary' as const, toolResultMode: 'standard' as const };
 const list = (value: unknown, label: string, max = 50) => {
   if (value === undefined) return [] as string[];
   if (!Array.isArray(value) || value.length > max || value.some((item) => typeof item !== 'string' || !item.trim())) throw new Error(`${label} 配置无效`);
@@ -29,6 +30,8 @@ export function validateAgent(value: unknown, existing: StoredAgent[] = []): Sto
   if (item.enabled !== undefined && typeof item.enabled !== 'boolean') throw new Error('Agent 启用状态无效');
   if (item.isDefault !== undefined && typeof item.isDefault !== 'boolean') throw new Error('Agent 默认状态无效');
   if (item.builtIn !== undefined && typeof item.builtIn !== 'boolean') throw new Error('Agent 内置状态无效');
+  const contextPolicy = item.contextPolicy === undefined ? defaultContextPolicy : item.contextPolicy;
+  if (!contextPolicy || !['task-only', 'selected-context'].includes(contextPolicy.childContext || '') || !['recent', 'summary', 'full'].includes(contextPolicy.historyMode || '') || !['brief', 'standard', 'detailed'].includes(contextPolicy.toolResultMode || '')) throw new Error('上下文策略无效');
   if (existing.some((agent) => agent.id === item.id)) throw new Error('Agent ID 已存在');
   return {
     id: item.id,
@@ -43,6 +46,7 @@ export function validateAgent(value: unknown, existing: StoredAgent[] = []): Sto
     skillIds,
     applicationIds,
     applicationTools,
+    contextPolicy: { ...contextPolicy },
     enabled: item.enabled !== false,
     isDefault: item.isDefault === true,
   };

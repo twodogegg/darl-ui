@@ -2,13 +2,57 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { conversationApplications, loadApplications, toolRisk, ToolConfirmations } from '../examples/agent-chat/server/mcp';
+import { describe, expect, it, vi } from 'vitest';
+import { applicationCatalog, conversationApplications, loadApplications, McpConnectionManager, toolRisk, ToolConfirmations, type McpApplicationConfig } from '../examples/agent-chat/server/mcp';
 import { safeError } from '../examples/agent-chat/server/models';
 
 const app = { id: 'catalog', name: 'Catalog', url: 'https://example.test/mcp', readOnlyTools: ['search'] };
 
 describe('MCP host policy', () => {
+  it('lists configured applications without connecting or discovering tools', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'darl-mcp-catalog-'));
+    try {
+      await writeFile(join(directory, 'applications.json'), JSON.stringify([app]));
+      expect(await applicationCatalog(directory)).toEqual([{ id: app.id, name: app.name, description: 'MCP 工具按需发现', tools: [] }]);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
+  it('reuses concurrent and sequential connections only within a user/session scope', async () => {
+    const close = vi.fn().mockResolvedValue(undefined);
+    const connect = vi.fn(async (value: McpApplicationConfig) => ({ app: value, tools: [], close, call: vi.fn() }));
+    const manager = new McpConnectionManager(connect);
+    const signal = new AbortController().signal;
+    const [first, second] = await Promise.all([manager.get('user-a:session-a', app, signal), manager.get('user-a:session-a', app, signal)]);
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(first).toBe(second);
+    await manager.get('user-a:session-b', app, signal);
+    await manager.get('user-b:session-a', app, signal);
+    expect(connect).toHaveBeenCalledTimes(3);
+  });
+
+  it('invalidates old configuration and reconnects after explicit refresh or failure', async () => {
+    const close = vi.fn().mockResolvedValue(undefined);
+    const connect = vi.fn(async (value: McpApplicationConfig) => ({ app: value, tools: [], close, call: vi.fn() }));
+    const manager = new McpConnectionManager(connect);
+    const signal = new AbortController().signal;
+    await manager.get('scope', app, signal);
+    await manager.get('scope', { ...app, apiKey: 'new-key' }, signal);
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(close).toHaveBeenCalledTimes(1);
+    await manager.invalidate('scope', app.id);
+    await manager.get('scope', { ...app, apiKey: 'new-key' }, signal);
+    expect(connect).toHaveBeenCalledTimes(3);
+    expect(close).toHaveBeenCalledTimes(2);
+
+    const failedConnect = vi.fn()
+      .mockRejectedValueOnce(new Error('HTTP 401'))
+      .mockImplementation(async (value: McpApplicationConfig) => ({ app: value, tools: [], close, call: vi.fn() }));
+    const recovering = new McpConnectionManager(failedConnect);
+    await expect(recovering.get('scope', app, signal)).rejects.toThrow('HTTP 401');
+    await recovering.get('scope', app, signal);
+    expect(failedConnect).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps user-referenced applications available on follow-ups and restored history', () => {
     const other = { ...app, id: 'other', name: 'Other' };
     const messages = [{ role: 'user' as const, content: '[素材库](app:catalog) 能做什么？' }, { role: 'assistant' as const, content: '可以查询素材。' }, { role: 'user' as const, content: '我有哪些素材？' }];

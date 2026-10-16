@@ -16,7 +16,7 @@ export { AgentsSettingsCard } from './components/settings/AgentsSettingsCard';
 export { ModelSettingsCard } from './components/settings/ModelSettingsCard';
 export { AgentSettingsCard } from './components/settings/AgentSettingsCard';
 export type { AgentSettingsCardProps } from './components/settings/types';
-export type { AgentConfig, AgentsSettingsCardProps, AgentModelCapabilities, AgentModelConfig, AgentModelType, ModelProvider, ModelProviderProtocol, ModelProviderStatus, ModelSettingsCardProps, SettingsPageProps, SettingsSection } from './components/settings/types';
+export type { AgentChildContextMode, AgentConfig, AgentContextPolicy, AgentHistoryMode, AgentsSettingsCardProps, AgentModelCapabilities, AgentModelConfig, AgentModelType, AgentToolResultMode, ModelProvider, ModelProviderProtocol, ModelProviderStatus, ModelSettingsCardProps, SettingsPageProps, SettingsSection } from './components/settings/types';
 export { StyleSelector } from './components/style-selector/StyleSelector';
 export type { StyleCollection, StyleOption, StyleCreateRequest, StyleFilter, StyleLoadMoreRequest, StyleSelectorProps } from './components/style-selector/StyleSelector';
 

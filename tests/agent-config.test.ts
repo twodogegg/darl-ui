@@ -15,6 +15,12 @@ describe('server-managed Agent configuration', () => {
     expect(validateAgents([agent('main'), agent('child')])).toHaveLength(2);
   });
 
+  it('applies safe default context policies and rejects unknown policy values', () => {
+    expect(validateAgent(agent('context'))).toMatchObject({ contextPolicy: { childContext: 'task-only', historyMode: 'summary', toolResultMode: 'standard' } });
+    expect(validateAgent({ ...agent('context-selected'), contextPolicy: { childContext: 'selected-context', historyMode: 'recent', toolResultMode: 'brief' } })).toMatchObject({ contextPolicy: { childContext: 'selected-context', historyMode: 'recent', toolResultMode: 'brief' } });
+    expect(() => validateAgent({ ...agent('invalid-context'), contextPolicy: { childContext: 'full-history' } })).toThrow('上下文策略');
+  });
+
   it('rejects duplicate defaults and duplicate ids', () => {
     expect(() => validateAgents([{ ...agent('a'), isDefault: true }, { ...agent('b'), isDefault: true }])).toThrow('默认 Agent');
     expect(() => validateAgents([agent('a'), agent('a')])).toThrow('重复');

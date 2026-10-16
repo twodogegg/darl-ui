@@ -56,13 +56,92 @@ export function toolRisk(app: McpApplicationConfig, tool: Tool): 'read' | 'write
   return 'write';
 }
 
+export function applicationConfigFingerprint(app: McpApplicationConfig) {
+  return JSON.stringify([app.id, app.name, app.url, app.apiKey || '', [...(app.readOnlyTools || [])].sort()]);
+}
+
+type McpConnection = Awaited<ReturnType<typeof connectApplication>>;
+type ConnectApplication = (app: McpApplicationConfig, signal: AbortSignal) => Promise<McpConnection>;
+
+interface CachedConnection {
+  appId: string;
+  fingerprint: string;
+  controller: AbortController;
+  promise: Promise<McpConnection>;
+  connection?: McpConnection;
+}
+
+/** Process-local MCP connection and tool-directory cache scoped by user/session. */
+export class McpConnectionManager {
+  private readonly entries = new Map<string, CachedConnection>();
+
+  constructor(private readonly connect: ConnectApplication = connectApplication) {}
+
+  async get(scopeKey: string, app: McpApplicationConfig, signal: AbortSignal) {
+    signal.throwIfAborted();
+    const key = `${scopeKey}\u0000${app.id}`;
+    const fingerprint = applicationConfigFingerprint(app);
+    const existing = this.entries.get(key);
+    if (existing && existing.fingerprint === fingerprint) return existing.promise;
+    if (existing) await this.invalidateKey(key, existing);
+
+    const controller = new AbortController();
+    const entry = { appId: app.id, fingerprint, controller } as CachedConnection;
+    const promise = this.connect(app, controller.signal).then((connection) => {
+      const current = this.entries.get(key);
+      if (!current || current.promise !== promise) {
+        void connection.close();
+        throw new Error('MCP 连接已失效，请重试');
+      }
+      current.connection = connection;
+      return connection;
+    }).catch((error) => {
+      if (this.entries.get(key)?.promise === promise) this.entries.delete(key);
+      throw error;
+    });
+    entry.promise = promise;
+    this.entries.set(key, entry);
+    return promise;
+  }
+
+  async reconcile(scopeKey: string, apps: McpApplicationConfig[]) {
+    const fingerprints = new Map(apps.map((app) => [app.id, applicationConfigFingerprint(app)]));
+    await Promise.all([...this.entries].flatMap(([key, entry]) => {
+      if (!key.startsWith(`${scopeKey}\u0000`) || fingerprints.get(entry.appId) === entry.fingerprint) return [];
+      return [this.invalidateKey(key, entry)];
+    }));
+  }
+
+  async invalidate(scopeKey: string, appId: string) {
+    const key = `${scopeKey}\u0000${appId}`;
+    const entry = this.entries.get(key);
+    if (entry) await this.invalidateKey(key, entry);
+  }
+
+  async invalidateAll(scopeKey?: string) {
+    await Promise.all([...this.entries].flatMap(([key, entry]) => {
+      if (scopeKey !== undefined && !key.startsWith(`${scopeKey}\u0000`)) return [];
+      return [this.invalidateKey(key, entry)];
+    }));
+  }
+
+  private async invalidateKey(key: string, entry: CachedConnection) {
+    if (this.entries.get(key) === entry) this.entries.delete(key);
+    entry.controller.abort();
+    if (entry.connection) await entry.connection.close().catch(() => {});
+  }
+}
+
 export async function connectApplication(app: McpApplicationConfig, signal: AbortSignal) {
   const transport = new StreamableHTTPClientTransport(new URL(app.url), {
     requestInit: { ...(app.apiKey ? { headers: { Authorization: `Bearer ${app.apiKey}` } } : {}), redirect: 'error' },
     fetch: (url, init) => fetch(url, { ...init, signal: AbortSignal.any([signal, ...(init?.signal ? [init.signal] : [])]) }),
   });
   const client = new Client({ name: 'darl-ui-agent-chat', version: '0.1.0' });
+  let closed = false;
   const close = async () => {
+    if (closed) return;
+    closed = true;
     try { await transport.terminateSession(); } catch { /* Some servers do not support session deletion. */ }
     await client.close();
   };
@@ -100,18 +179,10 @@ export async function connectApplication(app: McpApplicationConfig, signal: Abor
   }
 }
 
-export async function applicationCatalog(directory: string, signal: AbortSignal): Promise<AgentApplication[]> {
+export async function applicationCatalog(directory: string, signal?: AbortSignal): Promise<AgentApplication[]> {
   const configs = await loadApplications(directory);
-  return Promise.all(configs.map(async (app) => {
-    try {
-      const connection = await connectApplication(app, signal);
-      try {
-        return { id: app.id, name: app.name, status: 'connected' as const, description: `${connection.tools.length} 个 MCP 工具`, tools: connection.tools.map((tool) => ({ name: tool.name, title: tool.title || tool.annotations?.title, description: tool.description, risk: toolRisk(app, tool) })) };
-      } finally { await connection.close(); }
-    } catch (error) {
-      return { id: app.id, name: app.name, status: 'disconnected' as const, description: safeError(error, app.apiKey), tools: [] };
-    }
-  }));
+  void signal;
+  return configs.map((app) => ({ id: app.id, name: app.name, description: 'MCP 工具按需发现', tools: [] }));
 }
 
 export class ToolConfirmations {
