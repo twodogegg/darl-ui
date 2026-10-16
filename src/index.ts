@@ -21,3 +21,6 @@ export type { StyleCollection, StyleOption, StyleCreateRequest, StyleFilter, Sty
 
 export { DefaultModelSelector, normalizeDefaultModels, modelOptions } from './components/default-model-selector/DefaultModelSelector';
 export type { DefaultModelKind, DefaultModelOption, DefaultModelChoice, DefaultModelDraft, DefaultModelSelection, DefaultModelSelectorProps } from './components/default-model-selector/DefaultModelSelector';
+
+export { InteractiveConfirmDialog } from './components/interactive-confirm-dialog/InteractiveConfirmDialog';
+export type { ConfirmAnswer, ConfirmAnswers, ConfirmOption, ConfirmQuestion, InteractiveConfirmDialogProps } from './components/interactive-confirm-dialog/InteractiveConfirmDialog';
