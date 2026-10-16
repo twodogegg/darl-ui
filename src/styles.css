@@ -6,3 +6,4 @@
 @import './components/agent-sidebar/agent-sidebar.css';
 @import './components/style-selector/style-selector.css';
 @import './components/default-model-selector/default-model-selector.css';
+@import './components/interactive-confirm-dialog/interactive-confirm-dialog.css';
