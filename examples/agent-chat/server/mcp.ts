@@ -201,7 +201,7 @@ export async function connectApplication(app: McpApplicationConfig, signal: Abor
 export async function applicationCatalog(directory: string, signal?: AbortSignal): Promise<AgentApplication[]> {
   const configs = await loadApplications(directory);
   void signal;
-  return configs.map((app) => ({ id: app.id, name: app.name, description: 'MCP 工具按需发现', tools: [] }));
+  return configs.map((app) => ({ id: app.id, name: app.name, url: app.url, description: 'MCP 工具按需发现', tools: [] }));
 }
 
 export class ToolConfirmations {
