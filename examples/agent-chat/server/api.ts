@@ -236,9 +236,13 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     const instructions = [agent.instructions, skills].filter(Boolean).join('\n\n');
     const messages = [{ role: 'user' as const, content: task + '\n\n<剧本原文>\n' + script + '\n</剧本原文>' }];
     let output = '';
-    for await (const chunk of generate(resolved.provider, resolved.model, messages, instructions, undefined, signal)) {
-      output += chunk;
-      if (output.length > 2_000_000) throw new Error('分镜结果超过最大长度');
+    try {
+      for await (const chunk of generate(resolved.provider, resolved.model, messages, instructions, undefined, signal)) {
+        output += chunk;
+        if (output.length > 2_000_000) throw new Error('分镜结果超过最大长度');
+      }
+    } catch (reason) {
+      throw new Error(safeError(reason, resolved.provider.apiKey));
     }
     return output;
   });
