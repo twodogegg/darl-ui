@@ -13,6 +13,7 @@ interface McpApp {
   id: string;
   name: string;
   description?: string;
+  url?: string;
   status?: string;
   tools?: McpTool[];
 }
@@ -36,6 +37,7 @@ export function McpSettings({ applications, onChanged }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [name, setName] = useState('');
+  const [editing, setEditing] = useState<string | null>(null);
   const [id, setId] = useState('');
   const [url, setUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -56,8 +58,8 @@ export function McpSettings({ applications, onChanged }: Props) {
     setLoading(true);
     setError('');
     try {
-      await request('/api/applications', 'POST', { id, name, url, ...(apiKey ? { apiKey } : {}) });
-      setId(''); setName(''); setUrl(''); setApiKey('');
+      await request(editing ? `/api/applications/${encodeURIComponent(editing)}` : '/api/applications', editing ? 'PUT' : 'POST', { id, name, url, ...(apiKey ? { apiKey } : {}) });
+      setId(''); setName(''); setUrl(''); setApiKey(''); setEditing(null);
       onChanged();
     } catch (reason) { setError(reason instanceof Error ? reason.message : '添加失败'); }
     finally { setLoading(false); }
@@ -73,12 +75,12 @@ export function McpSettings({ applications, onChanged }: Props) {
     <h2>应用 / MCP</h2>
     <p>管理 Streamable HTTP MCP 连接。工具定义来自服务器动态发现，密钥仅交给本地服务端保存，不会在页面回显。</p>
     <form onSubmit={(event) => void create(event)} style={{ display: 'grid', gap: 10, maxWidth: 620, marginBottom: 24 }}>
-      <h3>添加 MCP 服务</h3>
-      <label>应用 ID <input required pattern="[A-Za-z0-9_-]{1,80}" value={id} onChange={(event) => setId(event.target.value)} placeholder="assets" /></label>
+      <h3>{editing ? '编辑 MCP 服务' : '添加 MCP 服务'}</h3>
+      <label>应用 ID <input required disabled={!!editing} pattern="[A-Za-z0-9_-]{1,80}" value={id} onChange={(event) => setId(event.target.value)} placeholder="assets" /></label>
       <label>应用名称 <input required value={name} onChange={(event) => setName(event.target.value)} placeholder="素材管理" /></label>
       <label>MCP URL <input required type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/mcp" /></label>
       <label>Bearer Token（可选） <input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} /></label>
-      <button disabled={loading} type="submit">保存连接</button>
+      <button disabled={loading} type="submit">{editing ? '保存修改' : '保存连接'}</button>{editing && <button type="button" onClick={() => { setEditing(null); setId(''); setName(''); setUrl(''); setApiKey(''); }}>取消编辑</button>}
     </form>
     <button disabled={loading} onClick={() => void discover(catalog, true)}>{loading ? '正在连接…' : '刷新连接与工具目录'}</button>
     {error && <p role="alert">{error}</p>}
@@ -86,7 +88,7 @@ export function McpSettings({ applications, onChanged }: Props) {
     {catalog.map((app) => <article key={app.id}>
       <h3>{app.name} · {app.status === 'connected' ? '已连接' : '未连接'}</h3>
       <p>{app.description || '尚未读取工具目录'} · {app.tools?.length || 0} 个工具</p>
-      <button disabled={loading} onClick={() => void remove(app.id)}>移除</button>
+      <button disabled={loading} onClick={() => { setEditing(app.id); setId(app.id); setName(app.name); setUrl(app.url || ''); setApiKey(''); }}>编辑</button> <button disabled={loading} onClick={() => void remove(app.id)}>移除</button>
       {app.tools?.map((tool) => <details key={tool.name} style={{ margin: '12px 0' }}>
         <summary><strong>{tool.title || tool.name}</strong> · {tool.risk === 'read' ? '只读' : tool.risk === 'dangerous' ? '危险操作（需确认）' : '执行前确认'}</summary>
         <p>{tool.description || '无描述'}</p>
