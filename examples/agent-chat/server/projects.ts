@@ -107,6 +107,16 @@ export async function handleWorkspaceProjectRequest(
       const style = store.createStyle({ name, prompt, image: file?.bytes, mimeType: file?.type });
       send(201, { code: 'CREATED', data: style }); return true;
     }
+    const styleRoute = path.match(/^\/api\/workspace\/styles\/(\d+)$/);
+    if (styleRoute && method === 'PATCH') {
+      const { form, image: file } = await readUpload(request, 'reference_image', false);
+      const name = form.get('name'), prompt = form.get('prompt');
+      if (typeof name !== 'string' || typeof prompt !== 'string')
+        throw new RequestError(422, '请填写风格名称和描述');
+      const style = store.updateStyle(numeric(styleRoute[1]), { name, prompt, image: file?.bytes, mimeType: file?.type });
+      if (!style) throw new RequestError(404, '只能编辑自己的风格');
+      send(200, { code: 'OK', data: style }); return true;
+    }
     if (path === '/api/workspace/projects' && method === 'GET') {
       const items = store.list();
       send(200, { code: 'OK', data: { items, total: items.length } }); return true;

@@ -8,6 +8,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': resolve(__dirname, 'playground/src') } },
   root: resolve(__dirname, 'playground'),
+  cacheDir: resolve(__dirname, 'node_modules/.vite/playground'),
   build: { outDir: resolve(__dirname, 'dist/demo'), emptyOutDir: true },
   server: { host: '0.0.0.0', port: 5188, strictPort: true, fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/.local/**'] } }
 });

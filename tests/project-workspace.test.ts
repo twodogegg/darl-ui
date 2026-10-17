@@ -118,4 +118,26 @@ describe('SQLite project workspace', () => {
     expect((await request('projects/1/script')).status).toBe(404);
     expect((await request('storage/%2Fsecret.png')).status).toBe(404);
   });
+
+  it('allows updating an owned style but protects built-in styles', async () => {
+    const form = new FormData();
+    form.set('name', '我的风格');
+    form.set('prompt', '原始描述');
+    form.set('reference_image', new Blob([Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==', 'base64')], { type: 'image/png' }), 'style.png');
+    const saved = await request('styles', { method: 'POST', body: form });
+    const id = saved.data.data.id;
+    const update = new FormData();
+    update.set('name', '更新后的风格');
+    update.set('prompt', '更新后的描述');
+    expect((await request(`styles/${id}`, { method: 'PATCH', body: update })).status).toBe(200);
+    const styles = (await request('styles')).data.data.items as Array<{ id: number; name: string; prompt: string }>;
+    expect(styles.find((style) => style.id === id)).toMatchObject({ name: '更新后的风格', prompt: '更新后的描述' });
+    expect((await request('styles')).data.data.items.find((style: { id: number }) => style.id === id).image_url)
+      .toBe(`/storage/styles/${id}`);
+    const builtIn = new FormData();
+    builtIn.set('name', '不应修改');
+    builtIn.set('prompt', '不应修改');
+    expect((await request('styles/1', { method: 'PATCH', body: builtIn })).status).toBe(404);
+  });
 });

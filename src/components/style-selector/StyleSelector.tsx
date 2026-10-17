@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Tabs, ToggleGroup } from 'radix-ui';
-import { ArrowLeft, Check, ImageIcon, ImagePlus, Search, Sparkles, Star, X } from 'lucide-react';
+import { ArrowLeft, Check, ImageIcon, ImagePlus, Pencil, Search, Sparkles, Star, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 import './style-selector.css';
 
@@ -40,6 +40,12 @@ export interface StyleSelectorProps {
   onFavoriteChange?: (style: StyleOption, favorite: boolean) => void;
   /** Resolve after saving; reject to keep the draft and display an error. */
   onCreate?: (request: StyleCreateRequest) => void | Promise<void>;
+  /** Update an owned style from the editor. */
+  onUpdate?: (style: StyleOption, request: StyleCreateRequest) => void | Promise<void>;
+  /** Open the editor for an owned style. */
+  onEdit?: (style: StyleOption) => void;
+  /** Style opened in edit mode. */
+  editingStyle?: StyleOption | null;
   defaultCollection?: StyleCollection;
   className?: string;
   accentColor?: string;
@@ -67,6 +73,7 @@ function Thumbnail({ src, className = '' }: { src?: string; className?: string }
 
 /** shadcn-style Button, Radix Tabs/ToggleGroup, and isolated CSS for Tailwind-free hosts. */
 export function StyleSelector({ styles, value, defaultValue = null, onChange, onFavoriteChange, onCreate,
+  onUpdate, onEdit, editingStyle,
   defaultCollection = 'market', className = '', accentColor, open, onOpenChange,
   pageSize = 20, hasMore = false, onLoadMore, onFilterChange }: StyleSelectorProps) {
   const id = useId();
@@ -82,6 +89,7 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
   const [description, setDescription] = useState('');
   const [referenceImage, setReferenceImage] = useState<File>();
   const [previewUrl, setPreviewUrl] = useState<string>();
+  const [activeEditStyle, setActiveEditStyle] = useState<StyleOption | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -99,11 +107,11 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
     if (open !== false) onFilterChange?.({ collection, ...(activeCategory ? { category: activeCategory } : {}), query: query.trim() });
   }, [filterKey, open]);
   const selectedId = value !== undefined ? value : internalValue;
-  const categories = useMemo(() => [...new Set(styles.map((item) => item.category).filter((item): item is string => !!item))], [styles]);
+  const categories = useMemo(() => [...new Set(styles.filter((item) => !item.isOwned).map((item) => item.category).filter((item): item is string => !!item))], [styles]);
   const filtered = useMemo(() => {
     const search = query.trim().toLocaleLowerCase();
     const items = styles.filter((item) => {
-      const matchesCollection = collection === 'market' || (collection === 'favorites' && item.favorite)
+      const matchesCollection = (collection === 'market' && !item.isOwned) || (collection === 'favorites' && item.favorite)
         || (collection === 'mine' && item.isOwned) || (collection === 'recent' && (recent.includes(item.id) || item.lastUsedAt));
       return matchesCollection && (collection === 'mine' || !category || item.category === category)
         && (!search || `${item.name} ${item.description ?? ''}`.toLocaleLowerCase().includes(search));
@@ -150,8 +158,15 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
   }, [open, creating, filterKey, visibleCount, filtered.length, autoLoadKey, moreRemote, loadingMore, loadError]);
-  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+  useEffect(() => () => {
+    if (previewUrl?.startsWith('blob:') && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
   useEffect(() => { if (open !== undefined) setPendingValue(value ?? internalValue); }, [open, value]);
+  useEffect(() => {
+    if (!editingStyle) return;
+    setActiveEditStyle(editingStyle); setCreating(true); setStep(1); setName(editingStyle.name); setDescription(editingStyle.description || '');
+    setReferenceImage(undefined); setPreviewUrl(editingStyle.image); setError('');
+  }, [editingStyle]);
 
   const selectStyle = (item: StyleOption) => {
     setPendingValue(item.id);
@@ -164,7 +179,7 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
     onOpenChange?.(false);
   };
   const resetCreate = () => {
-    setCreating(false); setStep(1); setName(''); setDescription('');
+    setActiveEditStyle(null); setCreating(false); setStep(1); setName(''); setDescription('');
     setReferenceImage(undefined); setPreviewUrl(undefined); setError('');
   };
   const acceptImage = (file?: File) => {
@@ -174,11 +189,13 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
     setReferenceImage(file); setPreviewUrl(URL.createObjectURL(file)); setError('');
   };
   const submitCreate = async () => {
-    if (!onCreate || saving) return;
+    if ((!onCreate && !onUpdate) || saving) return;
     setSaving(true); setError('');
     try {
-      await onCreate({ name: name.trim(), description: description.trim(),
-        ...(referenceImage ? { referenceImage } : {}) });
+      const request = { name: name.trim(), description: description.trim(), ...(referenceImage ? { referenceImage } : {}) };
+      if (activeEditStyle && onUpdate) await onUpdate(activeEditStyle, request);
+      else if (onCreate) await onCreate(request);
+      else return;
       resetCreate();
     } catch (reason) { setError(reason instanceof Error ? reason.message : '创建失败，请重试'); }
     finally { setSaving(false); }
@@ -226,15 +243,15 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
           </div>
         </div> : <div className="darl-style-review" aria-label="确认风格信息">
           <div className="darl-style-review-image"><Thumbnail src={previewUrl} /></div>
-          <div><p>确认风格信息</p><h2>{name}</h2><p className="darl-style-review-description">{description}</p><small>{referenceImage ? `参考图：${referenceImage.name}` : '未添加参考图'}</small></div>
+          <div><p>确认风格信息</p><h2>{name}</h2><p className="darl-style-review-description">{description}</p><small>{referenceImage ? `参考图：${referenceImage.name}` : previewUrl ? '已保留参考图' : '未添加参考图'}</small></div>
         </div>}
         {error && <p className="darl-style-error" role="alert">{error}</p>}
-        <footer className="darl-style-create-footer"><Button type="submit" disabled={!valid || saving}>{saving ? '创建中…' : step === 1 ? '下一步' : '创建风格'}</Button></footer>
+        <footer className="darl-style-create-footer"><Button type="submit" disabled={!valid || saving}>{saving ? (activeEditStyle ? '保存中…' : '创建中…') : step === 1 ? '下一步' : activeEditStyle ? '保存修改' : '创建风格'}</Button></footer>
       </form>
     </div> : <Tabs.Root className="darl-style-browser" value={collection} onValueChange={(next) => setCollection(next as StyleCollection)}>
       <header className="darl-style-header">
         <Tabs.List className="darl-style-collections" aria-label="风格集合">{collections.map((item) => <Tabs.Trigger key={item.id} value={item.id}>{item.label}</Tabs.Trigger>)}</Tabs.List>
-        <div className="darl-style-actions"><label className="darl-style-search"><Search aria-hidden="true" /><input aria-label="搜索风格名称" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索风格名称" />{query && <Button variant="ghost" size="icon" onClick={() => setQuery('')} aria-label="清除搜索"><X /></Button>}</label>{onCreate && <Button variant="outline" onClick={() => setCreating(true)}><Sparkles aria-hidden="true" />创建风格</Button>}{modal && <Button variant="ghost" size="icon" onClick={close} aria-label="关闭风格选择"><X /></Button>}</div>
+            <div className="darl-style-actions"><label className="darl-style-search"><Search aria-hidden="true" /><input aria-label="搜索风格名称" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索风格名称" />{query && <Button variant="ghost" size="icon" onClick={() => setQuery('')} aria-label="清除搜索"><X /></Button>}</label>{onCreate && <Button variant="outline" onClick={() => { setActiveEditStyle(null); setCreating(true); }}><Sparkles aria-hidden="true" />创建风格</Button>}{modal && <Button variant="ghost" size="icon" onClick={close} aria-label="关闭风格选择"><X /></Button>}</div>
       </header>
       {collection !== 'mine' && <div className="darl-style-filters"><ToggleGroup.Root className="darl-style-category" type="single" value={category || 'all'} onValueChange={(next) => { if (next) setCategory(next === 'all' ? '' : next); }} aria-label="风格分类"><ToggleGroup.Item value="all">全部</ToggleGroup.Item>{categories.map((item) => <ToggleGroup.Item key={item} value={item}>{item}</ToggleGroup.Item>)}</ToggleGroup.Root></div>}
       {collections.map((item) => <Tabs.Content key={item.id} value={item.id} className="darl-style-panel" ref={collection === item.id ? panelRef : undefined}>
@@ -243,6 +260,7 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
             <span className="darl-style-card-image"><Thumbnail src={option.image} /><span className="darl-style-card-overlay"><strong>{option.name}</strong></span><span className="darl-style-card-check"><Check /></span></span>
             <span className="darl-style-card-meta">{!option.isOwned && option.category && <span>{option.category}</span>}<span>{option.description}</span></span>
           </button>
+          {option.isOwned && onEdit && <Button variant="ghost" size="icon" className="darl-style-edit" onClick={(event) => { event.stopPropagation(); onEdit(option); }} aria-label={`编辑${option.name}`}><Pencil aria-hidden="true" /></Button>}
           {onFavoriteChange && <Button variant="ghost" size="icon" className="darl-style-favorite" aria-pressed={!!option.favorite} onClick={() => onFavoriteChange(option, !option.favorite)} aria-label={`${option.favorite ? '取消收藏' : '收藏'}${option.name}`}><Star aria-hidden="true" /></Button>}
         </article>)}</div>
         {!filtered.length && !moreRemote && !loadingMore && <div className="darl-style-empty"><Search aria-hidden="true" /><strong>{query ? '没有找到匹配的风格' : collection === 'mine' ? '还没有自己的风格' : collection === 'favorites' ? '还没有收藏的风格' : collection === 'recent' ? '还没有使用过的风格' : '暂无风格'}</strong><span>试试其他关键词或切换分类</span><Button variant="outline" onClick={() => { setQuery(''); setCategory(''); setCollection('market'); }}>浏览全部风格</Button></div>}

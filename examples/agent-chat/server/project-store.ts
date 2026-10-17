@@ -85,6 +85,21 @@ export class ProjectStore {
     return { id: Number(result.lastInsertRowid) };
   }
 
+  updateStyle(id: number, value: StyleInput) {
+    const existing = this.db.prepare('SELECT id FROM workspace_styles WHERE id = ? AND is_owned = 1').get(id);
+    if (!existing) return null;
+    if (!value.name.trim() || value.name.trim().length > 80 || !value.prompt.trim() || value.prompt.trim().length > 500)
+      throw new Error('风格名称或描述无效');
+    if (value.image && value.mimeType) {
+      this.db.prepare('UPDATE workspace_styles SET name = ?, prompt = ?, image_mime = ?, image_data = ? WHERE id = ?')
+        .run(value.name.trim(), value.prompt.trim(), value.mimeType, value.image, id);
+    } else {
+      this.db.prepare('UPDATE workspace_styles SET name = ?, prompt = ? WHERE id = ?')
+        .run(value.name.trim(), value.prompt.trim(), id);
+    }
+    return { id };
+  }
+
   image(kind: 'covers' | 'styles', id: number): { mime: string; data: Uint8Array } | null {
     const sql = kind === 'covers'
       ? 'SELECT mime_type AS mime, image_data AS data FROM workspace_covers WHERE id = ?'

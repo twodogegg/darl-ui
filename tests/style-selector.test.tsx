@@ -38,6 +38,32 @@ describe('StyleSelector', () => {
     expect(onFavoriteChange).toHaveBeenCalledWith(styles[1], true);
   });
 
+  it('keeps owned styles out of the market collection', () => {
+    const owned = { ...styles[0], id: 'owned', name: '我的风格', isOwned: true };
+    const { unmount } = render(<StyleSelector open styles={[styles[0], owned]} />);
+    expect(screen.getByRole('button', { name: '预览电影感' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '预览我的风格' })).toBeNull();
+    unmount();
+    render(<StyleSelector open styles={[owned]} defaultCollection="mine" />);
+    expect(screen.getByRole('button', { name: '预览我的风格' })).toBeInTheDocument();
+  });
+
+  it('exposes edit controls for owned styles and submits updates', async () => {
+    const owned = { ...styles[0], isOwned: true, image: '/api/workspace/storage/styles/8' };
+    const onEdit = vi.fn();
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = render(<StyleSelector open styles={[owned]} defaultCollection="mine" onEdit={onEdit} onUpdate={onUpdate} />);
+    fireEvent.click(screen.getByRole('button', { name: '编辑电影感' }));
+    expect(onEdit).toHaveBeenCalledWith(owned);
+    rerender(<StyleSelector open styles={[owned]} defaultCollection="mine" editingStyle={owned} onUpdate={onUpdate} />);
+    expect(screen.getByRole('textbox', { name: /风格名称/ })).toHaveValue('电影感');
+    expect(screen.getByRole('button', { name: '更换参考图片' }).querySelector('img')).toHaveAttribute('src', owned.image);
+    fireEvent.change(screen.getByRole('textbox', { name: /风格描述词/ }), { target: { value: '更新后的描述' } });
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(owned, { name: '电影感', description: '更新后的描述' }));
+  });
+
   it('validates creation and sends the confirmed request', async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);
     render(<StyleSelector open styles={styles} onCreate={onCreate} />);

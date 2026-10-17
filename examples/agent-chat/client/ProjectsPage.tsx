@@ -45,6 +45,7 @@ export function ProjectsPage({ onBack }: { onBack: () => void }) {
   const [detail, setDetail] = useState<Project | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [styleOpen, setStyleOpen] = useState(false);
+  const [editingStyle, setEditingStyle] = useState<StyleOption | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -68,7 +69,18 @@ export function ProjectsPage({ onBack }: { onBack: () => void }) {
     if (input.referenceImage) data.set('reference_image', input.referenceImage);
     const created = await backend<{ id: number }>('styles', { method: 'POST', body: data });
     await fetchStyles();
+    setEditingStyle(null);
     update('style_catalog_id', String(created.id));
+  };
+  const editStyle = (style: StyleOption) => { setEditingStyle(style); setStyleOpen(true); };
+  const updateStyle = async (style: StyleOption, input: StyleCreateRequest) => {
+    const data = new FormData();
+    data.set('name', input.name);
+    data.set('prompt', input.description);
+    if (input.referenceImage) data.set('reference_image', input.referenceImage);
+    await backend(`styles/${encodeURIComponent(style.id)}`, { method: 'PATCH', body: data });
+    await fetchStyles();
+    setEditingStyle(null);
   };
   const load = async () => {
     setLoading(true);
@@ -196,7 +208,8 @@ export function ProjectsPage({ onBack }: { onBack: () => void }) {
         </form>
       </section>
     </div>}
-    <StyleSelector styles={styles} open={styleOpen} onOpenChange={setStyleOpen} value={draft.style_catalog_id || null}
+    <StyleSelector styles={styles} open={styleOpen} onOpenChange={(open) => { setStyleOpen(open); if (!open) setEditingStyle(null); }} value={draft.style_catalog_id || null}
+      editingStyle={editingStyle} onEdit={editStyle} onUpdate={updateStyle}
       onChange={(style) => update('style_catalog_id', style?.id || '')} onCreate={createStyle} />
   </main>;
 }
