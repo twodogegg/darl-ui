@@ -9,6 +9,9 @@ import { AgentFailure, createAgentError, failure } from './errors';
 import { compactContextMessages, contextCharBudget, normalizeContextPolicy, selectedContext } from './context';
 import { LocalStorage, validateClientState, type ClientState } from './storage';
 import { handleWorkspaceProjectRequest } from './projects';
+import { MediaRuntime } from './media-runtime';
+import { handleMediaRequest } from './media-api';
+import { mediaToolDefinitions, runMediaTool } from './media-tools';
 import { ProjectStore } from './project-store';
 
 /** Resolve Agent models against the same enabled logical bindings used by the Models page. */
@@ -185,6 +188,7 @@ export function findAttachedImageForUpload(tool: McpToolDescriptor, args: Record
 export function createApi(directory: string, env: Record<string, string>, promptFile: string) {
   const storage = new LocalStorage(directory);
   const projectStore = new ProjectStore(storage.path);
+  const mediaRuntime = new MediaRuntime({ dbPath: storage.path, directory, config: () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), providers: () => storage.getConfig<StoredProvider[]>('providers') || [] });
   const confirmations = new ToolConfirmations();
   const connectionManager = new McpConnectionManager(connectApplicationWithRetry);
   const validatePrompt = (value: unknown): string => {
@@ -196,6 +200,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   if (!storage.getConfig<StoredProvider[]>('providers')) storage.setConfig('providers', initial);
   if (!storage.getConfig<ModelConfiguration>('modelConfiguration')) storage.setConfig('modelConfiguration', defaultModelConfiguration());
   if (!storage.getConfig<DefaultMediaSelection>('defaultMediaModels')) storage.setConfig('defaultMediaModels', defaultMediaSelection);
+  mediaRuntime.start();
   if (!storage.getConfig<string>('systemPrompt')) {
     storage.setConfig('systemPrompt', validatePrompt(readFileSync(promptFile, 'utf8')));
   }
@@ -222,6 +227,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     const origin = request.headers.origin;
     if (portOf(host) !== '5197' || (origin && portOf(origin) !== '5197')) return send(403, { error: '仅允许本服务端口同源访问' });
     if (await handleWorkspaceProjectRequest(request, response, projectStore)) return;
+    if (await handleMediaRequest(request, response, mediaRuntime)) return;
     const controller = new AbortController();
     response.on('close', () => controller.abort());
     const requestId = crypto.randomUUID();
@@ -470,9 +476,44 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           const functions = ownedConnections.flatMap((connection, appIndex) => connection.tools.filter((tool) => !applicationTools?.[connection.app.id] || applicationTools[connection.app.id].includes(tool.name)).map((tool, index) => ({ name: `mcp_${appIndex}_${index}`, connection, tool })));
           if (functions.length > 128) throw new Error('所选应用合计超过 128 个工具，请减少应用数量');
           const execution: ToolExecution = {
-          tools: functions.map(({ name, connection, tool }) => ({ name, description: `${connection.app.name} / ${tool.title || tool.name} (${tool.name}): ${tool.description || ''}`, parameters: tool.inputSchema })),
+          tools: [...functions.map(({ name, connection, tool }) => ({ name, description: `${connection.app.name} / ${tool.title || tool.name} (${tool.name}): ${tool.description || ''}`, parameters: tool.inputSchema })), ...mediaToolDefinitions],
           execute: async (request: { name: string; arguments: string }, toolSignal = signal) => {
             const callSignal = AbortSignal.any([signal, toolSignal]);
+            const native = mediaToolDefinitions.find((item) => item.name === request.name);
+            if (native) {
+              let args: Record<string, unknown>;
+              try { args = JSON.parse(request.arguments || '{}') as Record<string, unknown>; }
+              catch { throw new Error('媒体工具参数 JSON 不合法'); }
+              if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('媒体工具参数格式无效');
+              const isRead = native.name === 'media_get_task';
+              const call: AgentToolCall = { id: crypto.randomUUID(), appId: 'native:media', appName: '媒体任务', toolName: native.name,
+                input: args, status: 'pending', attempt: 1, runId: executionRunId, ...(ownerAgentId ? { agentId: ownerAgentId } : {}) };
+              const now = new Date().toISOString();
+              emitExecution?.({ id: crypto.randomUUID(), source: 'tool', status: 'started', name: native.name, timestamp: now,
+                runId: executionRunId, parentRunId: executionRunId, requestId, toolCallId: call.id });
+              emitTool(call);
+              if (!isRead) {
+                call.status = 'confirmation';
+                emitExecution?.({ id: crypto.randomUUID(), source: 'tool', status: 'confirmation', name: native.name,
+                  timestamp: new Date().toISOString(), runId: executionRunId, parentRunId: executionRunId, requestId, toolCallId: call.id });
+                emitTool(call);
+                if (!await confirmations.wait(call.id, callSignal)) throw new Error('用户拒绝了此次生成请求');
+              }
+              callSignal.throwIfAborted();
+              call.status = 'running'; call.startedAt = new Date().toISOString(); emitTool(call);
+              try {
+                const result = runMediaTool(mediaRuntime, native.name, args, images);
+                call.status = 'success'; call.endedAt = new Date().toISOString(); emitTool(call);
+                emitExecution?.({ id: crypto.randomUUID(), source: 'tool', status: 'success', name: native.name,
+                  timestamp: call.endedAt, startedAt: call.startedAt, endedAt: call.endedAt, runId: executionRunId,
+                  parentRunId: executionRunId, requestId, toolCallId: call.id });
+                return JSON.stringify(result);
+              } catch (error) {
+                call.status = 'error'; call.error = error instanceof Error ? error.message : '媒体任务提交失败';
+                call.endedAt = new Date().toISOString(); emitTool(call);
+                return JSON.stringify({ isError: true, error: call.error });
+              }
+            }
             const selected = functions.find((item) => item.name === request.name);
             if (!selected) throw failure('tool-validation', 'TOOL_NOT_AUTHORIZED', '模型请求了未授权的工具', false);
             const { connection, tool } = selected;
@@ -560,7 +601,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
             }
           },
           };
-          return functions.length ? execution : undefined;
+          return functions.length || mediaToolDefinitions.length ? execution : undefined;
         };
         const execution = await createExecution(scopedApps, restrictedAgent?.id, attachedImages, restrictedAgent?.applicationTools);
         const delegations: AgentDelegation[] = [];
