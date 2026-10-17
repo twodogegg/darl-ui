@@ -113,9 +113,8 @@ function ToolCallCard({ call }: { call: AgentToolCall }) {
       <span className="darl-agent-tool-title"><strong>{call.agentId ? `子 Agent · ${call.appName}` : call.appName}</strong><span>{call.toolTitle || call.toolName}</span></span>
       <span className="darl-agent-tool-status">{status}</span>
     </div>
-    {(delegationTask || call.status === 'confirmation') && <div className="darl-agent-tool-detail">
+    {delegationTask && <div className="darl-agent-tool-detail">
       {delegationTask && <div><span>委派任务</span><pre>{delegationTask}</pre></div>}
-      {call.status === 'confirmation' && call.input !== undefined && <div><span>参数</span><pre>{formatToolValue(call.input)}</pre></div>}
     </div>}
     {call.errorInfo ? <AgentErrorCard error={call.errorInfo} /> : call.error && <p className="darl-agent-tool-error">{call.error}</p>}
   </article>;
