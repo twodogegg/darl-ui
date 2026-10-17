@@ -111,7 +111,7 @@
 .darl-mw-field input { padding: 10px; border: 1px solid var(--darl-border); border-radius: 7px; background: var(--darl-background); color: var(--darl-text); }
 @media(max-width: 1100px) { .darl-media-workspace { grid-template-columns: 212px minmax(0, 1fr); }.darl-mw-result-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }.darl-mw-content { padding-left: 19px; padding-right: 19px; }.darl-mw-composer-shell { padding-left: 19px; padding-right: 19px; } }
 @media(max-width: 760px) {
-  .darl-media-workspace { display: flex; flex-direction: column; height: 820px; }
+  .darl-media-workspace { display: flex; flex-direction: column; height: min(820px, 100vh); height: min(820px, 100dvh); }
   .darl-mw-sidebar { border-right: 0; border-bottom: 1px solid var(--darl-border); flex: none; }
   .darl-mw-brand { height: 43px; padding: 0 12px; border: 0; }.darl-mw-brand-mark { width: 26px; height: 26px; }
   .darl-mw-brand small, .darl-mw-sidebar-footer { display: none; }

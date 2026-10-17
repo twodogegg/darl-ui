@@ -1,3 +1,4 @@
+html { overscroll-behavior-y: none; }
 body { margin: 0; background: #101113; }
 .chat-example[data-darl-theme="dark"] { --darl-background: #101113; --darl-surface: #191b1f; --darl-border: #2d3036; --darl-text: #e7e8eb; --darl-muted: #999da6; --darl-primary-foreground: #101113; min-height: 100dvh; color-scheme: dark; }
 .example-page { min-height: 100dvh; }
