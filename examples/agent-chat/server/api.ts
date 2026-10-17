@@ -13,6 +13,7 @@ import { SubAgentThreadLocks, continueSubAgentConversation } from './subagent-co
 import { handleWorkspaceProjectRequest } from './projects';
 import { ProjectStore } from './project-store';
 import { createMediaJobsApi } from './media-jobs-api';
+import { DEFAULT_AUTO_CONFIRM, validateAutoConfirmSettings, shouldConfirmMcp, type AutoConfirmSettings } from './approval-settings';
 
 /** Resolve Agent models against the same enabled logical bindings used by the Models page. */
 function resolveAgentTextModel(providers: StoredProvider[], configuration: ModelConfiguration, providerId: string, modelId: string) {
@@ -251,6 +252,12 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       const defaultAgent: StoredAgent = { id: 'default', name: '网站助手', avatar: '/agent-default-avatar.png', description: '系统默认 Agent', instructions: await loadPrompt(), providerId: defaultProvider?.id || 'darl', modelId: defaultModel?.id || env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash', skillIds: [], applicationIds: [], applicationTools: {}, contextPolicy: { childContext: 'task-only', historyMode: 'summary', toolResultMode: 'standard' }, enabled: true, isDefault: !configuredAgents.some((agent) => agent.isDefault), builtIn: true, ...savedDefault };
       const agents = [defaultAgent, ...configuredAgents.filter((agent) => agent.id !== defaultAgent.id)];
       const path = request.url.split('?')[0];
+      if (path === '/api/auto-confirm' && request.method === 'GET') return send(200, storage.getConfig<AutoConfirmSettings>('autoConfirm') || DEFAULT_AUTO_CONFIRM);
+      if (path === '/api/auto-confirm' && request.method === 'POST') {
+        const next = validateAutoConfirmSettings(await readBody(request));
+        storage.setConfig('autoConfirm', next);
+        return send(200, next);
+      }
       if (path === '/api/state' && request.method === 'GET') return send(200, storage.getConfig<ClientState>('clientState') || { sessions: [], skills: [] });
       if (path === '/api/state' && request.method === 'POST') {
         const state = validateClientState(await readBody(request));
@@ -556,7 +563,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           const functions = ownedConnections.flatMap((connection, appIndex) => connection.tools.filter((tool) => !applicationTools?.[connection.app.id] || applicationTools[connection.app.id].includes(tool.name)).map((tool, index) => ({ name: `mcp_${appIndex}_${index}`, connection, tool })));
           if (functions.length > 128) throw new Error('所选应用合计超过 128 个工具，请减少应用数量');
           const mediaTools = [
-            { name: 'builtin_generate_media', description: '向后台提交一条图片或视频生成任务。仅支持 gpt-image-2 图片和 minimax-h3-flash 视频。调用前必须明确用户的生成意图；提交需要用户确认。返回任务 ID，不等待媒体完成。', parameters: { type: 'object', properties: { modelId: { type: 'string', enum: ['gpt-image-2', 'minimax-h3-flash'] }, prompt: { type: 'string', minLength: 1, maxLength: 16000 }, options: { type: 'object', properties: { size: { type: 'string' }, resolution: { type: 'string' }, aspectRatio: { type: 'string' }, duration: { type: 'integer' } }, additionalProperties: false } }, required: ['modelId','prompt'], additionalProperties: false } },
+            { name: 'builtin_generate_media', description: '向后台提交一条图片或视频生成任务。仅支持 gpt-image-2 图片和 minimax-h3-flash 视频。调用前必须明确用户的生成意图；提交遵循项目二次确认设置。返回任务 ID，不等待媒体完成。', parameters: { type: 'object', properties: { modelId: { type: 'string', enum: ['gpt-image-2', 'minimax-h3-flash'] }, prompt: { type: 'string', minLength: 1, maxLength: 16000 }, options: { type: 'object', properties: { size: { type: 'string' }, resolution: { type: 'string' }, aspectRatio: { type: 'string' }, duration: { type: 'integer' } }, additionalProperties: false } }, required: ['modelId','prompt'], additionalProperties: false } },
             { name: 'builtin_get_media_task', description: '按后台生成任务 ID 查询图片或视频的真实状态与结果路径，不会触发新的付费生成。', parameters: { type: 'object', properties: { taskId: { type: 'string', minLength: 36, maxLength: 36 } }, required: ['taskId'], additionalProperties: false } },
           ];
           const execution: ToolExecution = {
@@ -578,10 +585,14 @@ export function createApi(directory: string, env: Record<string, string>, prompt
               const binding = bindings[0];
               const selectedProvider = providers.find(item => item.id === binding?.providerId);
               if (bindings.length !== 1 || !selectedProvider?.apiKey) return JSON.stringify({ error: '该模型需要且只能配置一个有效供应商及密钥' });
+              const autoConfirm = storage.getConfig<AutoConfirmSettings>('autoConfirm') || DEFAULT_AUTO_CONFIRM;
+              const mediaNeedsConfirmation = !(args.modelId === 'gpt-image-2' ? autoConfirm.image : autoConfirm.video);
               const confirmId = crypto.randomUUID();
               const toolCall: AgentToolCall = { id: confirmId, appId: 'builtin:media', appName: '媒体生成', toolName: 'generate_media', input: args, status: 'confirmation', runId: executionRunId, ...(ownerAgentId ? { agentId: ownerAgentId } : {}) };
-              emitTool(toolCall);
-              if (!await confirmations.wait(confirmId, toolSignal)) return JSON.stringify({ error: '用户拒绝了此次付费媒体生成' });
+              if (mediaNeedsConfirmation) {
+                emitTool(toolCall);
+                if (!await confirmations.wait(confirmId, toolSignal)) return JSON.stringify({ error: '用户拒绝了此次付费媒体生成' });
+              }
               toolSignal.throwIfAborted();
               const options = args.options && typeof args.options === 'object' && !Array.isArray(args.options) ? args.options : {};
               const job = mediaJobs.store.create({ modelId: args.modelId as 'gpt-image-2'|'minimax-h3-flash',
@@ -605,7 +616,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
               call.input = args;
               emitToolExecution('started');
               emitTool(call);
-              if (toolRisk(connection.app, tool) !== 'read') {
+              if (shouldConfirmMcp(toolRisk(connection.app, tool), storage.getConfig<AutoConfirmSettings>('autoConfirm') || DEFAULT_AUTO_CONFIRM)) {
                 call.status = 'confirmation';
                 const decision = confirmations.wait(call.id, callSignal);
                 emitToolExecution('confirmation');
