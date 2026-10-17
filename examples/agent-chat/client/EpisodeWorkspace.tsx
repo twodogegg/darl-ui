@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type ChangeEvent } from 'react';
 import type { AgentConfig } from '@darl/ui';
 import type { AssetDraft, BreakdownDraft, ShotDraft } from '../server/episode-store';
 import './episodes.css';
@@ -54,6 +54,8 @@ function AssetText({value,onAsset,assets}:{value:string;onAsset:(name:string)=>v
 export function EpisodeWorkspace({projectId,agents}:{projectId:number;agents:AgentConfig[]}){
   const [episodes,setEpisodes]=useState<Episode[]>([]);
   const [selectedId,setSelectedId]=useState<number|null>(null);
+  const selectedIdRef=useRef<number|null>(null);
+  selectedIdRef.current=selectedId;
   const [episode,setEpisode]=useState<Episode|null>(null);
   const [script,setScript]=useState('');
   const [newTitle,setNewTitle]=useState('');
@@ -115,6 +117,7 @@ export function EpisodeWorkspace({projectId,agents}:{projectId:number;agents:Age
     setBusy('analyze');setError('');setNotice('');
     try{
       const result=await get<Preview>(`episodes/${episode.id}/analyze`,'POST',{agentId,scriptRevision:episode.scriptRevision});
+      if (selectedIdRef.current!==episode.id) return;
       setDraft(result.plan);setDraftRevision(result.scriptRevision);
       setNotice('Agent 已返回分镜和美术资产草案。检查后点击「保存分镜与资产」。');
     }catch(e){setError((e as Error).message);}finally{setBusy('');}
@@ -171,7 +174,7 @@ export function EpisodeWorkspace({projectId,agents}:{projectId:number;agents:Age
       <button type="button" onClick={()=>void create()} disabled={!!busy||!newTitle.trim()}>添加剧集</button>
     </div>
     {episodes.length>0&&<nav className="workspace-episode-tabs" aria-label="选择剧集">
-      {episodes.map(e=><button type="button" key={e.id} className={e.id===selectedId?'active':''} onClick={()=>setSelectedId(e.id)}>{e.title}</button>)}
+      {episodes.map(e=><button type="button" key={e.id} className={e.id===selectedId?'active':''} onClick={()=>setSelectedId(e.id)} disabled={!!busy}>{e.title}</button>)}
     </nav>}
     {error&&<p className="workspace-error" role="alert">{error}</p>}
     {notice&&<p className="workspace-notice" role="status">{notice}</p>}
