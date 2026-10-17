@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useState, type ReactNode, type ChangeEvent } from 'react';
 import type { AgentConfig } from '@darl/ui';
 import type { AssetDraft, BreakdownDraft, ShotDraft } from '../server/episode-store';
 import './episodes.css';
@@ -26,7 +26,7 @@ const marker=/<([^<>\n]{1,80})>/gu;
 function AssetText({value,onAsset,assets}:{value:string;onAsset:(name:string)=>void;assets:AssetDraft[]}){
   const parts=[...value.matchAll(marker)];
   if(!parts.length)return <span>{value||'—'}</span>;
-  const nodes:React.ReactNode[]=[];
+  const nodes:ReactNode[]=[];
   let pos=0;
   parts.forEach((part,i)=>{
     const start=part.index??0;
@@ -53,7 +53,6 @@ export function EpisodeWorkspace({projectId,agents}:{projectId:number;agents:Age
   const [busy,setBusy]=useState('');
   const [error,setError]=useState('');
   const [notice,setNotice]=useState('');
-  const fileRef=useRef<HTMLInputElement>(null);
   const availableAgents=agents.filter(a=>!a.builtIn && a.enabled!==false);
 
   useEffect(()=>{
@@ -64,16 +63,6 @@ export function EpisodeWorkspace({projectId,agents}:{projectId:number;agents:Age
     return ()=>{active=false;};
   },[projectId]);
 
-  const loadEpisode=async(id:number)=>{
-    const [plan,assets]=await Promise.all([
-      get<PlanResponse>(`episodes/${id}`),
-      get<LibraryAsset[]>(`projects/${projectId}/assets`)
-    ]);
-    setEpisode(plan.episode);setScript(plan.episode.script);
-    setDraft(plan.shots.length?{shots:plan.shots,assets:plan.assets}:null);
-    setDraftRevision(plan.episode.planRevision);setLibrary(assets);
-    setError('');setNotice('');
-  };
   useEffect(()=>{
     if(selectedId==null){setEpisode(null);setDraft(null);return;}
     let active=true;
@@ -181,7 +170,7 @@ export function EpisodeWorkspace({projectId,agents}:{projectId:number;agents:Age
         <textarea className="workspace-script-editor" aria-label="本集剧本内容" rows={12}
           value={script} onChange={e=>setScript(e.target.value)} placeholder="粘贴已有的标准剧本，或导入 .txt / .md 文件"/>
         <div className="workspace-episode-actions">
-          <input ref={fileRef} type="file" accept=".txt,.md,text/plain,text/markdown" onChange={e=>void importFile(e)}/>
+          <input type="file" accept=".txt,.md,text/plain,text/markdown" onChange={e=>void importFile(e)}/>
           <button type="button" disabled={!!busy||script===episode.script} onClick={()=>void saveScript()}>{busy==='script'?'正在保存…':'保存剧本'}</button>
         </div>
         <div className="workspace-episode-analysis">
