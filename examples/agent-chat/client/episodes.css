@@ -1,0 +1,47 @@
+.workspace-episodes { margin-top:24px; border-top:1px solid var(--darl-border, #444); padding-top:22px; display:grid; gap:15px; min-width:0; }
+.workspace-episodes h2,.workspace-episodes h3 { margin:0; }
+.workspace-episodes header p,.workspace-episode-hint { color:var(--darl-muted-foreground, #a4a4a4); font-size:13px; line-height:1.6; }
+.workspace-episode-create,.workspace-episode-tabs,.workspace-episode-actions,.workspace-episode-title { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.workspace-episode-create input { flex:1 1 200px; }
+.workspace-episodes input,.workspace-episodes textarea,.workspace-episodes select { box-sizing:border-box; max-width:100%; padding:9px; background:var(--darl-background, #171717); color:inherit; border:1px solid var(--darl-border, #555); border-radius:7px; font:inherit; }
+.workspace-episodes button { border:1px solid var(--darl-border, #555); border-radius:7px; padding:8px 12px; background:transparent; color:inherit; cursor:pointer; }
+.workspace-episodes button:disabled { opacity:.45; cursor:not-allowed; }
+.workspace-episodes .workspace-primary { background:var(--darl-primary, #8ba4c5); color:#111; border-color:transparent; }
+.workspace-episode-tabs { overflow-x:auto; padding:3px 0; max-width:100%; flex-wrap:nowrap; }
+.workspace-episode-tabs button { white-space:nowrap; flex-shrink:0; }
+.workspace-episode-tabs button.active { background:var(--darl-primary, #8ba4c5); color:#111; }
+.workspace-episode-panel { display:grid; gap:13px; border:1px solid var(--darl-border, #555); border-radius:10px; padding:15px; min-width:0; }
+.workspace-episode-title { justify-content:space-between; }
+.workspace-episode-title small { color:var(--darl-muted-foreground, #aaa); }
+.workspace-script-editor { width:100%; min-height:240px; resize:vertical; }
+.workspace-episode-actions { justify-content:flex-end; }
+.workspace-episode-actions input[type=file] { flex:1 1 200px; min-width:0; font-size:.82rem; }
+.workspace-episode-analysis { display:flex; align-items:end; gap:12px; flex-wrap:wrap; }
+.workspace-episode-analysis label { display:grid; gap:6px; flex:1 1 200px; font-size:.9rem; }
+.workspace-episode-analysis button { min-height:38px; }
+.workspace-shot-scroll { max-width:100%; overflow-x:auto; border:1px solid var(--darl-border, #555); border-radius:8px; }
+.workspace-shot-table { border-collapse:collapse; min-width:1250px; width:100%; font-size:.83rem; }
+.workspace-shot-table th,.workspace-shot-table td { border:1px solid var(--darl-border, #404040); padding:7px; vertical-align:top; }
+.workspace-shot-table th { background:var(--darl-muted, #242424); white-space:nowrap; font-weight:600; text-align:left; }
+.workspace-shot-table .workspace-shot-field span { display:none; }
+.workspace-shot-table textarea { display:block; width:100%; resize:vertical; min-width:105px; }
+.workspace-shot-table td:nth-child(6) { min-width:240px; }
+.workspace-shot-table td:nth-child(7) { min-width:175px; }
+.workspace-shot-table input[type=number] { width:80px; }
+.workspace-shot-ops { display:flex; gap:2px; margin-top:10px; }
+.workspace-shot-ops button { padding:5px; min-width:25px; font-size:.85rem; }
+.workspace-shot-preview { padding:6px 3px; overflow-wrap:anywhere; white-space:pre-wrap; font-size:.82rem; line-height:1.6; }
+.workspace-asset-mention { display:inline!important; padding:0 3px!important; margin:0 1px; border:0!important; border-radius:3px!important; color:#76b9f4!important; background:rgba(90,140,200,.18)!important; font-weight:600; font-size:inherit; line-height:inherit; }
+.workspace-asset-mention.is-unbound { color:#e5aa65!important; background:rgba(225,164,95,.15)!important; }
+.workspace-asset-list { display:grid; gap:9px; }
+.workspace-asset-item { padding:10px; border:1px solid var(--darl-border, #555); border-radius:8px; display:grid; grid-template-columns:minmax(120px,1fr) minmax(110px,.6fr) minmax(150px,1fr) auto auto; gap:9px; align-items:end; }
+.workspace-asset-item label { display:grid; gap:5px; font-size:12px; }
+.workspace-asset-item input,.workspace-asset-item select { width:100%; }
+.workspace-asset-state { font-size:12px; color:var(--darl-muted-foreground, #aaa); padding-bottom:8px; white-space:nowrap; }
+@media (max-width:800px) {
+ .workspace-episode-panel { padding:12px; }
+ .workspace-episode-analysis button { width:100%; }
+ .workspace-asset-item { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+ .workspace-asset-item label:first-child,.workspace-asset-item label:nth-child(3) { grid-column:1 / -1; }
+ .workspace-asset-state { align-self:center; }
+}
