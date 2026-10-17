@@ -64,7 +64,7 @@ export class MediaRuntime {
     const value = raw as Record<string, unknown>;
     const number = (key: keyof QueueSettings, max: number) => {
       const v = value[key];
-      if (!Number.isSafeInteger(v) || Number(v) < 1 || Number(v) > max) throw new Error(key + ' 必须为 1-' + max);
+      if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < 1 || v > max) throw new Error(key + ' 必须为 1-' + max);
       return Number(v);
     };
     const result = { submitConcurrency: number('submitConcurrency', 10000), pollConcurrency: number('pollConcurrency', 2000), pollSeconds: number('pollSeconds', 300) };
