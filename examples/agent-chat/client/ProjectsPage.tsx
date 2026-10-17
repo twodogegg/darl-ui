@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { ArrowLeft, FolderPlus, Pencil, Trash2, UploadCloud } from 'lucide-react';
-import { StyleSelector, type StyleOption, type StyleCreateRequest } from '@darl/ui';
+import { StyleSelector, type StyleOption, type StyleCreateRequest, type AgentConfig } from '@darl/ui';
+import { EpisodeWorkspace } from './EpisodeWorkspace';
 import './projects.css';
 
 type Project = {
@@ -37,7 +38,7 @@ const storageImage = (key?: string | null): string | undefined => {
 const projectCover = (project: Project): string | undefined =>
   storageImage(project.cover_asset?.storage_key) || storageImage(project.cover_url) || storageImage(project.cover?.url) || undefined;
 
-export function ProjectsPage({ onBack }: { onBack: () => void }) {
+export function ProjectsPage({ onBack, agents }: { onBack: () => void; agents: AgentConfig[] }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [styles, setStyles] = useState<StyleOption[]>([]);
   const [draft, setDraft] = useState<Draft>(blank);
@@ -159,25 +160,25 @@ export function ProjectsPage({ onBack }: { onBack: () => void }) {
     <div className="workspace-projects-heading">
       <div><button type="button" className="workspace-link" onClick={onBack}><ArrowLeft size={16} />返回</button>
         <h1>{detail ? detail.name : '我的项目'}</h1>
-        <p>{detail ? '项目基本信息；剧集与剧本将在下一阶段加入。' : '创建项目，逐步建立你的影视创作工作空间。'}</p></div>
+        <p>{detail ? '逐集导入已有剧本，通过自定义 Agent 拆镜并提取资产需求。' : '创建项目，逐步建立你的影视创作工作空间。'}</p></div>
       {!detail && <button type="button" className="workspace-primary" onClick={startCreate}><FolderPlus size={17} />创建项目</button>}
     </div>
     {error && <p role="alert" className="workspace-error">{error}</p>}
     {notice && <p role="status" className="workspace-notice">{notice}</p>}
-    {loading ? <p>正在加载项目…</p> : detail ? <section className="workspace-project-card workspace-detail">
+    {loading ? <p>正在加载项目…</p> : detail ? <><section className="workspace-project-card workspace-detail">
       {projectCover(detail) && <img className="workspace-cover" src={projectCover(detail)} alt={`${detail.name}封面`} />}
       <div className="workspace-project-meta">
         <p>{detail.description || '暂无简介'}</p>
         <p>画面比例：{detail.aspect_ratio}</p>
         <p>视觉风格：{styles.find((s) => s.id === String(detail.style_catalog_id))?.name || detail.style?.name || '未设置'}</p>
-        <p>剧集：{detail.episode_count ?? 0} 集（逐集管理后续接入）</p>
+        <p>剧集：{detail.episode_count ?? 0} 集</p>
         <div className="workspace-project-actions">
           <button type="button" onClick={() => startEdit(detail)}><Pencil size={15} />编辑项目</button>
           <button type="button" disabled={busy} onClick={() => void archive(detail)}><Trash2 size={15} />归档项目</button>
           <button type="button" onClick={() => setDetail(null)}>返回列表</button>
         </div>
       </div>
-    </section> : projects.length ? <div className="workspace-project-grid">
+    </section><EpisodeWorkspace key={detail.id} projectId={detail.id} agents={agents} /></> : projects.length ? <div className="workspace-project-grid">
       {projects.map((item) => <article className="workspace-project-card" key={item.id}>
         <button className="workspace-card-open" type="button" onClick={() => void backend<Project>(`projects/${item.id}`).then(setDetail).catch((failure) => setError(failure.message))}>
           {projectCover(item) ? <img className="workspace-card-image" src={projectCover(item)} alt="" /> : <div className="workspace-card-placeholder">未上传封面</div>}
