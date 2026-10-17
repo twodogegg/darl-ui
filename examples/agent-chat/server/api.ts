@@ -279,7 +279,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         await connectionManager.invalidateAll();
         return send(200, await applicationCatalog(directory, signal));
       }
-      const applicationConfigRoute = path.match(/^\\/api\\/applications\\/([\\w-]+)$/);
+      const applicationConfigRoute = path.match(/^\/api\/applications\/([\w-]+)$/);
       if (applicationConfigRoute && request.method === 'DELETE') {
         const configs = await loadApplications(directory);
         if (!configs.some((app) => app.id === applicationConfigRoute[1])) return send(404, { error: '应用不存在' });
