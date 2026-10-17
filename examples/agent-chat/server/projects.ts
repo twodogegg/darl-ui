@@ -95,7 +95,7 @@ export async function handleWorkspaceProjectRequest(
         ...(body?.length ? { 'Content-Type': request.headers['content-type'] || 'application/json' } : {}),
         Accept: 'application/json',
       },
-      ...(body ? { body } : {}),
+      ...(body ? { body: Uint8Array.from(body).buffer as ArrayBuffer } : {}),
       signal: AbortSignal.timeout(25_000),
       redirect: 'error',
     });
