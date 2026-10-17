@@ -450,7 +450,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
       onConfirm={() => confirmAction(true)}
       details={pendingConfirmation && <div className="darl-agent-confirm-details">
         <div><strong>{isMediaConfirmation ? '模型' : '应用'}</strong><span>{isMediaConfirmation ? String(pendingInput.modelId || '—') : pendingConfirmation.appName}</span></div>
-        {!isMediaConfirmation && <div><strong>工具</strong><span>{pendingConfirmation.toolTitle || pendingConfirmation.toolName}</span></div>}
+        {!isMediaConfirmation && <><div><strong>工具</strong><span>{pendingConfirmation.toolTitle || pendingConfirmation.toolName}</span></div><div><strong>风险</strong><span>{pendingConfirmation.risk === 'dangerous' ? '危险操作' : pendingConfirmation.risk === 'write' ? '写操作' : pendingConfirmation.risk === 'read' ? '只读' : '—'}</span></div></>}
         {isMediaConfirmation && Boolean(pendingInput.options) && <div><strong>生成参数</strong><span>{formatToolValue(pendingInput.options)}</span></div>}
         <div className="darl-agent-confirm-input"><strong>{isMediaConfirmation ? '生成内容' : '调用参数'}</strong><pre>{formatToolValue(isMediaConfirmation ? pendingInput.prompt : pendingConfirmation.input)}</pre></div>
         {confirmError && <p role="alert">{confirmError}</p>}

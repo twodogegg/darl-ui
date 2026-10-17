@@ -605,7 +605,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
             const selected = functions.find((item) => item.name === request.name);
             if (!selected) throw failure('tool-validation', 'TOOL_NOT_AUTHORIZED', '模型请求了未授权的工具', false);
             const { connection, tool } = selected;
-            const call: AgentToolCall = { id: crypto.randomUUID(), appId: connection.app.id, appName: connection.app.name, toolName: tool.name, toolTitle: tool.title || tool.annotations?.title, input: request.arguments, status: 'pending', attempt: 1, runId: executionRunId, ...(ownerAgentId ? { agentId: ownerAgentId, ...(parentRunId ? { parentRunId } : {}) } : {}) };
+            const call: AgentToolCall = { id: crypto.randomUUID(), appId: connection.app.id, appName: connection.app.name, toolName: tool.name, toolTitle: tool.title || tool.annotations?.title, risk: toolRisk(connection.app, tool), input: request.arguments, status: 'pending', attempt: 1, runId: executionRunId, ...(ownerAgentId ? { agentId: ownerAgentId, ...(parentRunId ? { parentRunId } : {}) } : {}) };
             const emitToolExecution = (status: AgentExecutionEvent['status'], extra: Partial<AgentExecutionEvent> = {}) => {
               const timestamp = new Date().toISOString();
               emitExecution?.({ id: crypto.randomUUID(), source: 'tool', status, name: tool.title || tool.name, timestamp, startedAt: call.startedAt, runId: executionRunId, parentRunId: executionRunId, agentId: ownerAgentId, toolCallId: call.id, requestId, attempt: call.attempt, ...extra });

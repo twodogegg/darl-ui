@@ -38,9 +38,10 @@ describe('AgentSidebar', () => {
 
   it('确认工具时展示参数，宿主失败可重试并可拒绝', async () => {
     const onToolConfirm = vi.fn().mockRejectedValueOnce(new Error('确认请求失败')).mockResolvedValue(undefined);
-    const pending: AgentSession[] = [{ id: 'one', title: '工具确认', messages: [{ id: 'assistant', role: 'assistant', content: '', toolCalls: [{ id: 'write-call', appId: 'catalog', appName: '素材库', toolName: 'save', status: 'confirmation', input: { name: '新素材' } }] }] }];
+    const pending: AgentSession[] = [{ id: 'one', title: '工具确认', messages: [{ id: 'assistant', role: 'assistant', content: '', toolCalls: [{ id: 'write-call', appId: 'catalog', appName: '素材库', toolName: 'save', risk: 'write', status: 'confirmation', input: { name: '新素材' } }] }] }];
     render(<AgentSidebar open onOpenChange={vi.fn()} sessions={pending} activeSessionId="one" onToolConfirm={onToolConfirm} />);
     expect(screen.getByText(/"name": "新素材"/)).toBeVisible();
+    expect(screen.getByText('写操作')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '允许执行' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('确认请求失败');
     fireEvent.click(screen.getByRole('button', { name: '拒绝' }));
