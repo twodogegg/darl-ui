@@ -2,6 +2,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LocalStorage } from '../examples/agent-chat/server/storage';
 import { MediaRuntime } from '../examples/agent-chat/server/media-runtime';
@@ -31,7 +32,7 @@ function setup(concurrency = 1) {
     runtimes.push(runtime);
     return runtime;
   };
-  return { make, config };
+  return { make, config, dbPath: storage.path };
 }
 async function until(predicate: () => boolean, timeout = 6000) {
   const expires = Date.now() + timeout;
@@ -97,7 +98,7 @@ describe('durable media generation queue', () => {
   });
 
   it('never retries an uncertain paid request after server restart', async () => {
-    const { make } = setup(2);
+    const { make, dbPath } = setup(2);
     const first = make();
     const stalled = vi.fn(() => new Promise<Response>(() => {}));
     vi.stubGlobal('fetch', stalled);
@@ -105,6 +106,9 @@ describe('durable media generation queue', () => {
     const task = first.enqueue('image', { prompt: '电影风格', options: { size: '1024x1024' } });
     expect(first.get(task.id)?.status).toBe('running');
     first.stop();
+    const db = new DatabaseSync(dbPath);
+    db.prepare('UPDATE generation_jobs SET lease_until=0 WHERE id=?').run(task.id);
+    db.close();
     const restarted = make();
     restarted.start();
     expect(restarted.get(task.id)).toMatchObject({ status: 'failed', phase: 'unknown-submission' });
