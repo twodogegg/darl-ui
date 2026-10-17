@@ -284,11 +284,12 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const body = await readBody(request) as { name?: unknown; url?: unknown; apiKey?: unknown };
         if (typeof body.name !== 'string' || typeof body.url !== 'string') throw new Error('请填写名称和 MCP 地址');
         if (body.apiKey !== undefined && typeof body.apiKey !== 'string') throw new Error('密钥格式无效');
+        const apiKey = typeof body.apiKey === 'string' && body.apiKey ? body.apiKey : undefined;
         const configs = await loadApplications(directory);
         if (!configs.some((app) => app.id === applicationConfigRoute[1])) return send(404, { error: '应用不存在' });
         await saveApplications(directory, configs.map((app) => app.id !== applicationConfigRoute[1] ? app : {
           ...app, name: body.name as string, url: body.url as string,
-          ...(body.apiKey ? { apiKey: body.apiKey } : {}),
+          ...(apiKey ? { apiKey } : {}),
         }));
         await connectionManager.invalidateAll();
         return send(200, await applicationCatalog(directory, signal));

@@ -32,6 +32,11 @@ async function request(path: string, method = 'GET', body?: unknown) {
   return data;
 }
 
+function formatJson(value: unknown) {
+  try { return JSON.stringify(value, null, 2) ?? ''; }
+  catch { return '[无法显示]'; }
+}
+
 export function McpSettings({ applications, onChanged }: Props) {
   const [catalog, setCatalog] = useState<McpApp[]>(applications);
   const [loading, setLoading] = useState(false);
@@ -94,9 +99,9 @@ export function McpSettings({ applications, onChanged }: Props) {
         <p>{tool.description || '无描述'}</p>
         <p>工具标识：<code>{tool.name}</code></p>
         <h4>输入参数（JSON Schema）</h4>
-        <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(tool.inputSchema || {}, null, 2)}</pre>
-        {tool.outputSchema && <><h4>输出定义</h4><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(tool.outputSchema, null, 2)}</pre></>}
-        {tool.annotations && <><h4>工具注解</h4><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(tool.annotations, null, 2)}</pre></>}
+        <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{formatJson(tool.inputSchema || {})}</pre>
+        {tool.outputSchema !== undefined && tool.outputSchema !== null && <><h4>输出定义</h4><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{formatJson(tool.outputSchema)}</pre></>}
+        {tool.annotations !== undefined && tool.annotations !== null && <><h4>工具注解</h4><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{formatJson(tool.annotations)}</pre></>}
       </details>)}
     </article>)}
   </section>;

@@ -13,7 +13,7 @@ describe('MCP host policy', () => {
     const directory = await mkdtemp(join(tmpdir(), 'darl-mcp-catalog-'));
     try {
       await writeFile(join(directory, 'applications.json'), JSON.stringify([app]));
-      expect(await applicationCatalog(directory)).toEqual([{ id: app.id, name: app.name, description: 'MCP 工具按需发现', tools: [] }]);
+      expect(await applicationCatalog(directory)).toEqual([{ id: app.id, name: app.name, url: app.url, description: 'MCP 工具按需发现', tools: [] }]);
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
