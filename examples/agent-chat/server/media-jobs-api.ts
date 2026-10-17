@@ -17,6 +17,24 @@ async function body(req:IncomingMessage) {
   }
   return JSON.parse(data) as Record<string,unknown>;
 }
+/** Only pass parameters this host actually supports. Reject unsupported inputs before billing/queueing. */
+export function validateMediaJobOptions(modelId: string, options: Record<string, unknown>): Record<string, unknown> {
+  const image = modelId === 'gpt-image-2';
+  const allowed = image ? ['size'] : ['resolution', 'aspectRatio', 'duration'];
+  if (Object.keys(options).some(key => !allowed.includes(key))) throw new Error('生成参数包含尚未接通的功能（参考素材需单独验证）');
+  if (image) {
+    const size = options.size ?? '1024x1024';
+    if (!['auto','1024x1024','1536x1024','1024x1536'].includes(String(size))) throw new Error('图片尺寸无效');
+    return { size };
+  }
+  const resolution = options.resolution ?? '768';
+  const aspectRatio = options.aspectRatio ?? '9:16';
+  const duration = options.duration ?? 10;
+  if (resolution !== '480' && resolution !== '768') throw new Error('视频分辨率无效');
+  if (aspectRatio !== '16:9' && aspectRatio !== '9:16') throw new Error('视频画面比例无效');
+  if (!Number.isInteger(duration) || (duration as number) < 4 || (duration as number) > 15) throw new Error('视频时长应为 4–15 秒');
+  return { resolution, aspectRatio, duration };
+}
 export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration, providers:()=>StoredProvider[]){
   const store=new MediaJobStore(dbPath);
   const runner=new MediaJobRunner(store,(job)=>{
@@ -53,8 +71,8 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         const provider=providers().find(p=>p.id===binding.providerId);
         if(!provider?.apiKey)throw new Error('供应商缺少 API Key');
         const type=input.modelId==='gpt-image-2'?'image':'video';
-        const options=input.options&&typeof input.options==='object'&&!Array.isArray(input.options)?input.options as Record<string,unknown>:{};
-        if(options.references)throw new Error('参考素材模式待真实网关核验后开放');
+        const requestedOptions=input.options&&typeof input.options==='object'&&!Array.isArray(input.options)?input.options as Record<string,unknown>:{};
+        const options = validateMediaJobOptions(String(input.modelId), requestedOptions);
         const job=store.create({modelId:input.modelId as 'gpt-image-2'|'minimax-h3-flash',type,prompt:input.prompt.trim(),providerId:provider.id,upstreamModelId:binding.upstreamModelId,baseUrl:provider.baseUrl,options});
         void runner.tick();
         reply(res,201,job);return true;
