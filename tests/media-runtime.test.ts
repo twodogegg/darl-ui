@@ -115,6 +115,19 @@ describe('durable media generation queue', () => {
     expect(stalled).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps rate-limited tasks in the durable queue instead of marking them failed', async () => {
+    const { make } = setup(5);
+    const runtime = make();
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'Too many requests' } }), { status: 429 }));
+    vi.stubGlobal('fetch', fetcher);
+    runtime.start();
+    const task = runtime.enqueue('image', { prompt: '测试限流' });
+    await until(() => runtime.get(task.id)?.phase === 'rate-limited');
+    expect(runtime.get(task.id)?.status).toBe('queued');
+    expect(runtime.get(task.id)?.error).toContain('稍后自动重试');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects invalid queue limits instead of silently forcing an arbitrary low cap', () => {
     const { make } = setup();
     const runtime = make();
