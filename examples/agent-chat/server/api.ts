@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AgentExecutionEvent, AgentSkill, AgentToolCall } from '../../../src/index';
 import { defaultModelConfiguration, effectiveCapabilities, enabledBindings, validateModelConfiguration, type ModelConfiguration } from '../../../src/components/settings/model-config';
-import { applicationCatalog, connectApplication, conversationApplications, loadApplications, McpConnectionManager, toolRisk, ToolConfirmations } from './mcp';
+import { applicationCatalog, connectApplication, conversationApplications, loadApplications, saveApplications, McpConnectionManager, toolRisk, ToolConfirmations } from './mcp';
 import { loadAgents, publicAgent, validateAgent, validateAgents, type StoredAgent } from './agents';
 import { generate, generateWithToolLoop, listModels, publicProvider, runToolLoopAgent, safeError, validateProvider, type AgentDelegation, type ChatImage, type ChatMessage, type StoredProvider, type ToolExecution } from './models';
 import { AgentFailure, createAgentError, failure } from './errors';
@@ -269,6 +269,24 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         storage.setConfig('systemPrompt', systemPrompt);
         return send(200, { systemPrompt });
       }
+      if (path === '/api/applications' && request.method === 'POST') {
+        const body = await readBody(request) as { id?: unknown; name?: unknown; url?: unknown; apiKey?: unknown };
+        if (typeof body.id !== 'string' || typeof body.name !== 'string' || typeof body.url !== 'string') throw new Error('请填写应用 ID、名称和 MCP 地址');
+        if (body.apiKey !== undefined && typeof body.apiKey !== 'string') throw new Error('密钥格式无效');
+        const configs = await loadApplications(directory);
+        if (configs.some((app) => app.id === body.id)) throw new Error('应用 ID 已存在');
+        await saveApplications(directory, [...configs, { id: body.id, name: body.name.trim(), url: body.url, ...(body.apiKey ? { apiKey: body.apiKey } : {}) }]);
+        await connectionManager.invalidateAll();
+        return send(200, await applicationCatalog(directory, signal));
+      }
+      const applicationConfigRoute = path.match(/^\\/api\\/applications\\/([\\w-]+)$/);
+      if (applicationConfigRoute && request.method === 'DELETE') {
+        const configs = await loadApplications(directory);
+        if (!configs.some((app) => app.id === applicationConfigRoute[1])) return send(404, { error: '应用不存在' });
+        await saveApplications(directory, configs.filter((app) => app.id !== applicationConfigRoute[1]));
+        await connectionManager.invalidateAll();
+        return send(200, await applicationCatalog(directory, signal));
+      }
       if (path === '/api/applications' && request.method === 'GET') {
         if (new URL(request.url, 'http://localhost').searchParams.get('refresh') === '1') await connectionManager.invalidateAll();
         return send(200, await applicationCatalog(directory, signal));
@@ -286,7 +304,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         if (url.searchParams.get('refresh') === '1') await connectionManager.invalidate(scopeKey, app.id);
         try {
           const connection = await connectionManager.get(scopeKey, app, signal);
-          return send(200, { id: app.id, name: app.name, status: 'connected', description: `${connection.tools.length} 个 MCP 工具`, tools: connection.tools.map((tool) => ({ name: tool.name, title: tool.title || tool.annotations?.title, description: tool.description, risk: toolRisk(app, tool) })) });
+          return send(200, { id: app.id, name: app.name, status: 'connected', description: `${connection.tools.length} 个 MCP 工具`, tools: connection.tools.map((tool) => ({ name: tool.name, title: tool.title || tool.annotations?.title, description: tool.description, risk: toolRisk(app, tool), inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, annotations: tool.annotations })) });
         } catch (error) {
           return send(200, { id: app.id, name: app.name, status: 'disconnected', description: safeError(error, app.apiKey), tools: [] });
         }
