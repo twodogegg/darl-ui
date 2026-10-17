@@ -210,10 +210,11 @@ export async function* generateWithToolLoop(provider: StoredProvider, model: Age
 }
 
 /** Execute one isolated child context and return only its final text. */
-export async function runToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, task: string, instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution) {
+export async function runToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution) {
   signal.throwIfAborted();
   const agent = createToolLoopAgent(provider, model, instructions, effort, signal, execution);
-  const result = await agent.generate({ prompt: task, abortSignal: signal });
+  if (!messages.length) throw new Error('子 Agent 对话不能为空');
+  const result = await agent.generate({ messages: modelMessages(messages.map(sourceBoundMessage)), abortSignal: signal });
   signal.throwIfAborted();
   return structuredAgentResult(result.text);
 }

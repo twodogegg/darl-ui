@@ -1,8 +1,22 @@
 import { chmodSync, mkdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import type { ChatMessage } from './models';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 export interface ClientState { sessions: unknown[]; activeId?: string; skills: unknown[] }
+export interface SubAgentThreadKey {
+  scope: string;
+  rootSessionId: string;
+  parentAgentId: string;
+  childAgentId: string;
+}
+export interface StoredSubAgentThread extends SubAgentThreadKey {
+  id: string;
+  version: number;
+  updatedAt: string;
+  messages: ChatMessage[];
+}
 
 /** Single-user local persistence for the example host. SQLite is the only source of truth. */
 export class LocalStorage {
@@ -27,6 +41,19 @@ export class LocalStorage {
         updated_at TEXT NOT NULL,
         data TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS subagent_threads (
+        id TEXT PRIMARY KEY,
+        scope TEXT NOT NULL,
+        root_session_id TEXT NOT NULL,
+        parent_agent_id TEXT NOT NULL,
+        child_agent_id TEXT NOT NULL,
+        messages_json TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (scope, root_session_id, parent_agent_id, child_agent_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_subagent_threads_parent
+        ON subagent_threads (scope, root_session_id, updated_at);
     `);
     chmodSync(this.path, 0o600);
   }
@@ -42,6 +69,39 @@ export class LocalStorage {
       INSERT INTO app_config (key, value, updated_at) VALUES (?, ?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `).run(key, JSON.stringify(value), new Date().toISOString());
+  }
+
+  /** The demo uses a fixed local scope; multi-user hosts must provide authenticated isolation. */
+  getSubAgentThread(key: SubAgentThreadKey): StoredSubAgentThread | undefined {
+    const row = this.database.prepare(
+      'SELECT id, version, updated_at, messages_json FROM subagent_threads WHERE scope = ? AND root_session_id = ? AND parent_agent_id = ? AND child_agent_id = ?'
+    ).get(key.scope, key.rootSessionId, key.parentAgentId, key.childAgentId) as { id: string; version: number; updated_at: string; messages_json: string } | undefined;
+    if (!row) return undefined;
+    return { ...key, id: row.id, version: row.version, updatedAt: row.updated_at, messages: JSON.parse(row.messages_json) as ChatMessage[] };
+  }
+
+  /** Atomic optimistic version check also prevents stale writes by a second process. */
+  saveSubAgentThread(key: SubAgentThreadKey, messages: ChatMessage[], expectedVersion: number): StoredSubAgentThread {
+    if (Object.values(key).some((id) => typeof id !== 'string' || !id.trim() || id.length > 200)) throw new Error('子 Agent 会话标识无效');
+    if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 0) throw new Error('子 Agent 会话版本无效');
+    const json = JSON.stringify(messages);
+    if (!Array.isArray(messages) || messages.length > 200 || json.length > 16_000_000) throw new Error('子 Agent 会话历史过长');
+    const updatedAt = new Date().toISOString();
+    if (expectedVersion === 0) {
+      const id = randomUUID();
+      const result = this.database.prepare(
+        'INSERT OR IGNORE INTO subagent_threads (id, scope, root_session_id, parent_agent_id, child_agent_id, messages_json, version, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)'
+      ).run(id, key.scope, key.rootSessionId, key.parentAgentId, key.childAgentId, json, updatedAt);
+      if (result.changes !== 1) throw new Error('子 Agent 会话已被其他请求更新，请重试');
+      return { ...key, id, version: 1, updatedAt, messages };
+    }
+    const result = this.database.prepare(
+      'UPDATE subagent_threads SET messages_json = ?, version = version + 1, updated_at = ? WHERE scope = ? AND root_session_id = ? AND parent_agent_id = ? AND child_agent_id = ? AND version = ?'
+    ).run(json, updatedAt, key.scope, key.rootSessionId, key.parentAgentId, key.childAgentId, expectedVersion);
+    if (result.changes !== 1) throw new Error('子 Agent 会话已被其他请求更新，请重试');
+    const saved = this.getSubAgentThread(key);
+    if (!saved) throw new Error('子 Agent 会话不存在');
+    return saved;
   }
 
   getMediaTasks<T>(): T[] {
