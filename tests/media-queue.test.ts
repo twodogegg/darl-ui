@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MediaJobStore } from '../examples/agent-chat/server/media-job-store';
+import { validateMediaJobOptions } from '../examples/agent-chat/server/media-jobs-api';
 
 describe('SQLite media generation queue',()=>{
   it('persists queue and per-model limits, and recovers remote video without resubmission',()=>{
@@ -33,5 +34,13 @@ describe('SQLite media generation queue',()=>{
       expect(()=>db.setLimit('gpt-image-2',100001)).toThrow();
       expect(()=>db.setLimit('other',10)).toThrow();
     }finally{rmSync(dir,{recursive:true,force:true});}
+  });
+  it('accepts only supported direct generation fields before tasks are enqueued', () => {
+    expect(validateMediaJobOptions('gpt-image-2',{size:'1024x1536'})).toEqual({size:'1024x1536'});
+    expect(validateMediaJobOptions('minimax-h3-flash',{resolution:'768',aspectRatio:'9:16',duration:10}))
+      .toEqual({resolution:'768',aspectRatio:'9:16',duration:10});
+    expect(()=>validateMediaJobOptions('gpt-image-2',{references:['x']})).toThrow('尚未接通');
+    expect(()=>validateMediaJobOptions('minimax-h3-flash',{duration:20})).toThrow('4–15');
+    expect(()=>validateMediaJobOptions('minimax-h3-flash',{aspectRatio:'1:1'})).toThrow('画面比例');
   });
 });
