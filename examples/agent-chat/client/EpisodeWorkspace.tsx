@@ -22,7 +22,18 @@ const fields:Array<{key:keyof Omit<ShotDraft,'id'|'duration'>;label:string}>= [
   {key:'framing',label:'景别'},{key:'camera',label:'运镜'},{key:'cut',label:'切镜方式'},
   {key:'scene',label:'场景'},{key:'visual',label:'画面'},{key:'dialogue',label:'台词/对白'},{key:'sound',label:'音效'},
 ];
-const marker=/<([^<>\n]{1,80})>/gu;
+const marker=/<([^<>\\n]{1,80})>/gu;
+const toVisible = (source:string)=>source.replace(marker,(_,name:string)=>'@'+name.trim());
+const toStored = (source:string,assets:AssetDraft[])=>{
+  const names=[...new Set(assets.map(a=>a.name).filter(Boolean))].sort((a,b)=>b.length-a.length);
+  let result='';
+  for(let i=0;i<source.length;){
+    const hit=source[i]==='@'?names.find(name=>source.startsWith(name,i+1)):undefined;
+    if(hit){result+='<'+hit+'>';i+=hit.length+1;}
+    else{result+=source[i];i++;}
+  }
+  return result;
+};
 function AssetText({value,onAsset,assets}:{value:string;onAsset:(name:string)=>void;assets:AssetDraft[]}){
   const parts=[...value.matchAll(marker)];
   if(!parts.length)return <span>{value||'—'}</span>;
@@ -192,7 +203,7 @@ export function EpisodeWorkspace({projectId,agents}:{projectId:number;agents:Age
         <div className="workspace-episode-title"><h3>九列分镜脚本</h3>
           <strong>{draft.shots.length} 镜 · 预计 {Number(total.toFixed(2))} 秒</strong></div>
         {draftRevision!==episode.scriptRevision&&<p className="workspace-episode-hint">这份分镜基于旧版剧本；如果要保存，请先用最新剧本重新拆镜。</p>}
-        <p className="workspace-episode-hint">画面中的资产引用以 @资产名 展示；编辑框中保留可解析的 &lt;资产名&gt; 原始写法。</p>
+        <p className="workspace-episode-hint">编辑器显示 @资产名；保存时由代码转回 &lt;资产名&gt;，并可点击下方资产标签定位需求。</p>
         <div className="workspace-shot-scroll"><table className="workspace-shot-table">
           <thead><tr><th>镜头编号</th><th>景别</th><th>运镜</th><th>切镜方式</th><th>场景</th><th>画面</th><th>台词/对白</th><th>音效</th><th>时长（秒）</th></tr></thead>
           <tbody>{draft.shots.map((shot,i)=><tr key={shot.id}>
@@ -203,8 +214,8 @@ export function EpisodeWorkspace({projectId,agents}:{projectId:number;agents:Age
             </div></td>
             {fields.map(({key,label})=><td key={key}>
               <label className="workspace-shot-field"><span>{label}</span>
-                <textarea aria-label={`镜头 ${i+1} ${label}`} rows={key==='visual'?4:2} value={shot[key]}
-                  onChange={e=>updateShot(i,key,e.target.value)}/>
+                <textarea aria-label={`镜头 ${i+1} ${label}`} rows={key==='visual'?4:2} value={(key==='visual'||key==='scene')?toVisible(shot[key]):shot[key]}
+                  onChange={e=>updateShot(i,key,(key==='visual'||key==='scene')?toStored(e.target.value,draft.assets):e.target.value)}/>
               </label>
               {(key==='visual'||key==='scene')&&<div className="workspace-shot-preview">
                 <AssetText value={shot[key]} assets={draft.assets} onAsset={assetFocus}/>
