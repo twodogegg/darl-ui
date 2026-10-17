@@ -48,6 +48,20 @@ describe('DefaultModelSelector', () => {
       video: { modelId: 'video-b', resolution: '768P', aspectRatio: '9:16' },
     }));
   });
+  it('supports a media-only wizard', async () => {
+    const onComplete = vi.fn();
+    render(<DefaultModelSelector models={models.filter((item) => item.type === 'image' || item.type === 'video')} kinds={['image', 'video']} onComplete={onComplete} />);
+    expect(screen.getByText('步骤 1 / 2')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: '选择文本模型' })).not.toBeInTheDocument();
+    expect(screen.queryByText('音频')).not.toBeInTheDocument();
+    next();
+    expect(screen.getByRole('combobox', { name: '选择视频模型' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /完成/ }));
+    await waitFor(() => expect(onComplete).toHaveBeenCalledWith({
+      image: { modelId: 'image-a', resolution: '2K', aspectRatio: '9:16' },
+      video: { modelId: 'video-a', resolution: '720P', aspectRatio: '9:16' },
+    }));
+  });
   it('blocks navigation if a required model list is missing', () => {
     render(<DefaultModelSelector models={models.filter((item) => item.type !== 'audio')} onComplete={vi.fn()} />);
     next(); next();

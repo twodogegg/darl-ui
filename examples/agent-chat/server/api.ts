@@ -36,6 +36,32 @@ function resolveAgentTextModel(providers: StoredProvider[], configuration: Model
 
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_DATA_URL_LENGTH = 64 + 4 * Math.ceil(MAX_IMAGE_BYTES / 3);
+type DefaultMediaSelection = {
+  image: { modelId: 'gpt-image-2'; resolution: '1K' | '2K' | '4K'; aspectRatio: '1:1' | '3:4' | '4:3' | '16:9' | '9:16' };
+  video: { modelId: 'minimax-h3-flash'; resolution: '480P'; aspectRatio: '16:9' };
+};
+const defaultMediaSelection: DefaultMediaSelection = {
+  image: { modelId: 'gpt-image-2', resolution: '2K', aspectRatio: '16:9' },
+  video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' },
+};
+
+function validateDefaultMediaSelection(value: unknown): DefaultMediaSelection {
+  if (!value || typeof value !== 'object') throw new Error('默认媒体模型配置无效');
+  const input = value as Record<string, unknown>;
+  const image = input.image;
+  const video = input.video;
+  if (!image || typeof image !== 'object' || !video || typeof video !== 'object') throw new Error('默认媒体模型配置不完整');
+  const imageChoice = image as Record<string, unknown>;
+  const videoChoice = video as Record<string, unknown>;
+  const imageResolutions = ['1K', '2K', '4K'];
+  const imageRatios = ['1:1', '3:4', '4:3', '16:9', '9:16'];
+  if (imageChoice.modelId !== 'gpt-image-2' || !imageResolutions.includes(String(imageChoice.resolution)) || !imageRatios.includes(String(imageChoice.aspectRatio))) throw new Error('默认图片模型参数不受支持');
+  if (videoChoice.modelId !== 'minimax-h3-flash' || videoChoice.resolution !== '480P' || videoChoice.aspectRatio !== '16:9') throw new Error('默认视频模型参数不受支持');
+  return {
+    image: { modelId: 'gpt-image-2', resolution: imageChoice.resolution as DefaultMediaSelection['image']['resolution'], aspectRatio: imageChoice.aspectRatio as DefaultMediaSelection['image']['aspectRatio'] },
+    video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' },
+  };
+}
 
 async function connectApplicationWithRetry(app: Parameters<typeof connectApplication>[0], signal: AbortSignal) {
   let lastError: unknown;
@@ -169,6 +195,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const initial: StoredProvider[] = [{ id: 'darl', name: 'Darl', baseUrl: env.AGENT_CHAT_BASE_URL || 'https://api.darl.cn/v1', protocol: 'openai-completions', apiKey: env.AGENT_CHAT_API_KEY || '', status: 'unknown', models: [{ id: env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash', name: env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash', providerId: 'darl', type: 'text', enabled: true }] }];
   if (!storage.getConfig<StoredProvider[]>('providers')) storage.setConfig('providers', initial);
   if (!storage.getConfig<ModelConfiguration>('modelConfiguration')) storage.setConfig('modelConfiguration', defaultModelConfiguration());
+  if (!storage.getConfig<DefaultMediaSelection>('defaultMediaModels')) storage.setConfig('defaultMediaModels', defaultMediaSelection);
   if (!storage.getConfig<string>('systemPrompt')) {
     storage.setConfig('systemPrompt', validatePrompt(readFileSync(promptFile, 'utf8')));
   }
@@ -179,6 +206,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     if (validateModelConfiguration(value).length) throw new Error('模型配置已损坏，请重新保存模型配置');
     return value;
   };
+  const loadDefaultMediaSelection = (): DefaultMediaSelection => validateDefaultMediaSelection(storage.getConfig<unknown>('defaultMediaModels') || defaultMediaSelection);
   const update = async (mutate: (providers: StoredProvider[]) => StoredProvider[]) => storage.setConfig('providers', mutate(await load()));
   const saveAgents = async (next: StoredAgent[]) => storage.setConfig('agents', next);
   return async (request: IncomingMessage, response: ServerResponse, next: () => void) => {
@@ -266,6 +294,12 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         return send(200, { ok: true });
       }
       if (path === '/api/providers' && request.method === 'GET') return send(200, providers.map(publicProvider));
+      if (path === '/api/default-models' && request.method === 'GET') return send(200, loadDefaultMediaSelection());
+      if (path === '/api/default-models' && request.method === 'POST') {
+        const selection = validateDefaultMediaSelection((await readBody(request))?.selection);
+        storage.setConfig('defaultMediaModels', selection);
+        return send(200, selection);
+      }
       if (path === '/api/model-config' && request.method === 'GET') return send(200, await loadModelConfiguration());
       if (path === '/api/model-config' && request.method === 'POST') {
         const incoming = (await readBody(request))?.configuration;

@@ -291,6 +291,8 @@ import '@darl/ui/styles.css';
 
 `examples/agent-chat` 的设置中心提供独立的 Agents 页面。每个 Agent 在服务端保存名称、系统提示词、文本模型、推理强度、允许的 Skills 和 MCP 应用 / 工具；API Key 仍只保存在服务端。设置默认 Agent 后，聊天可以直接选择专业 Agent，也可以由主 Agent 通过 AI SDK 7 `ToolLoopAgent` 按需委派给其他已启用的 Agent。
 
+设置中心的模型页面顶部同时提供默认媒体模型设置，目前只配置图片和视频：默认图片为 `gpt-image-2`（2K、16:9），默认视频为 `minimax-h3-flash`（480P、16:9）。配置保存在示例服务的本地 SQLite 中；文本模型仍由 Agent 自身配置管理。
+
 每次委派只把任务说明传给子 Agent，子 Agent 使用自己的模型、提示词和工具权限，完成后只返回最终摘要。MCP 写操作继续复用宿主的 `ToolConfirmations`，因此允许、拒绝、停止和超时都在服务端生效；NDJSON 工具事件包含 `runId`、`parentRunId` 和 `agentId`，现有侧栏会显示委派、执行和审批状态。Agent 配置保存在 `.local/agent-chat/data.sqlite`，不会写入浏览器存储。
 
 ## StyleSelector｜风格选择弹窗
@@ -349,9 +351,9 @@ import '@darl/ui/styles.css';
 设置中心当前提供模型、Agents 和应用 / MCP 入口；页面内容由宿主通过 `children` 接入。文本模型编辑器提供 `vision` 图片输入开关；模型配置完成后，将 `providers` 中启用的模型转换为 `AgentSidebar` 的 `models` 即可复用同一个聊天侧栏。
 
 
-## DefaultModelSelector｜四步默认模型向导
+## DefaultModelSelector｜默认模型向导
 
-固定顺序：文本 → 图片 → 音频 → 视频。传入模型（必填）及可选能力、默认值；组件以弹窗提供选择流程，只管理选择和交互，`onComplete` 交给宿主保存。缺少任意类型模型时不允许完成；最后一步确认配置并保存。模型使用下拉框，支持手机端布局与 DarlUIProvider 主题。
+默认顺序为文本 → 图片 → 音频 → 视频，也可以通过 `kinds` 只配置宿主需要的类型。传入模型（必填）及可选能力、默认值；组件以弹窗提供选择流程，只管理选择和交互，`onComplete` 交给宿主保存。缺少已配置类型的模型时不允许完成；最后一步确认配置并保存。模型使用下拉框，支持手机端布局与 DarlUIProvider 主题。
 
 ```tsx
 import { DefaultModelSelector, type DefaultModelOption } from '@darl/ui';
@@ -373,20 +375,22 @@ const [open, setOpen] = useState(false);
   open={open}
   onOpenChange={setOpen}
   models={models}
+  kinds={['text', 'image', 'audio', 'video']}
   onComplete={async (result) => saveDefaults(result)}
 />
 ```
 
 - `models`: 所有模型的数组，支持运行时更新；每条记录需要 `id`、`name`、`type`，也可提供 `description`。
+- `kinds`: 可选的向导类型顺序；例如 `['image', 'video']` 只配置图片和视频，适合 Agents 等只提供媒体模型的页面。
 - `capabilities.resolutions`: 分辨率列表；省略时图片使用 1K/2K/4K、视频使用 480P/720P/1080P。显式空数组隐藏相应参数。
 - `capabilities.aspectRatios`: 支持的比例，限定 3:4、4:3、16:9、9:16；省略时提供全部四种。
 - `defaults.resolution` 与 `defaults.aspectRatio`: 模型建议默认值；未提供时图片优先 2K、视频优先 720P、画幅优先 9:16，不支持时使用首个有效选项。
-- `value`/`onChange`: 可选受控模式；`defaultValue` 为非受控初值；`onComplete` 必填，接受四类 `{ modelId, resolution?, aspectRatio? }`，可以异步保存，出错时保持当前选择并展示错误。
+- `value`/`onChange`: 可选受控模式；`defaultValue` 为非受控初值；`onComplete` 必填，返回已配置类型的 `{ modelId, resolution?, aspectRatio? }`，可以异步保存，出错时保持当前选择并展示错误。
 - `open`/`onOpenChange`: 传入后以弹窗模式渲染；按 Esc、点击遮罩或关闭按钮可关闭。未传 `open` 时保留内嵌渲染，便于兼容已有用法。
 - `accentColor`/`className`: 可选外观覆盖。组件不调用模型 API、不保存配置、不加载远程模型数据。
 - 切换模型时应用该模型默认参数；返回已有步骤保留用户有效的手动选择。宿主替换模型列表后，失效模型/参数自动回退到有效选项。
 
-Playground：`/#default-models`。
+Playground：`/#agent-sidebar`，点击「默认模型」打开图片和视频配置。
 
 
 ## InteractiveConfirmDialog｜通用 Agent 交互确认弹窗

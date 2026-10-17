@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AgentSidebar, AgentsSettingsCard, DarlUIProvider, ModelManagementCard, SettingsPage, defaultModelConfiguration, toAgentModels, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentErrorInfo, type AgentExecutionEvent, type AgentToolCall, type AgentSendRequest, type AgentSession, type AgentSkill, type ModelConfiguration, type ModelProvider } from '@darl/ui';
+import { AgentSidebar, AgentsSettingsCard, DefaultModelSelector, DarlUIProvider, ModelManagementCard, SettingsPage, defaultModelConfiguration, toAgentModels, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentErrorInfo, type AgentExecutionEvent, type AgentToolCall, type AgentSendRequest, type AgentSession, type AgentSkill, type DefaultModelDraft, type DefaultModelOption, type DefaultModelSelection, type ModelConfiguration, type ModelProvider } from '@darl/ui';
 import { ArrowLeft, BookOpen, Bot, MessageSquare, Settings2, Wrench } from 'lucide-react';
 import { lines } from '../stream';
 import { Guide } from './Guide';
@@ -30,6 +30,14 @@ function recoverTimeline(timeline: AgentExecutionEvent[] | undefined) {
   });
 }
 const newSession = (): AgentSession => ({ id: crypto.randomUUID(), title: '新对话', messages: [] });
+const defaultMediaModels: DefaultModelOption[] = [
+  { id: 'gpt-image-2', name: 'GPT Image 2', type: 'image', description: '图片生成模型', capabilities: { resolutions: ['1K', '2K', '4K'], aspectRatios: ['1:1', '3:4', '4:3', '16:9', '9:16'] }, defaults: { resolution: '2K', aspectRatio: '16:9' } },
+  { id: 'minimax-h3-flash', name: 'MiniMax H3 Flash', type: 'video', description: '快速视频生成模型', capabilities: { resolutions: ['480P'], aspectRatios: ['16:9'] }, defaults: { resolution: '480P', aspectRatio: '16:9' } },
+];
+const initialDefaultMediaSelection: DefaultModelDraft = {
+  image: { modelId: 'gpt-image-2', resolution: '2K', aspectRatio: '16:9' },
+  video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' },
+};
 async function api<T>(path: string, body?: unknown, method = body ? 'POST' : 'GET'): Promise<T> {
   let response: Response;
   try { response = await fetch(`/api/${path}`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, ...(body ? { body: JSON.stringify(body) } : {}) }); }
@@ -48,6 +56,8 @@ export function App() {
   const [applications, setApplications] = useState<AgentApplication[]>([]);
   const [applicationToolsLoaded, setApplicationToolsLoaded] = useState(false);
   const [agents, setAgents] = useState<AgentConfig[]>([]);
+  const [defaultMediaSelection, setDefaultMediaSelection] = useState<DefaultModelDraft>(initialDefaultMediaSelection);
+  const [defaultMediaModelsOpen, setDefaultMediaModelsOpen] = useState(false);
   const [applicationRevision, setApplicationRevision] = useState(0);
   const [applicationsLoading, setApplicationsLoading] = useState(false);
   const [applicationError, setApplicationError] = useState('');
@@ -91,6 +101,11 @@ export function App() {
   useEffect(() => {
     let active = true;
     api<AgentConfig[]>('agents').then((value) => { if (active) { setAgents(value); setAgentId((current) => current || value.find((agent) => agent.isDefault)?.id); } }).catch((reason) => { if (active) setError(reason.message); });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    let active = true;
+    api<DefaultModelDraft>('default-models').then((value) => { if (active) setDefaultMediaSelection(value); }).catch((reason) => { if (active) setError(reason.message); });
     return () => { active = false; };
   }, []);
   useEffect(() => {
@@ -276,18 +291,29 @@ export function App() {
   const renameSession = (sessionId: string, title: string) => {
     setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, title, updatedAt: new Date().toLocaleString() } : session));
   };
+  const saveDefaultMediaModels = async (selection: DefaultModelSelection) => {
+    const saved = await api<DefaultModelDraft>('default-models', { selection });
+    setDefaultMediaSelection(saved);
+    setDefaultMediaModelsOpen(false);
+  };
   const buttonClass = 'darl-button darl-button--outline darl-button-size--default';
+  const defaultModelSettings = <section className="example-default-models" aria-labelledby="example-default-models-title">
+    <header><div><span className="example-eyebrow">DEFAULT MEDIA MODELS</span><h2 id="example-default-models-title">默认模型</h2><p>为网站开发设置默认图片和视频模型，暂不配置文本与音频。</p></div><button className={buttonClass} onClick={() => setDefaultMediaModelsOpen(true)}><Settings2 size={15} />配置默认模型</button></header>
+    <div className="example-default-model-grid"><div><span>图片</span><strong>{defaultMediaSelection.image?.modelId || '未设置'} · {defaultMediaSelection.image?.resolution || '—'} · {defaultMediaSelection.image?.aspectRatio || '—'}</strong></div><div><span>视频</span><strong>{defaultMediaSelection.video?.modelId || '未设置'} · {defaultMediaSelection.video?.resolution || '—'} · {defaultMediaSelection.video?.aspectRatio || '—'}</strong></div></div>
+  </section>;
+  const agentsSettings = <AgentsSettingsCard agents={agents} models={models.map((model) => ({ ...model, id: model.upstreamModelId || model.id, providerId: model.providerId || '', type: 'text' as const }))} applications={applications} skills={skills} onSave={async (agent) => setAgents(await api<AgentConfig[]>('agents', { agent }))} onDelete={async (id) => setAgents(await api<AgentConfig[]>(`agents/${id}`, undefined, 'DELETE'))} />;
+  const modelSettings = <div className="example-model-settings">{defaultModelSettings}<DefaultModelSelector models={defaultMediaModels} kinds={['image', 'video']} value={defaultMediaSelection} onChange={setDefaultMediaSelection} open={defaultMediaModelsOpen} onOpenChange={setDefaultMediaModelsOpen} onComplete={saveDefaultMediaModels} /><ModelManagementCard configuration={modelConfiguration} providers={providers}
+    onSave={async (configuration) => setModelConfiguration(await api<ModelConfiguration>('model-config', { configuration }))}
+    onProviderSave={async (provider, apiKey) => setProviders(await api<ModelProvider[]>('providers', { provider, apiKey }))}
+    onProviderDelete={async (id) => setProviders(await api<ModelProvider[]>(`providers/${id}`, undefined, 'DELETE'))}
+    onTestConnection={async (provider) => setProviders(await api<ModelProvider[]>(`providers/${provider.id}/test`, {}))}
+  /></div>;
 
   return <DarlUIProvider theme={{ mode: 'dark', primaryColor: '#8ba4c5' }} className="chat-example">
     <div className={`example-page ${open ? 'with-agent' : ''}`}>
       <header className="example-header"><a href="http://localhost:5188">Darl UI <span>/ Agent Chat</span></a><div><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setProjectsVisible(true); setOpen(true); }}><BookOpen size={16} />项目</button><button className={buttonClass} onClick={showGuide}><BookOpen size={16} />开发说明</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />设置</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setOpen((value) => !value); }}><MessageSquare size={16} />聊天</button></div></header>
       {error && <p className="example-error" role="alert">{error}</p>}
-      {projectsVisible ? <ProjectsPage onBack={() => setProjectsVisible(false)} /> : guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : settings ? <main className="example-settings"><button className={buttonClass} onClick={() => { setSettings(false); setOpen(true); }}><ArrowLeft size={15} />返回聊天</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'agents', label: 'Agents', icon: <Bot /> }, { id: 'applications', label: '应用 / MCP', icon: <Wrench /> }]}>{settingsSection === 'agents' ? <AgentsSettingsCard agents={agents} models={models.map((model) => ({ ...model, id: model.upstreamModelId || model.id, providerId: model.providerId || '', type: 'text' as const }))} applications={applications} skills={skills} onSave={async (agent) => setAgents(await api<AgentConfig[]>('agents', { agent }))} onDelete={async (id) => setAgents(await api<AgentConfig[]>(`agents/${id}`, undefined, 'DELETE'))} /> : settingsSection === 'applications' ? <section className="example-applications"><h2>应用 / MCP</h2><p>服务端配置连接，工具目录由 MCP 动态发现。在对话中 @ 引用一次应用，后续消息即可继续使用它的工具。</p><button className={buttonClass} disabled={applicationsLoading} onClick={() => setApplicationRevision((value) => value + 1)}>{applicationsLoading ? '正在连接…' : '重新连接'}</button>{applicationError && <p role="alert">{applicationError}</p>}{!applicationsLoading && !applications.length && <p>暂无应用，请在服务端配置 MCP 应用。</p>}{applications.map((app) => <article key={app.id}><h3>{app.name} · {app.status === 'connected' ? '已连接' : '未连接'}</h3><p>{app.description}</p><ul>{app.tools?.map((tool) => <li key={tool.name}><strong>{tool.title || tool.name}</strong><span>{tool.risk === 'read' ? '只读' : '执行前确认'}</span><p>{tool.description}</p></li>)}</ul></article>)}</section> : <ModelManagementCard configuration={modelConfiguration} providers={providers}
-        onSave={async (configuration) => setModelConfiguration(await api<ModelConfiguration>('model-config', { configuration }))}
-        onProviderSave={async (provider, apiKey) => setProviders(await api<ModelProvider[]>('providers', { provider, apiKey }))}
-        onProviderDelete={async (id) => setProviders(await api<ModelProvider[]>(`providers/${id}`, undefined, 'DELETE'))}
-        onTestConnection={async (provider) => setProviders(await api<ModelProvider[]>(`providers/${provider.id}/test`, {}))}
-      />}</SettingsPage></main> : <main className="example-home"><span className="example-eyebrow">AGENT CHAT EXAMPLE</span><h1>让网站助手<br />真正开始工作。</h1><p>使用现有聊天 UI，连接真实模型。对话、历史和 Skills 保存在本机 SQLite。</p><div className="example-actions"><button className="darl-button darl-button--default darl-button-size--default" onClick={() => setOpen(true)}><MessageSquare size={16} />打开助手</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />模型设置</button></div><div className="example-info"><div><span>模型</span><strong>{models.find((model) => model.id === availableModelId)?.name || '尚未配置'}</strong></div><div><span>会话</span><strong>{sessions.length}</strong></div><div><span>Skills</span><strong>{skills.length}</strong></div></div><small>支持文本和图片消息与 MCP 工具调用。用 @ 引用一次即可在本对话持续使用；写入或未知工具执行前需要确认。Skill 指令会发送给模型，图片由支持视觉输入的模型处理。</small></main>}
+      {projectsVisible ? <ProjectsPage onBack={() => setProjectsVisible(false)} /> : guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : settings ? <main className="example-settings"><button className={buttonClass} onClick={() => { setSettings(false); setOpen(true); }}><ArrowLeft size={15} />返回聊天</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'agents', label: 'Agents', icon: <Bot /> }, { id: 'applications', label: '应用 / MCP', icon: <Wrench /> }]}>{settingsSection === 'agents' ? agentsSettings : settingsSection === 'applications' ? <section className="example-applications"><h2>应用 / MCP</h2><p>服务端配置连接，工具目录由 MCP 动态发现。在对话中 @ 引用一次应用，后续消息即可继续使用它的工具。</p><button className={buttonClass} disabled={applicationsLoading} onClick={() => setApplicationRevision((value) => value + 1)}>{applicationsLoading ? '正在连接…' : '重新连接'}</button>{applicationError && <p role="alert">{applicationError}</p>}{!applicationsLoading && !applications.length && <p>暂无应用，请在服务端配置 MCP 应用。</p>}{applications.map((app) => <article key={app.id}><h3>{app.name} · {app.status === 'connected' ? '已连接' : '未连接'}</h3><p>{app.description}</p><ul>{app.tools?.map((tool) => <li key={tool.name}><strong>{tool.title || tool.name}</strong><span>{tool.risk === 'read' ? '只读' : '执行前确认'}</span><p>{tool.description}</p></li>)}</ul></article>)}</section> : modelSettings}</SettingsPage></main> : <main className="example-home"><span className="example-eyebrow">AGENT CHAT EXAMPLE</span><h1>让网站助手<br />真正开始工作。</h1><p>使用现有聊天 UI，连接真实模型。对话、历史和 Skills 保存在本机 SQLite。</p><div className="example-actions"><button className="darl-button darl-button--default darl-button-size--default" onClick={() => setOpen(true)}><MessageSquare size={16} />打开助手</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />模型设置</button></div><div className="example-info"><div><span>模型</span><strong>{models.find((model) => model.id === availableModelId)?.name || '尚未配置'}</strong></div><div><span>会话</span><strong>{sessions.length}</strong></div><div><span>Skills</span><strong>{skills.length}</strong></div></div><small>支持文本和图片消息与 MCP 工具调用。用 @ 引用一次即可在本对话持续使用；写入或未知工具执行前需要确认。Skill 指令会发送给模型，图片由支持视觉输入的模型处理。</small></main>}
     </div>
     <AgentSidebar open={open} onOpenChange={setOpen} sessions={sessions} activeSessionId={activeId} onSessionChange={setActiveId} onSessionRename={renameSession}
       onNewSession={() => { const session = newSession(); setSessions((current) => [session, ...current]); setActiveId(session.id); }}

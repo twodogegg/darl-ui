@@ -171,10 +171,14 @@
 .demo-agent-info-grid span { color: var(--muted-foreground); font-size: 11px; }.demo-agent-info-grid strong { font-size: 13px; }
 .demo-agent-callout { display: flex; align-items: flex-start; gap: 9px; margin-top: 18px; padding: 13px 15px; border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted-foreground); font-size: 12px; line-height: 1.7; }
 .demo-agent-callout svg { flex: none; margin-top: 2px; color: var(--primary); }
+.demo-agent-default-config { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+.demo-agent-default-config > div { display: grid; gap: 5px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); }
+.demo-agent-default-config span { color: var(--muted-foreground); font-size: 11px; }
+.demo-agent-default-config strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .demo-agent-frame .demo-agent-embedded { position: absolute; inset: 0 0 0 auto; width: min(430px, 100%); box-shadow: -18px 0 55px #0f172a26; }
 .demo-agent-open { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 9px; color: var(--muted-foreground); font-size: 13px; }
 .demo-agent-open svg { width: 28px; height: 28px; color: var(--primary); }
-@media (max-width: 700px) { .demo-agent-host-nav > span { display: none; }.demo-agent-host-body { padding: 44px 18px; }.demo-agent-info-grid { grid-template-columns: 1fr; }.demo-agent-frame, .demo-agent-host { min-height: 650px; } }
+@media (max-width: 700px) { .demo-agent-host-nav > span { display: none; }.demo-agent-host-body { padding: 44px 18px; }.demo-agent-info-grid, .demo-agent-default-config { grid-template-columns: 1fr; }.demo-agent-frame, .demo-agent-host { min-height: 650px; } }
 
 /* Bridge the existing library's isolated tokens into the site's shadcn theme. */
 .demo-shell .darl-ui-root,

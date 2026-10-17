@@ -67,9 +67,19 @@ body { margin: 0; background: #101113; }
 @media (min-width: 750px) { .with-agent { margin-right: 450px; } .example-info { grid-template-columns: 2fr 1fr 1fr; } .example-settings { padding: 32px; } }
 @media (max-width: 749px) { .with-agent { visibility: hidden; } .chat-example .darl-agent-sidebar { width: 100%; } .example-guide { padding: 20px 16px 56px; } .guide-layout { display: block; padding-top: 22px; } .guide-nav { position: static; display: flex; overflow-x: auto; margin: 0 -4px 30px; padding: 0 4px 4px; } .guide-nav button { flex: none; white-space: nowrap; } .guide-section { padding-bottom: 48px; } .guide-grid, .guide-split, .guide-mcp-grid, .guide-checklist-grid { grid-template-columns: 1fr; } }
 
+.example-model-settings { display: grid; gap: 18px; max-width: 1180px; min-width: 0; }
+.example-default-models { padding: 20px; border: 1px solid var(--darl-border); border-radius: 14px; background: var(--darl-surface); }
+.example-default-models header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.example-default-models h2 { margin: 6px 0 5px; font-size: 19px; }
+.example-default-models p { margin: 0; color: var(--darl-muted); font-size: 12px; line-height: 1.6; }
+.example-default-model-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+.example-default-model-grid > div { display: grid; gap: 6px; min-width: 0; padding: 12px; border: 1px solid var(--darl-border); border-radius: 9px; background: var(--darl-background); }
+.example-default-model-grid span { color: var(--darl-muted); font-size: 11px; }
+.example-default-model-grid strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .example-applications { max-width: 960px; min-width: 0; }
 .example-applications p { color: var(--darl-muted); line-height: 1.7; overflow-wrap: anywhere; }
 .example-applications article { margin-top: 20px; padding: 18px; border: 1px solid var(--darl-border); border-radius: 10px; }
 .example-applications ul { padding: 0; list-style: none; }
 .example-applications li { padding: 12px 0; border-top: 1px solid var(--darl-border); }
 .example-applications li > span { margin-left: 12px; color: var(--darl-muted); font-size: 12px; }
+@media (max-width: 749px) { .example-default-models header { display: grid; } .example-default-model-grid { grid-template-columns: 1fr; } }

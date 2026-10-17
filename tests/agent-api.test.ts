@@ -132,6 +132,26 @@ describe('Agent configuration API', () => {
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
+  it('persists the Agents page media defaults', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'darl-default-media-'));
+    const promptFile = join(directory, 'system.md');
+    await writeFile(promptFile, '默认提示词');
+    try {
+      await withApi(directory, promptFile, async (request) => {
+        const initial = await request('default-models');
+        expect(await initial.json()).toEqual({
+          image: { modelId: 'gpt-image-2', resolution: '2K', aspectRatio: '16:9' },
+          video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' },
+        });
+        const saved = await request('default-models', { selection: { image: { modelId: 'gpt-image-2', resolution: '4K', aspectRatio: '9:16' }, video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' } } });
+        expect(saved.status).toBe(200);
+        expect(await saved.json()).toMatchObject({ image: { resolution: '4K', aspectRatio: '9:16' } });
+        expect(dbJson(directory, 'defaultMediaModels')).toMatchObject({ image: { resolution: '4K', aspectRatio: '9:16' } });
+        expect((await request('default-models', { selection: { image: { modelId: 'gpt-image-2', resolution: '8K', aspectRatio: '16:9' }, video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' } } })).status).toBe(400);
+      });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
   it('persists chat state and media tasks in the local database', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'darl-local-state-'));
     const promptFile = join(directory, 'system.md');

@@ -33,6 +33,8 @@ export type DefaultModelSelection = Record<DefaultModelKind, DefaultModelChoice>
 export interface DefaultModelSelectorProps {
   /** Models and their capabilities are supplied and may be replaced by the host. */
   models: DefaultModelOption[];
+  /** Restrict the wizard to the supplied model types. Defaults to all four types. */
+  kinds?: DefaultModelKind[];
   /** When provided, render the selector as a modal dialog. */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -41,7 +43,7 @@ export interface DefaultModelSelectorProps {
   /** Uncontrolled initial selection, useful for editing previously saved defaults. */
   defaultValue?: DefaultModelDraft;
   onChange?: (selection: DefaultModelDraft) => void;
-  /** Called only after all four types have an available model. The host persists the result. */
+  /** Called only after every configured type has an available model. The host persists the result. */
   onComplete: (selection: DefaultModelSelection) => void | Promise<void>;
   accentColor?: string;
   className?: string;
@@ -56,6 +58,7 @@ const STEPS: { kind: DefaultModelKind; title: string; description: string }[] = 
 const RATIOS = ['3:4', '4:3', '16:9', '9:16'];
 const IMAGE_RESOLUTIONS = ['1K', '2K', '4K'];
 const VIDEO_RESOLUTIONS = ['480P', '720P', '1080P'];
+const ALL_KINDS = STEPS.map(({ kind }) => kind);
 
 function unique(values: string[]): string[] {
   return Array.from(new Set(values.filter((value) => typeof value === 'string' && value.trim())));
@@ -75,9 +78,9 @@ function optionOrDefault(options: string[], candidate: string | undefined, model
   return find(candidate) ?? find(modelDefault) ?? find(fallback) ?? options[0];
 }
 
-export function normalizeDefaultModels(models: DefaultModelOption[], draft: DefaultModelDraft = {}): DefaultModelDraft {
+export function normalizeDefaultModels(models: DefaultModelOption[], draft: DefaultModelDraft = {}, kinds: DefaultModelKind[] = ALL_KINDS): DefaultModelDraft {
   const result: DefaultModelDraft = {};
-  for (const { kind } of STEPS) {
+  for (const { kind } of STEPS.filter((step) => kinds.includes(step.kind))) {
     const options = models.filter((model) => model.type === kind);
     const previous = draft[kind];
     const model = options.find((entry) => entry.id === previous?.modelId) ?? options[0];
@@ -96,21 +99,22 @@ export function normalizeDefaultModels(models: DefaultModelOption[], draft: Defa
   return result;
 }
 
-/** Four-step, host-configured selector. Only navigation and Finish are buttons. */
+/** Host-configured selector. Only navigation and Finish are buttons. */
 export function DefaultModelSelector({
-  models, open, onOpenChange, value, defaultValue, onChange, onComplete, accentColor, className = '',
+  models, kinds = ALL_KINDS, open, onOpenChange, value, defaultValue, onChange, onComplete, accentColor, className = '',
 }: DefaultModelSelectorProps) {
   const id = useId();
   const [step, setStep] = useState(0);
   const [localDraft, setLocalDraft] = useState<DefaultModelDraft>(defaultValue ?? {});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const selection = normalizeDefaultModels(models, value ?? localDraft);
-  const current = STEPS[step];
+  const steps = STEPS.filter((item) => kinds.includes(item.kind));
+  const selection = normalizeDefaultModels(models, value ?? localDraft, kinds);
+  const current = steps[step] ?? steps[0] ?? STEPS[0];
   const candidates = models.filter((item) => item.type === current.kind);
   const selected = selection[current.kind];
   const model = candidates.find((item) => item.id === selected?.modelId);
-  const complete = STEPS.every(({ kind }) => Boolean(selection[kind]?.modelId));
+  const complete = steps.length > 0 && steps.every(({ kind }) => Boolean(selection[kind]?.modelId));
   const modal = open !== undefined;
   const style = accentColor ? {
     '--darl-default-accent': accentColor,
@@ -140,6 +144,10 @@ export function DefaultModelSelector({
   const close = () => onOpenChange?.(false);
 
   useEffect(() => {
+    setStep((index) => Math.min(index, Math.max(0, steps.length - 1)));
+  }, [steps.length]);
+
+  useEffect(() => {
     if (!modal || !open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !saving) close();
@@ -155,11 +163,11 @@ export function DefaultModelSelector({
       <div className="darl-default-header-copy">
         <span className="darl-default-eyebrow">默认模型设置</span>
         <h2 id={modal ? `${id}-title` : undefined}>选择你的创作模型</h2>
-        <p>依次为文本、图片、音频和视频设置默认模型。</p>
+        <p>依次为{steps.map(({ title }) => title).join('、')}设置默认模型。</p>
       </div>
       {modal && <Button variant="ghost" size="icon" className="darl-default-close" onClick={close} disabled={saving} aria-label="关闭默认模型选择"><X aria-hidden="true" /></Button>}
       <ol className="darl-default-steps" aria-label="设置进度">
-        {STEPS.map((item, index) => <li key={item.kind} aria-current={index === step ? 'step' : undefined} className={index === step ? 'is-current' : index < step ? 'is-past' : ''}>
+        {steps.map((item, index) => <li key={item.kind} aria-current={index === step ? 'step' : undefined} className={index === step ? 'is-current' : index < step ? 'is-past' : ''}>
           <span className="darl-default-step-number">{index < step ? <Check size={13} aria-hidden="true" /> : index + 1}</span>
           <span>{item.title}</span>
         </li>)}
@@ -168,7 +176,7 @@ export function DefaultModelSelector({
 
     <div className="darl-default-content">
       <div className="darl-default-heading">
-        <span>步骤 {step + 1} / 4</span>
+        <span>步骤 {step + 1} / {steps.length}</span>
         <h3>{current.title}模型</h3>
         <p>{current.description}</p>
       </div>
@@ -215,10 +223,10 @@ export function DefaultModelSelector({
         onClick={() => { setStep((index) => Math.max(0, index - 1)); setError(''); }}>
         <ArrowLeft size={16} aria-hidden="true" /> 上一步
       </Button>}
-      {step === 3 ? <Button className="darl-default-nav" disabled={!complete || saving} onClick={finish}>
+      {step === steps.length - 1 ? <Button className="darl-default-nav" disabled={!complete || saving} onClick={finish}>
         {saving ? '保存中…' : '完成'} <Check size={16} aria-hidden="true" />
       </Button> : <Button className="darl-default-nav" disabled={!selected || saving}
-        onClick={() => { setStep((index) => Math.min(3, index + 1)); setError(''); }}>
+        onClick={() => { setStep((index) => Math.min(steps.length - 1, index + 1)); setError(''); }}>
         下一步 <ArrowRight size={16} aria-hidden="true" />
       </Button>}
     </footer>
