@@ -47,15 +47,26 @@ function statusLabel(status?: string) {
 }
 
 function ToolDetails({ tool }: { tool: McpTool }) {
-  return <details className="darl-mcp-tool">
-    <summary><strong>{tool.title || tool.name}</strong><span>{tool.risk === 'read' ? '只读' : tool.risk === 'dangerous' ? '危险操作' : '执行前确认'}</span></summary>
-    <p>{tool.description || '无描述'}</p>
-    <code>{tool.name}</code>
-    <h5>输入 JSON Schema</h5>
-    <pre>{formatJson(tool.inputSchema || {})}</pre>
-    {tool.outputSchema !== undefined && tool.outputSchema !== null && <><h5>输出 Schema</h5><pre>{formatJson(tool.outputSchema)}</pre></>}
-    {tool.annotations !== undefined && tool.annotations !== null && <><h5>工具注解</h5><pre>{formatJson(tool.annotations)}</pre></>}
-  </details>;
+  const output = tool.outputSchema !== undefined && tool.outputSchema !== null
+    ? <><h5>输出 Schema</h5><pre>{formatJson(tool.outputSchema)}</pre></>
+    : null;
+  const annotations = tool.annotations !== undefined && tool.annotations !== null
+    ? <><h5>工具注解</h5><pre>{formatJson(tool.annotations)}</pre></>
+    : null;
+  return (
+    <details className="darl-mcp-tool">
+      <summary>
+        <strong>{tool.title || tool.name}</strong>
+        <span>{tool.risk === 'read' ? '只读' : tool.risk === 'dangerous' ? '危险操作' : '执行前确认'}</span>
+      </summary>
+      <p>{tool.description || '无描述'}</p>
+      <code>{tool.name}</code>
+      <h5>输入 JSON Schema</h5>
+      <pre>{formatJson(tool.inputSchema || {})}</pre>
+      {output}
+      {annotations}
+    </details>
+  );
 }
 
 export function McpSettings({ applications, onChanged }: Props) {
@@ -98,24 +109,20 @@ export function McpSettings({ applications, onChanged }: Props) {
 
   async function startOAuth(app: McpApp) {
     const popup = window.open('about:blank', '_blank');
-    let waitingForCallback = false;
     setOauthBusy(app.id); setError(''); setMessage('正在准备 OAuth 授权…');
     try {
       const result = await request(`/api/applications/${encodeURIComponent(app.id)}/oauth/start`, 'POST') as { authorized?: boolean; authorizationUrl?: string };
       if (result.authorized) {
-        popup?.close();
-        setOauthBusy(null);
         setMessage(`${app.name} 已授权，正在刷新工具目录。`); onChanged(); return;
       }
       if (!result.authorizationUrl) throw new Error('服务端没有返回授权地址');
-      waitingForCallback = true;
       if (popup) popup.location.href = result.authorizationUrl;
       else window.location.href = result.authorizationUrl;
       setMessage('请在新窗口完成授权，完成后此页面会自动刷新。');
     } catch (reason) {
       popup?.close();
       setError(reason instanceof Error ? reason.message : 'OAuth 授权启动失败');
-    } finally { if (!waitingForCallback) setOauthBusy(null); }
+    } finally { if (!popup) setOauthBusy(null); }
   }
 
   async function saveConnection(event: React.FormEvent) {
