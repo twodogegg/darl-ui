@@ -1,0 +1,31 @@
+.example-media-jobs { max-width: 1120px; margin: 0 auto; padding: 24px; display: grid; gap: 22px; color: var(--darl-foreground, inherit); min-width: 0; }
+.example-media-jobs h1 { margin: 0; font-size: 1.45rem; line-height: 1.35; }
+.example-media-jobs h2 { margin: 0 0 12px; font-size: 1.05rem; }
+.example-media-jobs-header, .example-media-jobs-card-head, .example-media-jobs-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.example-media-jobs-header .darl-button { flex-shrink: 0; }
+.example-media-jobs-muted { color: var(--darl-muted-foreground, #9ca3af); font-size: .87rem; line-height: 1.5; }
+.example-media-jobs-form, .example-media-jobs-card, .example-media-jobs-comparison { border: 1px solid var(--darl-border, #454545); border-radius: 12px; padding: 16px; min-width: 0; }
+.example-media-jobs-form { display: grid; gap: 15px; }
+.example-media-jobs-form label { display: grid; gap: 7px; font-size: .9rem; }
+.example-media-jobs-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.example-media-jobs-form :is(input, select, textarea) { box-sizing: border-box; width: 100%; min-width: 0; padding: 9px 10px; font: inherit; border-radius: 8px; color: inherit; background: var(--darl-background, #212121); border: 1px solid var(--darl-border, #555); }
+.example-media-jobs-form textarea { resize: vertical; }
+.example-media-jobs-actions { align-items: flex-end; }
+.example-media-jobs-actions .example-media-jobs-muted { flex: 1 1 240px; }
+.example-media-jobs-error { color: #ef7777; overflow-wrap: anywhere; }
+.example-media-jobs-list { display: grid; gap: 10px; }
+.example-media-jobs-prompt { margin: 12px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.example-media-jobs-card .example-media-jobs-muted { overflow-wrap: anywhere; }
+.example-media-jobs-result { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 12px; }
+.example-media-jobs-result img { display: block; width: 128px; height: 128px; object-fit: contain; background: #111; border-radius: 8px; }
+.example-media-jobs-compare-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: .85rem; cursor: pointer; }
+.example-media-jobs-comparison { overflow: hidden; }
+.example-media-jobs-comparison > p { margin-top: 12px; }
+@media (max-width: 650px) {
+  .example-media-jobs { padding: 13px; gap: 16px; }
+  .example-media-jobs-header { gap: 8px; }
+  .example-media-jobs-header h1 { order: -1; width: 100%; }
+  .example-media-jobs-form, .example-media-jobs-card, .example-media-jobs-comparison { padding: 12px; }
+  .example-media-jobs-fields { grid-template-columns: minmax(0, 1fr); }
+  .example-media-jobs-actions .darl-button { width: 100%; }
+}
