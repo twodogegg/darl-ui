@@ -219,6 +219,7 @@ function statusText(status: AgentApplication['status']): string {
 export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, onSessionChange, onSessionRename, onNewSession, onSend, onRegenerate, onToolConfirm, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onFileUpload, models = [], agents = [], selectedAgentId: controlledAgentId, onSelectedAgentIdChange, onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
   const [view, setView] = useState<'chat' | 'history'>('chat');
   const [confirmBusy, setConfirmBusy] = useState(false);
+  const [handledConfirmation, setHandledConfirmation] = useState<string | null>(null);
   const [confirmError, setConfirmError] = useState('');
   const [expanded, setExpanded] = useState(false);
   const [picker, setPicker] = useState<'add' | 'apps' | 'skills' | 'models' | 'effort' | 'agents' | null>(null);
@@ -297,7 +298,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const confirmAction = async (approved: boolean) => {
     if (!pendingConfirmation || !onToolConfirm || confirmBusy) return;
     setConfirmBusy(true); setConfirmError('');
-    try { await onToolConfirm(pendingConfirmation.id, approved); }
+    try { await onToolConfirm(pendingConfirmation.id, approved); setHandledConfirmation(pendingConfirmation.id); }
     catch (reason) { setConfirmError(reason instanceof Error ? reason.message : '确认失败，请重试'); }
     finally { setConfirmBusy(false); }
   };
@@ -438,7 +439,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
     <input ref={fileInput} aria-label="选择上传文件" type="file" hidden multiple={uploadKind === 'file'} onChange={(event) => { const files = Array.from(event.target.files ?? []); const first = files[0]; if (uploadKind === 'skill' && files.length) void Promise.resolve().then(async () => { const imported = await importSkillPackage(files); await onSkillImport?.(imported); if (first) await onSkillUpload?.(first); setLocalSkills((current) => [...current.filter((item) => item.id !== imported.id), imported]); }).catch((reason) => setError(reason instanceof Error ? reason.message : '导入失败')); if (uploadKind === 'file' && files.length) { const images = files.filter((file) => file.type.startsWith('image/')); if (images.length !== files.length) setError('仅支持图片附件，请选择 PNG、JPEG、WebP 或 GIF'); if (images.length) { setAttachments((current) => ({ ...current, [draftKey]: [...(current[draftKey] ?? []), ...images] })); if (onFileUpload) void Promise.resolve().then(() => onFileUpload(images)).catch(() => setError('附件处理失败')); } } setPicker(null); event.currentTarget.value = ''; }} accept={uploadKind === 'skill' ? skillFileAccept : 'image/*,.png,.jpg,.jpeg,.webp,.gif'} />
   </aside>
     <InteractiveConfirmDialog
-      open={Boolean(pendingConfirmation && onToolConfirm)}
+      open={Boolean(pendingConfirmation && onToolConfirm && pendingConfirmation.id !== handledConfirmation)}
       onOpenChange={(open) => { if (!open) void confirmAction(false); }}
       title={isMediaConfirmation ? `确认生成${mediaKind}` : '确认执行 MCP 工具'}
       description={isMediaConfirmation ? '即将提交生成任务，可能产生费用。' : '即将调用外部工具，请核对操作与参数。'}
