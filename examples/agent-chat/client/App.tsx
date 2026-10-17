@@ -33,7 +33,7 @@ function recoverTimeline(timeline: AgentExecutionEvent[] | undefined) {
 const newSession = (): AgentSession => ({ id: crypto.randomUUID(), title: '新对话', messages: [] });
 const defaultMediaModels: DefaultModelOption[] = [
   { id: 'gpt-image-2', name: 'GPT Image 2', type: 'image', description: '图片生成模型', capabilities: { resolutions: ['1K', '2K', '4K'], aspectRatios: ['1:1', '3:4', '4:3', '16:9', '9:16'] }, defaults: { resolution: '2K', aspectRatio: '16:9' } },
-  { id: 'minimax-h3-flash', name: 'MiniMax H3 Flash', type: 'video', description: '快速视频生成模型', capabilities: { resolutions: ['480P'], aspectRatios: ['16:9'] }, defaults: { resolution: '480P', aspectRatio: '16:9' } },
+  { id: 'minimax-h3-flash', name: 'MiniMax H3 Flash', type: 'video', description: '快速视频生成模型', capabilities: { resolutions: ['480P', '768P'], aspectRatios: ['16:9', '9:16'] }, defaults: { resolution: '480P', aspectRatio: '16:9' } },
 ];
 const initialDefaultMediaSelection: DefaultModelDraft = {
   image: { modelId: 'gpt-image-2', resolution: '2K', aspectRatio: '16:9' },
