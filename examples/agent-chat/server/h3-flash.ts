@@ -68,7 +68,7 @@ async function h3Response(response: Response, apiKey: string) {
   if (response.ok) return response;
   const value = await response.json().catch(() => null) as { error?: { message?: string } } | null;
   const message = value?.error?.message || `H3 Flash API 请求失败（HTTP ${response.status}）`;
-  throw new Error(message.replaceAll(apiKey, '[已隐藏]'));
+  throw Object.assign(new Error(message.replaceAll(apiKey, '[已隐藏]')), { status: response.status });
 }
 
 export async function uploadH3File(baseUrl: string, apiKey: string, file: Blob, fileName: string, purpose?: string, signal?: AbortSignal): Promise<H3FileDescriptor> {
