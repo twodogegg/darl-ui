@@ -6,7 +6,7 @@ import './projects.css';
 type Project = {
   id: number; name: string; description?: string | null; aspect_ratio: string;
   style_catalog_id?: number | null; cover_asset_id?: number | null;
-  cover_url?: string | null; cover?: { url?: string | null } | null;
+  cover_url?: string | null; cover?: { url?: string | null } | null; cover_asset?: { storage_key?: string | null } | null;
   style?: { name?: string; id?: number } | null;
   episode_count?: number;
 };
@@ -27,7 +27,14 @@ async function backend<T>(path: string, init?: RequestInit): Promise<T> {
 const json = (method: string, body: unknown): RequestInit => ({
   method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
-const projectCover = (project: Project): string | undefined => project.cover_url || project.cover?.url || undefined;
+const storageImage = (key?: string | null): string | undefined => {
+  if (!key) return undefined;
+  const clean = key.replace(/^\/storage\//, '');
+  return clean.split('/').every((part) => /^[a-zA-Z0-9_.-]+$/.test(part) && part !== '..' && part !== '.') ?
+    '/api/workspace/storage/' + clean.split('/').map(encodeURIComponent).join('/') : undefined;
+};
+const projectCover = (project: Project): string | undefined =>
+  storageImage(project.cover_asset?.storage_key) || storageImage(project.cover_url) || storageImage(project.cover?.url) || undefined;
 
 export function ProjectsPage({ onBack }: { onBack: () => void }) {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -52,7 +59,7 @@ export function ProjectsPage({ onBack }: { onBack: () => void }) {
       ]);
       setProjects(items.items || []);
       setStyles([...(catalog.official_items || []), ...(catalog.items || [])].map((style) => ({
-        id: String(style.id), name: style.name, image: style.image_url,
+        id: String(style.id), name: style.name, image: storageImage(style.image_url),
         description: style.prompt, category: style.category,
         isOwned: (catalog.items || []).some((item) => item.id === style.id),
       })));
@@ -162,7 +169,7 @@ export function ProjectsPage({ onBack }: { onBack: () => void }) {
           <label>项目标题 *<input required maxLength={30} value={draft.name} onChange={(e) => update('name', e.target.value)} placeholder="请输入标题" /></label>
           <label>项目简介（可选）<textarea rows={3} value={draft.description} onChange={(e) => update('description', e.target.value)} placeholder="可以留空" /></label>
           <label>视觉风格 *<button type="button" className="workspace-style-picker" onClick={() => setStyleOpen(true)}>{styles.find((s) => s.id === draft.style_catalog_id)?.name || '选择视觉风格'}</button></label>
-          <label>画面比例 *<select value={draft.aspect_ratio} onChange={(e) => update('aspect_ratio', e.target.value)}>{ratios.map((ratio) => <option value={ratio} key={ratio}>{ratio}</option>)}</select></label>
+          <label>画面比例 *<select value={draft.aspect_ratio} disabled={!!editing} onChange={(e) => update('aspect_ratio', e.target.value)}>{ratios.map((ratio) => <option value={ratio} key={ratio}>{ratio}</option>)}</select>{editing && <small>旧后端暂不支持修改已有项目的画面比例。</small>}</label>
           <label>项目封面（可选，仅手动上传）<span className="workspace-file-label"><UploadCloud size={16} />{coverFile?.name || '选择图片（PNG/JPG/WebP，最大10MB）'}</span>
             <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setCoverFile(e.target.files?.[0] || null)} />
           </label>
