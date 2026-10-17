@@ -34,8 +34,8 @@ describe('workspace project API bridge', () => {
     const response = await request('/api/workspace/projects/1/script');
     expect(response.status).toBe(404);
   });
-  it('rejects encoded traversal in private storage paths', async () => {
-    const response = await request('/api/workspace/storage/%2e%2e/secret.png');
+  it('rejects encoded separators in private storage paths', async () => {
+    const response = await request('/api/workspace/storage/%2Fsecret.png');
     expect(response.status).toBe(400);
   });
 });
