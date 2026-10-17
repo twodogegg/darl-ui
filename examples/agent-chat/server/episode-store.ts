@@ -51,7 +51,7 @@ export function validateBreakdown(input: unknown): BreakdownDraft {
     const asset = item as Record<string, unknown>;
     const name = text(asset.name, 80);
     if (!name || /[<>\n]/u.test(name) || !assetTypes.has(String(asset.type))) throw new Error('资产名称或类型无效');
-    if (!Array.isArray(asset.shotNumbers) || asset.shotNumbers.some((n) => !Number.isInteger(n) || n < 1 || n > shots.length))
+    if (!Array.isArray(asset.shotNumbers) || !asset.shotNumbers.length || asset.shotNumbers.some((n) => !Number.isInteger(n) || n < 1 || n > shots.length))
       throw new Error('资产所关联的镜头序号无效');
     const key = String(asset.type) + ':' + name;
     const existing = names.get(key);
