@@ -10,6 +10,7 @@ import { compactContextMessages, contextCharBudget, normalizeContextPolicy, sele
 import { LocalStorage, validateClientState, type ClientState } from './storage';
 import { handleWorkspaceProjectRequest } from './projects';
 import { ProjectStore } from './project-store';
+import { createMediaJobsApi } from './media-jobs-api';
 
 /** Resolve Agent models against the same enabled logical bindings used by the Models page. */
 function resolveAgentTextModel(providers: StoredProvider[], configuration: ModelConfiguration, providerId: string, modelId: string) {
@@ -185,6 +186,7 @@ export function findAttachedImageForUpload(tool: McpToolDescriptor, args: Record
 export function createApi(directory: string, env: Record<string, string>, promptFile: string) {
   const storage = new LocalStorage(directory);
   const projectStore = new ProjectStore(storage.path);
+  const mediaJobs = createMediaJobsApi(storage.path, () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), () => storage.getConfig<StoredProvider[]>('providers') || []);
   const confirmations = new ToolConfirmations();
   const connectionManager = new McpConnectionManager(connectApplicationWithRetry);
   const validatePrompt = (value: unknown): string => {
@@ -222,6 +224,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     const origin = request.headers.origin;
     if (portOf(host) !== '5197' || (origin && portOf(origin) !== '5197')) return send(403, { error: '仅允许本服务端口同源访问' });
     if (await handleWorkspaceProjectRequest(request, response, projectStore)) return;
+    if (await mediaJobs.handle(request, response)) return;
     const controller = new AbortController();
     response.on('close', () => controller.abort());
     const requestId = crypto.randomUUID();
