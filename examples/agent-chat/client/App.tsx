@@ -62,8 +62,8 @@ export function App() {
   const [defaultMediaSelection, setDefaultMediaSelection] = useState<DefaultModelDraft>(initialDefaultMediaSelection);
   const [defaultMediaModelsOpen, setDefaultMediaModelsOpen] = useState(false);
   const [applicationRevision, setApplicationRevision] = useState(0);
-  const [applicationsLoading, setApplicationsLoading] = useState(false);
-  const [applicationError, setApplicationError] = useState('');
+  const [, setApplicationsLoading] = useState(false);
+  const [, setApplicationError] = useState('');
   const [settingsSection, setSettingsSection] = useState('models');
   const [modelId, setModelId] = useState('');
   const [agentId, setAgentId] = useState<string | undefined>();
