@@ -472,10 +472,42 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           }
           const functions = ownedConnections.flatMap((connection, appIndex) => connection.tools.filter((tool) => !applicationTools?.[connection.app.id] || applicationTools[connection.app.id].includes(tool.name)).map((tool, index) => ({ name: `mcp_${appIndex}_${index}`, connection, tool })));
           if (functions.length > 128) throw new Error('所选应用合计超过 128 个工具，请减少应用数量');
+          const mediaTools = [
+            { name: 'builtin_generate_media', description: '向后台提交一条图片或视频生成任务。仅支持 gpt-image-2 图片和 minimax-h3-flash 视频。调用前必须明确用户的生成意图；提交需要用户确认。返回任务 ID，不等待媒体完成。', parameters: { type: 'object', properties: { modelId: { type: 'string', enum: ['gpt-image-2', 'minimax-h3-flash'] }, prompt: { type: 'string', minLength: 1, maxLength: 16000 }, options: { type: 'object', properties: { size: { type: 'string' }, resolution: { type: 'string' }, aspectRatio: { type: 'string' }, duration: { type: 'integer' } }, additionalProperties: false } }, required: ['modelId','prompt'], additionalProperties: false } },
+            { name: 'builtin_get_media_task', description: '按后台生成任务 ID 查询图片或视频的真实状态与结果路径，不会触发新的付费生成。', parameters: { type: 'object', properties: { taskId: { type: 'string', minLength: 36, maxLength: 36 } }, required: ['taskId'], additionalProperties: false } },
+          ];
           const execution: ToolExecution = {
-          tools: functions.map(({ name, connection, tool }) => ({ name, description: `${connection.app.name} / ${tool.title || tool.name} (${tool.name}): ${tool.description || ''}`, parameters: tool.inputSchema })),
+          tools: [...functions.map(({ name, connection, tool }) => ({ name, description: `${connection.app.name} / ${tool.title || tool.name} (${tool.name}): ${tool.description || ''}`, parameters: tool.inputSchema })), ...mediaTools],
           execute: async (request: { name: string; arguments: string }, toolSignal = signal) => {
             const callSignal = AbortSignal.any([signal, toolSignal]);
+            if (request.name === 'builtin_generate_media' || request.name === 'builtin_get_media_task') {
+              const args = JSON.parse(request.arguments || '{}') as { modelId?: string; prompt?: string; options?: Record<string, unknown>; taskId?: string };
+              if (request.name === 'builtin_get_media_task') {
+                const job = mediaJobs.store.get(String(args.taskId || ''));
+                if (!job) return JSON.stringify({ error: '任务不存在' });
+                return JSON.stringify({ id: job.id, status: job.status, modelId: job.modelId, error: job.error,
+                  ...(job.status === 'completed' ? { resultUrl: `/api/media-generation/jobs/${job.id}/file` } : {}) });
+              }
+              if (!['gpt-image-2','minimax-h3-flash'].includes(String(args.modelId)) || typeof args.prompt !== 'string' || !args.prompt.trim() || args.prompt.length > 16000)
+                return JSON.stringify({ error: '模型或提示词参数无效' });
+              const model = modelConfiguration.models.find(item => item.id === args.modelId && item.enabled !== false);
+              const bindings = model?.bindings.filter(item => item.enabled !== false) || [];
+              const binding = bindings[0];
+              const selectedProvider = providers.find(item => item.id === binding?.providerId);
+              if (bindings.length !== 1 || !selectedProvider?.apiKey) return JSON.stringify({ error: '该模型需要且只能配置一个有效供应商及密钥' });
+              const confirmId = crypto.randomUUID();
+              const toolCall: AgentToolCall = { id: confirmId, appId: 'builtin:media', appName: '媒体生成', toolName: 'generate_media', input: args, status: 'confirmation', runId: executionRunId, ...(ownerAgentId ? { agentId: ownerAgentId } : {}) };
+              emitTool(toolCall);
+              if (!await confirmations.wait(confirmId, toolSignal)) return JSON.stringify({ error: '用户拒绝了此次付费媒体生成' });
+              toolSignal.throwIfAborted();
+              const options = args.options && typeof args.options === 'object' && !Array.isArray(args.options) ? args.options : {};
+              const job = mediaJobs.store.create({ modelId: args.modelId as 'gpt-image-2'|'minimax-h3-flash',
+                type: args.modelId === 'gpt-image-2' ? 'image' : 'video', prompt: args.prompt.trim(), options,
+                providerId: selectedProvider.id, upstreamModelId: binding.upstreamModelId, baseUrl: selectedProvider.baseUrl });
+              emitTool({ ...toolCall, status: 'success', output: { id: job.id, status: job.status } });
+              void mediaJobs.runner.tick();
+              return JSON.stringify({ id: job.id, status: job.status, message: '生成任务已入队，可稍后查询' });
+            }
             const selected = functions.find((item) => item.name === request.name);
             if (!selected) throw failure('tool-validation', 'TOOL_NOT_AUTHORIZED', '模型请求了未授权的工具', false);
             const { connection, tool } = selected;
@@ -563,7 +595,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
             }
           },
           };
-          return functions.length ? execution : undefined;
+          return execution;
         };
         const execution = await createExecution(scopedApps, restrictedAgent?.id, attachedImages, restrictedAgent?.applicationTools);
         const delegations: AgentDelegation[] = [];
