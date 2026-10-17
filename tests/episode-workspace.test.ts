@@ -63,7 +63,7 @@ describe('episode screenplay + shot and asset planning',()=>{
     expect(store.assets(projectId)).toHaveLength(3);
     const other=store.create(projectId,'第 02 集')!;
     store.saveScript(other.id,'第二集',0);
-    store.savePlan(other.id,1,parsed);
+    store.savePlan(other.id,1,parseAgentBreakdown(output()));
     expect(new EpisodeStore(path).assets(projectId)).toHaveLength(3);
     expect(new EpisodeStore(path).plan(other.id)?.assets).toHaveLength(3);
     expect(new EpisodeStore(path).plan(ep.id)?.shots[0].id).toBe(saved.shots[0].id);
