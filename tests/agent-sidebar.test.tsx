@@ -139,9 +139,12 @@ describe('AgentSidebar', () => {
     render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" onSend={onSend} />);
     fireEvent.click(screen.getByRole('button', { name: '添加材料或能力' }));
     fireEvent.click(screen.getByRole('button', { name: /上传图片/ }));
+    const createObjectURL = vi.fn(() => 'blob:agent-image-preview');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
     const image = new File(['image-bytes'], '参考图.png', { type: 'image/png' });
     fireEvent.change(screen.getByLabelText('选择上传文件'), { target: { files: [image] } });
-    expect(screen.queryByText('参考图.png')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('参考图.png')).not.toBeInTheDocument());
+    expect(createObjectURL).toHaveBeenCalledWith(image);
     expect(screen.getByRole('button', { name: '移除附件 参考图.png' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
     await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ content: '', files: [image], attachments: [expect.objectContaining({ name: '参考图.png', type: 'image/png', data: expect.stringMatching(/^data:image\/png;base64,/) })] })));
