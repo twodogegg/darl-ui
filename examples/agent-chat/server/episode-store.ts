@@ -141,8 +141,8 @@ export class EpisodeStore {
   saveScript(episodeId: number, script: unknown, expectedRevision: unknown) {
     const existing = this.get(episodeId);
     if (!existing) return null;
-    const source=text(script,200_000);
-    if (source===null) throw new Error('剧本必须是文本，最多 20 万字符');
+    if (typeof script !== 'string' || script.length > 200_000) throw new Error('剧本必须是文本，最多 20 万字符');
+    const source = script; // Preserve every byte of the user's supplied screenplay text.
     if (expectedRevision!==existing.scriptRevision) throw new Error('剧本已在其他位置更新，请刷新后重试');
     this.db.prepare("UPDATE workspace_episodes SET script=?, script_revision=script_revision+1, updated_at=CURRENT_TIMESTAMP WHERE id=?")
       .run(source,episodeId);
