@@ -127,3 +127,9 @@ body { margin: 0; background: #101113; }
 @media (max-width: 850px) { .darl-mcp-settings__grid { grid-template-columns: 1fr; } }
 @media (max-width: 749px) { .darl-mcp-settings__header { display: grid; } .darl-mcp-settings__security { justify-self: start; } }
 @media (max-width: 749px) { .example-default-models header { display: grid; } .example-default-model-grid { grid-template-columns: 1fr; } }
+
+/* Project-wide secondary confirmations; reuse the existing shadcn-style Switch. */
+.example-approval-options { display: grid; margin-top: 16px; border: 1px solid var(--darl-border, #444); border-radius: 12px; overflow: hidden; }
+.example-approval-option { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 14px 16px; cursor: pointer; }
+.example-approval-option + .example-approval-option { border-top: 1px solid var(--darl-border, #444); }
+.example-approval-option span { font-weight: 500; }

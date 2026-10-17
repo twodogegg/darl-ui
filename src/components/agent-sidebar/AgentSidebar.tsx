@@ -6,6 +6,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
 import { Button } from '../ui/Button';
+import { InteractiveConfirmDialog } from '../interactive-confirm-dialog/InteractiveConfirmDialog';
 import type { AgentApplication, AgentAttachment, AgentErrorInfo, AgentExecutionEvent, AgentImageAttachment, AgentSession, AgentSidebarProps, AgentSkill, AgentToolCall } from './types';
 import { importSkillPackage } from './skill-package';
 
@@ -102,16 +103,7 @@ function Markdown({ content, onCopyCode, depth = 0 }: { content: string; onCopyC
   return <div className="darl-agent-markdown"><ReactMarkdown remarkPlugins={[remarkGfm, markCodeBlocks]} rehypePlugins={[rehypeSanitize]} components={components}>{content}</ReactMarkdown></div>;
 }
 
-function ToolCallCard({ call, onConfirm }: { call: AgentToolCall; onConfirm?: AgentSidebarProps['onToolConfirm'] }) {
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState('');
-  useEffect(() => { setPending(false); setError(''); }, [call.status]);
-  const decide = async (approved: boolean) => {
-    if (!onConfirm || pending) return;
-    setPending(true); setError('');
-    try { await onConfirm(call.id, approved); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : '确认失败，请重试'); setPending(false); }
-  };
+function ToolCallCard({ call }: { call: AgentToolCall }) {
   const status = { pending: '等待调用', running: '执行中', retrying: '重试中', success: '已完成', error: '调用失败', confirmation: '等待确认' }[call.status];
   const StatusIcon = call.status === 'running' || call.status === 'retrying' ? LoaderCircle : call.status === 'error' ? AlertCircle : call.status === 'success' ? Check : Wrench;
   const delegationTask = call.appId.startsWith('agent:') && call.input && typeof call.input === 'object' && 'task' in call.input && typeof call.input.task === 'string' ? call.input.task : '';
@@ -121,16 +113,10 @@ function ToolCallCard({ call, onConfirm }: { call: AgentToolCall; onConfirm?: Ag
       <span className="darl-agent-tool-title"><strong>{call.agentId ? `子 Agent · ${call.appName}` : call.appName}</strong><span>{call.toolTitle || call.toolName}</span></span>
       <span className="darl-agent-tool-status">{status}</span>
     </div>
-    {(delegationTask || call.status === 'confirmation') && <div className="darl-agent-tool-detail">
+    {delegationTask && <div className="darl-agent-tool-detail">
       {delegationTask && <div><span>委派任务</span><pre>{delegationTask}</pre></div>}
-      {call.status === 'confirmation' && call.input !== undefined && <div><span>参数</span><pre>{formatToolValue(call.input)}</pre></div>}
     </div>}
     {call.errorInfo ? <AgentErrorCard error={call.errorInfo} /> : call.error && <p className="darl-agent-tool-error">{call.error}</p>}
-    {call.status === 'confirmation' && <div className="darl-agent-tool-confirm">
-      <span>此操作需要你的确认。</span>
-      {onConfirm ? <div><Button size="sm" disabled={pending} onClick={() => void decide(true)}>允许执行</Button><Button variant="outline" size="sm" disabled={pending} onClick={() => void decide(false)}>拒绝</Button></div> : <span>等待宿主处理确认。</span>}
-      {error && <p role="alert" className="darl-agent-tool-error">{error}</p>}
-    </div>}
   </article>;
 }
 
@@ -168,7 +154,7 @@ function hasSubAgentActivity(events: AgentExecutionEvent[] | undefined) {
   return Boolean(events?.some((event) => event.source === 'agent' && Boolean(event.agentId)));
 }
 
-function ExecutionTimeline({ events, calls = [], onConfirm }: { events: AgentExecutionEvent[]; calls?: AgentToolCall[]; onConfirm?: AgentSidebarProps['onToolConfirm'] }) {
+function ExecutionTimeline({ events, calls = [] }: { events: AgentExecutionEvent[]; calls?: AgentToolCall[] }) {
   const [expanded, setExpanded] = useState(false);
   const hasLiveEvents = events.some((event) => ['pending', 'started', 'running', 'retrying', 'confirmation'].includes(event.status));
   const [now, setNow] = useState(() => Date.now());
@@ -209,7 +195,7 @@ function ExecutionTimeline({ events, calls = [], onConfirm }: { events: AgentExe
         const depth = Math.min(3, (runDepth.get(latest.runId || '') || 0) + (latest.source === 'tool' ? 1 : 0));
         return <li key={activity.key} className={`darl-agent-execution-item darl-agent-execution-item--${latest.status}${isLive ? '' : ' is-history'}`} style={{ '--darl-agent-depth': depth } as CSSProperties}>
           <div className="darl-agent-execution-row"><span className="darl-agent-execution-dot">{isLive && (latest.status === 'running' || latest.status === 'retrying') ? <LoaderCircle size={12} className="darl-agent-spin" /> : latest.status === 'success' ? <Check size={12} /> : latest.status === 'error' || latest.status === 'cancelled' || latest.status === 'timeout' ? <AlertCircle size={12} /> : <ChevronRight size={12} />}</span><span className="darl-agent-execution-copy"><strong>{executionSourceText(latest)}</strong><span>{latest.name}</span></span>{retryCount > 0 && <span className="darl-agent-execution-retry">重试 {retryCount}</span>}<span className="darl-agent-execution-state">{executionStatusText[latest.status]}</span><time>{formatDuration(executionDuration(latest, now, events))}</time></div>
-          {hasDetails && <details className="darl-agent-execution-details"><summary>查看详情</summary>{first.summary && <p>{first.summary}</p>}{transitions.length > 1 && <small className="darl-agent-execution-transitions">{transitions.join(' → ')}</small>}{latest.error && <div className="darl-agent-execution-error"><strong>{latest.error.message}</strong><small>{latest.error.code} · {latest.error.suggestion}</small></div>}{confirmation && <ToolCallCard call={confirmation} onConfirm={onConfirm} />}</details>}
+          {hasDetails && <details className="darl-agent-execution-details"><summary>查看详情</summary>{first.summary && <p>{first.summary}</p>}{transitions.length > 1 && <small className="darl-agent-execution-transitions">{transitions.join(' → ')}</small>}{latest.error && <div className="darl-agent-execution-error"><strong>{latest.error.message}</strong><small>{latest.error.code} · {latest.error.suggestion}</small></div>}{confirmation && <ToolCallCard call={confirmation} />}</details>}
         </li>;
       })}
     </ol>}
@@ -232,6 +218,9 @@ function statusText(status: AgentApplication['status']): string {
 
 export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, onSessionChange, onSessionRename, onNewSession, onSend, onRegenerate, onToolConfirm, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onFileUpload, models = [], agents = [], selectedAgentId: controlledAgentId, onSelectedAgentIdChange, onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
   const [view, setView] = useState<'chat' | 'history'>('chat');
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [handledConfirmation, setHandledConfirmation] = useState<string | null>(null);
+  const [confirmError, setConfirmError] = useState('');
   const [expanded, setExpanded] = useState(false);
   const [picker, setPicker] = useState<'add' | 'apps' | 'skills' | 'models' | 'effort' | 'agents' | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -302,6 +291,17 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const filteredSessions = useMemo(() => sessions.filter((session) => `${session.title} ${session.messages.at(-1)?.content ?? ''}`.toLowerCase().includes(historyQuery.toLowerCase())), [historyQuery, sessions]);
   useEffect(() => { setError(''); setPicker(null); }, [activeSession?.id]);
 
+  const pendingConfirmation = activeSession?.messages.flatMap(message => message.toolCalls || []).find(call => call.status === 'confirmation');
+  const pendingInput = pendingConfirmation?.input && typeof pendingConfirmation.input === 'object' ? pendingConfirmation.input as Record<string, unknown> : {};
+  const isMediaConfirmation = pendingConfirmation?.appId === 'builtin:media';
+  const mediaKind = pendingInput.modelId === 'gpt-image-2' ? '图片' : '视频';
+  const confirmAction = async (approved: boolean) => {
+    if (!pendingConfirmation || !onToolConfirm || confirmBusy) return;
+    setConfirmBusy(true); setConfirmError('');
+    try { await onToolConfirm(pendingConfirmation.id, approved); setHandledConfirmation(pendingConfirmation.id); }
+    catch (reason) { setConfirmError(reason instanceof Error ? reason.message : '确认失败，请重试'); }
+    finally { setConfirmBusy(false); }
+  };
   const lastMessage = activeSession?.messages.at(-1);
   useEffect(() => {
     followOutput.current = true;
@@ -415,7 +415,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
         {!activeMessages.length && <div className="darl-agent-empty-state"><span className="darl-agent-empty-icon"><Sparkles size={22} /></span><h2>需要我帮你做什么？</h2><p>选择应用和 Skill，把它们插入消息中。</p></div>}
         {activeMessages.map((message) => <article key={message.id} className={`darl-agent-message darl-agent-message--${message.role}`}>
           <div className="darl-agent-message-label">{message.role === 'user' ? '你' : 'Agent'}</div>
-          <div className="darl-agent-message-body">{message.streaming && !message.content && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{hasSubAgentActivity(message.timeline) ? <ExecutionTimeline events={message.timeline!} calls={message.toolCalls} onConfirm={onToolConfirm} /> : message.toolCalls?.map((call) => <ToolCallCard key={call.id} call={call} onConfirm={onToolConfirm} />)}{message.error && <AgentErrorCard error={message.error} />}{message.attachments?.map((attachment, index) => { const name = attachmentName(attachment); const url = typeof attachment === 'string' ? undefined : attachment.url; return url?.startsWith('data:image/') || url?.startsWith('http') ? <figure className="darl-agent-image-attachment" key={`${name}-${index}`}><button type="button" className="darl-agent-image-trigger" onClick={() => openImagePreview({ src: url, alt: name })} title="点击放大预览"><img src={url} alt={name} loading="lazy" /></button></figure> : <span className="darl-agent-chip" key={`${name}-${index}`}><Paperclip size={12} />{name}</span>; })}</div>
+          <div className="darl-agent-message-body">{message.streaming && !message.content && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{hasSubAgentActivity(message.timeline) ? <ExecutionTimeline events={message.timeline!} calls={message.toolCalls} /> : message.toolCalls?.map((call) => <ToolCallCard key={call.id} call={call} />)}{message.error && <AgentErrorCard error={message.error} />}{message.attachments?.map((attachment, index) => { const name = attachmentName(attachment); const url = typeof attachment === 'string' ? undefined : attachment.url; return url?.startsWith('data:image/') || url?.startsWith('http') ? <figure className="darl-agent-image-attachment" key={`${name}-${index}`}><button type="button" className="darl-agent-image-trigger" onClick={() => openImagePreview({ src: url, alt: name })} title="点击放大预览"><img src={url} alt={name} loading="lazy" /></button></figure> : <span className="darl-agent-chip" key={`${name}-${index}`}><Paperclip size={12} />{name}</span>; })}</div>
           {message.role === 'assistant' && !message.streaming && <div className="darl-agent-message-actions"><Button variant="ghost" size="sm" onClick={() => void copy(message.content, message.id)}><Clipboard size={13} />{copyState === message.id ? '已复制' : '复制'}</Button>{onRegenerate && <Button variant="ghost" size="sm" disabled={isGenerating} onClick={() => onRegenerate(message.id)}><RefreshCw size={13} />重新生成</Button>}</div>}
         </article>)}
         <div className="darl-agent-scroll-controls" aria-label="消息导航"><Button variant="ghost" size="icon" aria-label="滚动到顶部" title="滚动到顶部" onClick={() => scrollMessages('top')}><ArrowUp size={15} /></Button><Button variant="ghost" size="icon" aria-label="滚动到底部" title="滚动到底部" onClick={() => scrollMessages('bottom')}><ArrowDown size={15} /></Button></div>
@@ -437,7 +437,28 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
     {picker === 'agents' && <Picker title="选择 Agent" className="darl-agent-picker--agents" onClose={closePicker}><div className="darl-agent-picker-cards">{selectableAgents.map((agent) => <button key={agent.id} type="button" className={`darl-agent-picker-card${agent.id === agentId ? ' is-selected' : ''}`} onClick={() => setAgentId(agent.id)}><div className="darl-agent-picker-card-visual"><AgentPickerAvatar agent={agent} />{agent.id === agentId && <span className="darl-agent-picker-card-check"><Check size={14} /></span>}</div><span className="darl-agent-picker-card-copy"><strong>{agent.name}</strong><small>{agent.description || '专业 Agent'}</small><em>{agent.builtIn ? '系统默认' : agent.isDefault ? '默认' : '已启用'}</em></span></button>)}</div>{!selectableAgents.length && <p className="darl-agent-empty">暂无可用主 Agent</p>}</Picker>}
     {picker === 'effort' && selectedModel && <Picker title="思考强度" onClose={closePicker}><div className="darl-agent-effort-list">{supportedEfforts.map((value) => <button type="button" key={value} data-selected={value === effort} onClick={() => { setEffort(value); setPicker(null); }}><strong>{value}</strong><small>{value === '低' ? '更快响应' : value === '高' ? '更深入分析' : '平衡速度和质量'}</small>{value === effort && <Check size={15} />}</button>)}</div></Picker>}
     <input ref={fileInput} aria-label="选择上传文件" type="file" hidden multiple={uploadKind === 'file'} onChange={(event) => { const files = Array.from(event.target.files ?? []); const first = files[0]; if (uploadKind === 'skill' && files.length) void Promise.resolve().then(async () => { const imported = await importSkillPackage(files); await onSkillImport?.(imported); if (first) await onSkillUpload?.(first); setLocalSkills((current) => [...current.filter((item) => item.id !== imported.id), imported]); }).catch((reason) => setError(reason instanceof Error ? reason.message : '导入失败')); if (uploadKind === 'file' && files.length) { const images = files.filter((file) => file.type.startsWith('image/')); if (images.length !== files.length) setError('仅支持图片附件，请选择 PNG、JPEG、WebP 或 GIF'); if (images.length) { setAttachments((current) => ({ ...current, [draftKey]: [...(current[draftKey] ?? []), ...images] })); if (onFileUpload) void Promise.resolve().then(() => onFileUpload(images)).catch(() => setError('附件处理失败')); } } setPicker(null); event.currentTarget.value = ''; }} accept={uploadKind === 'skill' ? skillFileAccept : 'image/*,.png,.jpg,.jpeg,.webp,.gif'} />
-  </aside><ImageLightbox image={imagePreview} onClose={() => setImagePreview(null)} /></ImagePreviewContext.Provider>;
+  </aside>
+    <InteractiveConfirmDialog
+      open={Boolean(pendingConfirmation && onToolConfirm && pendingConfirmation.id !== handledConfirmation)}
+      onOpenChange={(open) => { if (!open) void confirmAction(false); }}
+      title={isMediaConfirmation ? `确认生成${mediaKind}` : '确认执行 MCP 工具'}
+      description={isMediaConfirmation ? '即将提交生成任务，可能产生费用。' : '即将调用外部工具，请核对操作与参数。'}
+      questions={[]}
+      showCancel
+      cancelText="拒绝"
+      confirmText={isMediaConfirmation ? '确认生成' : '允许执行'}
+      onConfirm={() => confirmAction(true)}
+      details={pendingConfirmation && <div className="darl-agent-confirm-details">
+        <div><strong>{isMediaConfirmation ? '模型' : '应用'}</strong><span>{isMediaConfirmation ? String(pendingInput.modelId || '—') : pendingConfirmation.appName}</span></div>
+        {!isMediaConfirmation && <><div><strong>工具</strong><span>{pendingConfirmation.toolTitle || pendingConfirmation.toolName}</span></div><div><strong>风险</strong><span>{pendingConfirmation.risk === 'dangerous' ? '危险操作' : pendingConfirmation.risk === 'write' ? '写操作' : pendingConfirmation.risk === 'read' ? '只读' : '—'}</span></div></>}
+        {isMediaConfirmation && Boolean(pendingInput.options) && <div><strong>生成参数</strong><span>{formatToolValue(pendingInput.options)}</span></div>}
+        <div className="darl-agent-confirm-input"><strong>{isMediaConfirmation ? '生成内容' : '调用参数'}</strong><pre>{formatToolValue(isMediaConfirmation ? pendingInput.prompt : pendingConfirmation.input)}</pre></div>
+        {confirmError && <p role="alert">{confirmError}</p>}
+        {confirmBusy && <p role="status">正在提交审批…</p>}
+      </div>}
+    />
+    <ImageLightbox image={imagePreview} onClose={() => setImagePreview(null)} />
+  </ImagePreviewContext.Provider>;
 }
 
 export type { AgentApplication, AgentAttachment, AgentImageAttachment, AgentMessage, AgentModel, AgentSession, AgentSkill, AgentTool, AgentToolCall } from './types';

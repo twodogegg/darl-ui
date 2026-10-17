@@ -109,6 +109,7 @@ export interface AgentToolCall {
   appName: string;
   toolName: string;
   toolTitle?: string;
+  risk?: 'read' | 'write' | 'dangerous';
   input?: unknown;
   output?: unknown;
   error?: string;

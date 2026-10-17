@@ -256,3 +256,11 @@
 
 /* 触屏设备取消点击时的整块高亮，并让点击即时响应（保留双指缩放） */
 .darl-agent-sidebar { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+
+/* Shared action approval details inside the reusable Radix confirmation dialog. */
+.darl-agent-confirm-details { display: grid; gap: 12px; min-width: 0; }
+.darl-agent-confirm-details > div:not(.darl-agent-confirm-input) { display: flex; justify-content: space-between; gap: 14px; align-items: start; }
+.darl-agent-confirm-details strong { color: var(--darl-confirm-muted, #9ca3af); font-size: 12px; font-weight: 500; }
+.darl-agent-confirm-details span { font-size: 13px; overflow-wrap: anywhere; text-align: right; white-space: pre-wrap; }
+.darl-agent-confirm-input { display: grid; gap: 6px; min-width: 0; }
+.darl-agent-confirm-input pre { margin: 0; padding: 12px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--darl-confirm-border, #ddd); border-radius: 8px; font-size: 12px; }
