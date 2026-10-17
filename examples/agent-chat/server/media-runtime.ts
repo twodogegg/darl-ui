@@ -14,7 +14,7 @@ interface Job {
   upstream_model_id: string; status: 'queued' | 'running' | 'completed' | 'failed';
   phase: string; prompt: string; options_json: string; references_json: string;
   remote_id: string | null; result_json: string | null; error: string | null;
-  lease_token: string | null; available_at: number; next_poll_at: number | null;
+  lease_token: string | null; lease_until: number | null; available_at: number; next_poll_at: number | null;
   created_at: number; updated_at: number; attempts: number;
 }
 interface Reference { file: string; name: string; mime: string }
@@ -39,7 +39,7 @@ export class MediaRuntime {
       'provider_id TEXT NOT NULL, base_url TEXT NOT NULL, upstream_model_id TEXT NOT NULL,',
       'status TEXT NOT NULL, phase TEXT NOT NULL, prompt TEXT NOT NULL, options_json TEXT NOT NULL,',
       'references_json TEXT NOT NULL, remote_id TEXT, result_json TEXT, error TEXT,',
-      'lease_token TEXT, available_at INTEGER NOT NULL, next_poll_at INTEGER,',
+      'lease_token TEXT, lease_until INTEGER, available_at INTEGER NOT NULL, next_poll_at INTEGER,',
       'created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0);',
       'CREATE INDEX IF NOT EXISTS generation_jobs_ready ON generation_jobs(status,available_at,created_at);',
       'CREATE INDEX IF NOT EXISTS generation_jobs_poll ON generation_jobs(status,next_poll_at);',
@@ -78,14 +78,17 @@ export class MediaRuntime {
     const now = Date.now();
     // The upstream request may have succeeded before its remote ID was persisted.
     // Never automatically resubmit these ambiguous paid requests after a crash.
-    this.db.prepare("UPDATE generation_jobs SET status='failed',phase='unknown-submission',error=?,updated_at=? WHERE status='running' AND remote_id IS NULL")
-      .run('服务中断时提交结果未知，为防止重复付费，已停止自动重试', now);
+    this.recoverExpired(now);
     this.db.prepare("UPDATE generation_jobs SET phase='remote',next_poll_at=?,updated_at=? WHERE status='running' AND remote_id IS NOT NULL")
       .run(now, now);
-    if (!this.timer) { this.timer = setInterval(() => this.schedule(), 1000); this.timer.unref?.(); }
+    if (!this.timer) { this.timer = setInterval(() => { this.recoverExpired(Date.now()); this.schedule(); }, 1000); this.timer.unref?.(); }
     this.schedule();
   }
   stop() { if (this.timer) clearInterval(this.timer); this.timer = undefined; }
+  private recoverExpired(now: number) {
+    this.db.prepare("UPDATE generation_jobs SET status='failed',phase='unknown-submission',error=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE status='running' AND remote_id IS NULL AND (lease_until IS NULL OR lease_until<=?)")
+      .run('服务在上游请求中断；提交结果未知，为防止重复付费，已停止自动重试', now, now);
+  }
   private row(id: string) { return this.db.prepare('SELECT * FROM generation_jobs WHERE id=?').get(id) as unknown as Job | undefined; }
   private rows(sql: string, param?: number) {
     return (param === undefined ? this.db.prepare(sql).all() : this.db.prepare(sql).all(param)) as unknown as Job[];
@@ -163,11 +166,11 @@ export class MediaRuntime {
       writeFileSync(join(this.root, name), file.data, { mode: 0o600 });
       return { index, name, mime: file.mime };
     });
-    this.db.prepare("UPDATE generation_jobs SET status='completed',phase='done',result_json=?,error=NULL,updated_at=? WHERE id=? AND status='running'")
+    this.db.prepare("UPDATE generation_jobs SET status='completed',phase='done',result_json=?,error=NULL,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND status='running'")
       .run(JSON.stringify(result), Date.now(), job.id);
   }
   private fail(job: Job, error: unknown) {
-    this.db.prepare("UPDATE generation_jobs SET status='failed',phase='failed',error=?,updated_at=? WHERE id=? AND status='running'")
+    this.db.prepare("UPDATE generation_jobs SET status='failed',phase='failed',error=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND status='running'")
       .run((error instanceof Error ? error.message : '生成失败').slice(0, 900), Date.now(), job.id);
   }
   private schedule() {
@@ -185,8 +188,8 @@ export class MediaRuntime {
         const active = counts.get(job.model_id) || 0;
         if (active >= this.modelCapacity(job.model_id)) continue;
         const token = randomUUID();
-        const marked = this.db.prepare("UPDATE generation_jobs SET status='running',phase='submitting',lease_token=?,attempts=attempts+1,updated_at=? WHERE id=? AND status='queued'")
-          .run(token, Date.now(), job.id);
+        const marked = this.db.prepare("UPDATE generation_jobs SET status='running',phase='submitting',lease_token=?,lease_until=?,attempts=attempts+1,updated_at=? WHERE id=? AND status='queued'")
+          .run(token, Date.now() + 90_000, Date.now(), job.id);
         if (!marked.changes) continue;
         counts.set(job.model_id, active + 1);
         free--;
@@ -205,6 +208,8 @@ export class MediaRuntime {
   }
   private async execute(job: Job) {
     this.submitting.add(job.id);
+    const heartbeat = setInterval(() => this.db.prepare("UPDATE generation_jobs SET lease_until=? WHERE id=? AND status='running' AND lease_token=?").run(Date.now() + 90_000, job.id, job.lease_token), 15_000);
+    heartbeat.unref?.();
     try {
       const options = JSON.parse(job.options_json) as MediaOptions;
       const conn = this.connection(job);
@@ -216,7 +221,7 @@ export class MediaRuntime {
         const created = await submitH3Flash(conn, { prompt: job.prompt, seconds: options.seconds,
           resolution: options.resolution, aspectRatio: options.aspectRatio, referenceImages: this.references(job) });
         const now = Date.now();
-        this.db.prepare("UPDATE generation_jobs SET remote_id=?,phase='remote',lease_token=NULL,next_poll_at=?,updated_at=? WHERE id=? AND status='running'")
+        this.db.prepare("UPDATE generation_jobs SET remote_id=?,phase='remote',lease_token=NULL,lease_until=NULL,next_poll_at=?,updated_at=? WHERE id=? AND status='running'")
           .run(created.id, now + this.settings().pollSeconds * 1000, now, job.id);
       }
     } catch (error) {
@@ -224,11 +229,11 @@ export class MediaRuntime {
       if (status === 429 && job.attempts < 5) {
         // HTTP 429 means upstream refused this request. Safely retry with persisted backoff.
         const delay = Math.min(120000, 5000 * 2 ** (job.attempts - 1));
-        this.db.prepare("UPDATE generation_jobs SET status='queued',phase='rate-limited',error=?,available_at=?,lease_token=NULL,updated_at=? WHERE id=? AND status='running'")
+        this.db.prepare("UPDATE generation_jobs SET status='queued',phase='rate-limited',error=?,available_at=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND status='running'")
           .run('供应商限流，稍后自动重试', Date.now() + delay, Date.now(), job.id);
       } else this.fail(job, error);
     }
-    finally { this.submitting.delete(job.id); this.schedule(); }
+    finally { clearInterval(heartbeat); this.submitting.delete(job.id); this.schedule(); }
   }
   private async poll(job: Job) {
     if (!job.remote_id) return;
