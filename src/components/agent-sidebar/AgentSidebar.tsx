@@ -1,7 +1,7 @@
 import { AgentComposerInput, ReferenceText, referenceIds } from './AgentComposerInput';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { AlertCircle, ArrowDown, ArrowLeft, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Clipboard, Clock3, Copy, History, LoaderCircle, Maximize2, Minimize2, Paperclip, Pencil, Plus, RefreshCw, Search, Send, Sparkles, Square, Upload, Wrench, X } from 'lucide-react';
+import { AlertCircle, ArrowDown, ArrowLeft, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Clipboard, Clock3, Copy, History, LoaderCircle, Maximize2, Minimize2, Paperclip, Pencil, Plus, RefreshCw, Search, Send, Sparkles, Square, Trash2, Upload, Wrench, X } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
@@ -65,6 +65,39 @@ function originalImageUrl(content: string, source: string): string {
 type ImagePreviewTheme = CSSProperties & Record<`--${string}`, string>;
 type ImagePreview = { src: string; alt: string; theme?: ImagePreviewTheme };
 const ImagePreviewContext = createContext<((image: Pick<ImagePreview, 'src' | 'alt'>) => void) | null>(null);
+
+function readAgentTheme(element: HTMLElement): ImagePreviewTheme {
+  const styles = getComputedStyle(element);
+  const value = (property: string, fallback: string) => styles.getPropertyValue(property).trim() || fallback;
+  const background = value('background-color', '#fff');
+  const surfaceColor = value('--darl-agent-surface', '#f8fafc');
+  const text = value('--darl-agent-text', '#0f172a');
+  const mutedColor = value('--darl-agent-muted', '#64748b');
+  const borderColor = value('--darl-agent-border', '#e2e8f0');
+  const primaryColor = value('--darl-agent-primary', '#2563eb');
+  const primaryForeground = value('--darl-agent-primary-foreground', '#fff');
+  const danger = value('--darl-danger', '#ef4444');
+  const radius = value('--darl-radius', '12px');
+  return {
+    '--darl-agent-bg': background,
+    '--darl-agent-surface': surfaceColor,
+    '--darl-agent-text': text,
+    '--darl-agent-muted': mutedColor,
+    '--darl-agent-border': borderColor,
+    '--darl-agent-primary': primaryColor,
+    '--darl-agent-primary-foreground': primaryForeground,
+    '--darl-agent-danger': danger,
+    '--darl-background': background,
+    '--darl-surface': surfaceColor,
+    '--darl-text': text,
+    '--darl-muted': mutedColor,
+    '--darl-border': borderColor,
+    '--darl-primary': primaryColor,
+    '--darl-primary-foreground': primaryForeground,
+    '--darl-danger': danger,
+    '--darl-radius': radius,
+  };
+}
 
 function useImagePreview() {
   return useContext(ImagePreviewContext);
@@ -216,7 +249,7 @@ function statusText(status: AgentApplication['status']): string {
   return status === 'connected' ? '已连接' : status === 'needs-auth' ? '需要授权' : '未连接';
 }
 
-export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, onSessionChange, onSessionRename, onNewSession, onSend, onRegenerate, onToolConfirm, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onFileUpload, models = [], agents = [], selectedAgentId: controlledAgentId, onSelectedAgentIdChange, onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
+export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, onSessionChange, onSessionRename, onSessionDelete, onNewSession, onSend, onRegenerate, onToolConfirm, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onFileUpload, models = [], agents = [], selectedAgentId: controlledAgentId, onSelectedAgentIdChange, onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
   const [view, setView] = useState<'chat' | 'history'>('chat');
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [handledConfirmation, setHandledConfirmation] = useState<string | null>(null);
@@ -230,6 +263,10 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const [historyQuery, setHistoryQuery] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<AgentSession | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [deleteTheme, setDeleteTheme] = useState<ImagePreviewTheme>();
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
   const [copyState, setCopyState] = useState('');
   const [copyNotice, setCopyNotice] = useState('');
   const [insertion, setInsertion] = useState<{ token: string; key: number } | null>(null);
@@ -354,6 +391,21 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
     try { await onSessionRename?.(sessionId, title); setRenamingId(null); }
     catch (reason) { setError(reason instanceof Error ? reason.message : '重命名失败，请重试'); }
   };
+  const requestDelete = (session: AgentSession, trigger: HTMLButtonElement) => {
+    deleteButtonRef.current = trigger;
+    if (sidebarRef.current) setDeleteTheme(readAgentTheme(sidebarRef.current));
+    setRenamingId(null);
+    setDeleteError('');
+    setDeleteTarget(session);
+  };
+  const confirmDelete = async () => {
+    const target = deleteTarget;
+    if (!target || !onSessionDelete || confirmBusy) return;
+    setConfirmBusy(true); setDeleteError('');
+    try { await onSessionDelete(target.id); setDeleteError(''); setDeleteTarget(null); }
+    catch (reason) { setDeleteError(reason instanceof Error ? reason.message : '删除失败，请重试'); }
+    finally { setConfirmBusy(false); }
+  };
   const scrollMessages = (direction: 'top' | 'bottom') => {
     messagesRef.current?.scrollTo({ top: direction === 'top' ? 0 : messagesRef.current.scrollHeight, behavior: 'smooth' });
   };
@@ -361,36 +413,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const openImagePreview = (image: Pick<ImagePreview, 'src' | 'alt'>) => {
     const sidebar = sidebarRef.current;
     if (!sidebar) { setImagePreview(image); return; }
-    const computed = (element: Element, property: string, fallback: string) => getComputedStyle(element).getPropertyValue(property).trim() || fallback;
-    const surface = sidebar.querySelector('.darl-agent-composer') || sidebar;
-    const muted = sidebar.querySelector('.darl-agent-heading span') || sidebar;
-    const border = sidebar.querySelector('.darl-agent-header') || sidebar;
-    const primary = sidebar.querySelector('.darl-agent-brand-mark') || sidebar;
-    const background = computed(sidebar, 'background-color', '#fff');
-    const surfaceColor = computed(surface, 'background-color', '#f8fafc');
-    const text = computed(sidebar, 'color', '#0f172a');
-    const mutedColor = computed(muted, 'color', '#64748b');
-    const borderColor = computed(border, 'border-bottom-color', '#e2e8f0');
-    const primaryColor = computed(primary, 'background-color', '#2563eb');
-    const primaryForeground = computed(primary, 'color', '#fff');
-    const radius = getComputedStyle(sidebar).getPropertyValue('--darl-radius').trim() || '12px';
-    setImagePreview({ ...image, theme: {
-      '--darl-agent-bg': background,
-      '--darl-agent-surface': surfaceColor,
-      '--darl-agent-text': text,
-      '--darl-agent-muted': mutedColor,
-      '--darl-agent-border': borderColor,
-      '--darl-agent-primary': primaryColor,
-      '--darl-agent-primary-foreground': primaryForeground,
-      '--darl-background': background,
-      '--darl-surface': surfaceColor,
-      '--darl-text': text,
-      '--darl-muted': mutedColor,
-      '--darl-border': borderColor,
-      '--darl-primary': primaryColor,
-      '--darl-primary-foreground': primaryForeground,
-      '--darl-radius': radius,
-    } });
+    setImagePreview({ ...image, theme: readAgentTheme(sidebar) });
   };
 
   return <ImagePreviewContext.Provider value={openImagePreview}><div className={`darl-agent-expanded-backdrop${expanded ? ' is-visible' : ''}`} aria-hidden="true" onClick={() => setExpanded(false)} /><aside ref={sidebarRef} className={`darl-agent-sidebar${expanded ? ' darl-agent-sidebar--expanded' : ''} ${className}`} role={expanded ? 'dialog' : 'complementary'} aria-modal={expanded ? 'true' : undefined} aria-label="Agent 辅助侧栏" onKeyDown={(event) => { if (event.key === 'Escape') { setPicker(null); setExpanded(false); } }}>
@@ -408,7 +431,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
 
     {view === 'history' ? <section className="darl-agent-history" aria-label="对话历史">
       <label className="darl-agent-search"><Search size={15} /><input value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="搜索对话" aria-label="搜索对话" /></label>
-      {filteredSessions.map((session) => renamingId === session.id ? <form key={session.id} className="darl-agent-history-row darl-agent-history-row--editing" onSubmit={(event) => { event.preventDefault(); void saveRename(session.id); }}><input aria-label="会话名称" autoFocus value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setRenamingId(null); }} /><Button size="sm" type="submit">保存</Button><Button variant="ghost" size="sm" type="button" onClick={() => setRenamingId(null)}>取消</Button></form> : <div key={session.id} className={`darl-agent-history-row${session.id === activeSession?.id ? ' is-active' : ''}`} aria-current={session.id === activeSession?.id ? 'page' : undefined}><button type="button" className="darl-agent-history-select" onClick={() => { onSessionChange?.(session.id); setView('chat'); }}><span><strong>{session.title}</strong><small>{session.messages.at(-1)?.content || '暂无消息'}</small></span><time>{session.updatedAt || ''}</time></button>{onSessionRename && <Button variant="ghost" size="icon" aria-label={`重命名 ${session.title}`} title="重命名" onClick={() => beginRename(session)}><Pencil size={14} /></Button>}</div>)}
+      {filteredSessions.map((session) => renamingId === session.id ? <form key={session.id} className="darl-agent-history-row darl-agent-history-row--editing" onSubmit={(event) => { event.preventDefault(); void saveRename(session.id); }}><input aria-label="会话名称" autoFocus value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setRenamingId(null); }} /><Button size="sm" type="submit">保存</Button><Button variant="ghost" size="sm" type="button" onClick={() => setRenamingId(null)}>取消</Button></form> : <div key={session.id} className={`darl-agent-history-row${session.id === activeSession?.id ? ' is-active' : ''}`} aria-current={session.id === activeSession?.id ? 'page' : undefined}><button type="button" className="darl-agent-history-select" onClick={() => { onSessionChange?.(session.id); setView('chat'); }}><span><strong>{session.title}</strong><small>{session.messages.at(-1)?.content || '暂无消息'}</small></span><time>{session.updatedAt || ''}</time></button><div className="darl-agent-history-actions">{onSessionRename && <Button variant="ghost" size="icon" aria-label={`重命名 ${session.title}`} title="重命名" onClick={() => beginRename(session)}><Pencil size={14} /></Button>}{onSessionDelete && <Button variant="ghost" size="icon" className="darl-agent-history-delete" aria-label={`删除 ${session.title}`} title="删除" onClick={(event) => requestDelete(session, event.currentTarget)}><Trash2 size={14} /></Button>}</div></div>)}
       {!filteredSessions.length && <p className="darl-agent-empty">没有匹配的对话</p>}
     </section> : <>
       <section ref={messagesRef} className="darl-agent-messages" aria-live="polite" onScroll={(event) => { const element = event.currentTarget; followOutput.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>
@@ -458,6 +481,21 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
       </div>}
     />
     <ImageLightbox image={imagePreview} onClose={() => setImagePreview(null)} />
+    <DialogPrimitive.Root open={Boolean(deleteTarget)} onOpenChange={(next) => { if (!next && !confirmBusy) setDeleteTarget(null); }}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="darl-agent-confirm-overlay" />
+        <DialogPrimitive.Content className="darl-agent-confirm" style={deleteTheme} aria-describedby={undefined} onKeyDown={(event) => { event.stopPropagation(); if (event.key === 'Enter' && !confirmBusy) { event.preventDefault(); void confirmDelete(); } }} onCloseAutoFocus={(event) => { event.preventDefault(); deleteButtonRef.current?.focus(); }}>
+          <div className="darl-agent-confirm-icon"><Trash2 size={18} /></div>
+          <DialogPrimitive.Title className="darl-agent-confirm-title">删除对话</DialogPrimitive.Title>
+          {deleteTarget && <p className="darl-agent-confirm-text">确定删除「{deleteTarget.title}」？该对话的消息记录将被移除，无法恢复。</p>}
+          {deleteError && <p className="darl-agent-confirm-error" role="alert">{deleteError}</p>}
+          <div className="darl-agent-confirm-actions">
+            <DialogPrimitive.Close asChild><Button variant="ghost" size="sm" disabled={confirmBusy}>取消</Button></DialogPrimitive.Close>
+            <Button variant="default" size="sm" className="darl-agent-danger-button" disabled={confirmBusy} onClick={() => void confirmDelete()}>{confirmBusy ? '删除中…' : '删除'}</Button>
+          </div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   </ImagePreviewContext.Provider>;
 }
 

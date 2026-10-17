@@ -1,5 +1,5 @@
 .darl-agent-sidebar { --darl-agent-bg: var(--darl-background, #fff); --darl-agent-surface: var(--darl-surface, #f8fafc); --darl-agent-text: var(--darl-text, #0f172a); --darl-agent-muted: var(--darl-muted, #64748b); --darl-agent-border: var(--darl-border, #e2e8f0); --darl-agent-primary: var(--darl-primary, #2563eb); --darl-agent-primary-foreground: var(--darl-primary-foreground, #fff); position: fixed; z-index: 40; inset: 0 0 0 auto; display: flex; flex-direction: column; width: min(450px, 100%); background: var(--darl-agent-bg); color: var(--darl-agent-text); border-left: 1px solid var(--darl-agent-border); box-shadow: -18px 0 55px #0f172a1a; font: 13px/1.55 Inter, ui-sans-serif, system-ui, sans-serif; isolation: isolate; }
-.darl-agent-sidebar *, .darl-agent-sidebar *::before, .darl-agent-sidebar *::after { box-sizing: border-box; }
+.darl-agent-sidebar *, .darl-agent-sidebar *::before, .darl-agent-sidebar *::after, .darl-agent-confirm, .darl-agent-confirm * { box-sizing: border-box; }
 .darl-agent-sidebar button, .darl-agent-sidebar textarea, .darl-agent-sidebar input { font: inherit; }
 .darl-agent-sidebar button:focus-visible, .darl-agent-sidebar textarea:focus-visible, .darl-agent-sidebar input:focus-visible { outline: 2px solid var(--darl-agent-primary); outline-offset: 2px; }
 .darl-agent-header { display: flex; align-items: center; flex: none; gap: 10px; height: 62px; padding: 0 13px; border-bottom: 1px solid var(--darl-agent-border); }
@@ -80,6 +80,20 @@
 .darl-agent-history-select > span { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .darl-agent-history-select time { flex: none; color: var(--darl-agent-muted); font-size: 9px; }
 .darl-agent-history-row > .darl-button { min-width: 28px; min-height: 28px; padding: 0; color: var(--darl-agent-muted); }
+.darl-agent-history-actions { display: flex; flex: none; gap: 2px; opacity: 0; transition: opacity 120ms ease; }
+.darl-agent-history-row:hover .darl-agent-history-actions, .darl-agent-history-row:focus-within .darl-agent-history-actions, .darl-agent-history-row.is-active .darl-agent-history-actions { opacity: 1; }
+.darl-agent-history-actions .darl-button { min-width: 28px; min-height: 28px; padding: 0; color: var(--darl-agent-muted); }
+.darl-agent-history-actions .darl-button:hover { color: var(--darl-agent-text); }
+.darl-agent-history-delete:hover { color: var(--darl-agent-danger, #ef4444) !important; }
+.darl-agent-confirm-overlay { position: fixed; z-index: 70; inset: 0; background: rgb(2 6 23 / 55%); box-sizing: border-box; }
+.darl-agent-confirm { position: fixed; z-index: 71; top: 50%; left: 50%; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; width: min(360px, calc(100vw - 32px)); padding: 18px; border: 1px solid var(--darl-agent-border, var(--darl-border, #e2e8f0)); border-radius: 14px; background: var(--darl-agent-bg, var(--darl-background, #fff)); color: var(--darl-agent-text, var(--darl-text, #0f172a)); box-shadow: 0 20px 50px rgb(2 6 23 / 40%); font-family: inherit; transform: translate(-50%, -50%); }
+.darl-agent-confirm-icon { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; background: color-mix(in srgb, #ef4444 16%, transparent); color: var(--darl-agent-danger, #ef4444); }
+.darl-agent-confirm-title { margin: 0; font-size: 14px; font-weight: 600; }
+.darl-agent-confirm-text { margin: 0; color: var(--darl-agent-muted); font-size: 12px; line-height: 1.6; word-break: break-word; }
+.darl-agent-confirm-error { margin: 0; color: var(--darl-agent-danger, #ef4444); font-size: 11px; }
+.darl-agent-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.darl-agent-danger-button { background: #ef4444; border-color: #ef4444; color: #fff; }
+.darl-agent-danger-button:hover { background: #dc2626; border-color: #dc2626; }
 .darl-agent-history-row--editing { align-items: center; }
 .darl-agent-history-row--editing input { min-width: 0; flex: 1; height: 31px; padding: 0 8px; border: 1px solid var(--darl-agent-border); border-radius: 7px; outline: 0; background: var(--darl-agent-bg); color: var(--darl-agent-text); }
 .darl-agent-history-row--editing .darl-button { min-height: 31px; }

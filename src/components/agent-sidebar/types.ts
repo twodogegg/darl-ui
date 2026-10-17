@@ -181,6 +181,8 @@ export interface AgentSidebarProps {
   activeSessionId?: string;
   onSessionChange?: (sessionId: string) => void;
   onSessionRename?: (sessionId: string, title: string) => void | Promise<void>;
+  /** Host removes the session and should switch the active session itself. */
+  onSessionDelete?: (sessionId: string) => void | Promise<void>;
   onNewSession?: () => void;
   onSend?: (request: AgentSendRequest) => void | Promise<void>;
   isGenerating?: boolean;

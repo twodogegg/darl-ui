@@ -11,6 +11,7 @@ import '@darl/ui/styles.css';
   activeSessionId={activeSessionId}
   onSessionChange={setActiveSessionId}
   onSessionRename={renameSession}
+  onSessionDelete={deleteSession}
   onNewSession={createSession}
   onSend={sendMessage}
   onRegenerate={regenerateMessage}

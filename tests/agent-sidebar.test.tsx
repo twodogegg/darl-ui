@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { AgentSidebar, type AgentApplication, type AgentErrorInfo, type AgentSession, type AgentSkill } from '../src';
+import { AgentSidebar, DarlUIProvider, type AgentApplication, type AgentErrorInfo, type AgentSession, type AgentSkill } from '../src';
 
 const apps: AgentApplication[] = [{ id: 'crm', name: '客户系统', description: '查询客户资料', status: 'connected', tools: [{ name: 'find_customer', title: '查询客户' }] }];
 const skills: AgentSkill[] = [{ id: 'summary', name: '客户摘要', description: '整理客户信息' }];
@@ -256,6 +256,41 @@ describe('AgentSidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看历史记录' }));
     fireEvent.click(screen.getByRole('button', { name: '新对话' }));
     expect(onNewSession).toHaveBeenCalled();
+  });
+
+  it('删除会话需要二次确认，取消不会删除', async () => {
+    const onSessionDelete = vi.fn().mockResolvedValue(undefined);
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[...sessions, { id: 'two', title: '第二个对话', messages: [] }]} activeSessionId="one" onSessionDelete={onSessionDelete} />);
+    fireEvent.click(screen.getByRole('button', { name: '查看历史记录' }));
+    fireEvent.click(screen.getByRole('button', { name: '删除 第二个对话' }));
+    const dialog = await screen.findByRole('dialog', { name: '删除对话' });
+    expect(dialog).toHaveTextContent('确定删除「第二个对话」');
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '删除对话' })).not.toBeInTheDocument());
+    expect(onSessionDelete).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '删除 第二个对话' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: '删除对话' })).getByRole('button', { name: '删除' }));
+    await waitFor(() => expect(onSessionDelete).toHaveBeenCalledWith('two'));
+  });
+
+  it('删除失败时保留确认弹窗并提示错误', async () => {
+    const onSessionDelete = vi.fn().mockRejectedValue(new Error('删除失败：会话正在生成'));
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" onSessionDelete={onSessionDelete} />);
+    fireEvent.click(screen.getByRole('button', { name: '查看历史记录' }));
+    fireEvent.click(screen.getByRole('button', { name: '删除 已有对话' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: '删除对话' })).getByRole('button', { name: '删除' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('删除失败：会话正在生成');
+    expect(screen.getByRole('dialog', { name: '删除对话' })).toBeInTheDocument();
+  });
+
+  it('删除确认弹窗继承侧栏主题变量', async () => {
+    const onSessionDelete = vi.fn().mockResolvedValue(undefined);
+    render(<DarlUIProvider theme={{ mode: 'dark' }}><AgentSidebar open onOpenChange={vi.fn()} sessions={[...sessions, { id: 'two', title: '第二个对话', messages: [] }]} activeSessionId="one" onSessionDelete={onSessionDelete} /></DarlUIProvider>);
+    fireEvent.click(screen.getByRole('button', { name: '查看历史记录' }));
+    fireEvent.click(screen.getByRole('button', { name: '删除 第二个对话' }));
+    const dialog = await screen.findByRole('dialog', { name: '删除对话' });
+    expect(dialog.getAttribute('style')).toContain('--darl-agent-bg');
+    expect(dialog.getAttribute('style')).toContain('--darl-text');
   });
 
   it('可以在历史记录中重命名会话，并展开为居中对话窗口', async () => {

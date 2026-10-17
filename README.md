@@ -262,7 +262,7 @@ import '@darl/ui/styles.css';
 
 ## AgentSidebar｜网站辅助 Agent 侧栏
 
-演示入口：`http://localhost:5188/#agent-sidebar`。右侧会话面板包含新对话、历史搜索与切换、会话重命名、消息发送、应用 / Skill 选择、模型及其推理强度选择；消息较长时可直接跳到顶部或底部，也可以展开为居中的大对话窗口。回复操作只有复制和重新生成；整条复制保留原始 Markdown，代码块单独复制代码。Markdown 使用 GFM 渲染，并支持将 `md` / `markdown` 围栏内容渲染为可读内容。
+演示入口：`http://localhost:5188/#agent-sidebar`。右侧会话面板包含新对话、历史搜索与切换、会话重命名与删除（需二次确认）、消息发送、应用 / Skill 选择、模型及其推理强度选择；消息较长时可直接跳到顶部或底部，也可以展开为居中的大对话窗口。回复操作只有复制和重新生成；整条复制保留原始 Markdown，代码块单独复制代码。Markdown 使用 GFM 渲染，并支持将 `md` / `markdown` 围栏内容渲染为可读内容。
 
 ```tsx
 import { AgentSidebar } from '@darl/ui';
@@ -275,6 +275,7 @@ import '@darl/ui/styles.css';
   activeSessionId={activeSessionId}
   onSessionChange={setActiveSessionId}
   onSessionRename={renameSession}
+  onSessionDelete={deleteSession}
   onNewSession={createSession}
   onSend={sendMessage}
   onRegenerate={regenerateMessage}
@@ -293,6 +294,8 @@ import '@darl/ui/styles.css';
 `AgentMessage.timeline` 可接收按流式顺序排列的 `AgentExecutionEvent`。事件只包含通用的 `source`、`status`、`name`、`runId`、`parentRunId`、`agentId`、时间戳、耗时和安全错误摘要；`source: 'agent'` 会区分主 Agent 与子 Agent，`source: 'tool'` 显示 MCP 工具。侧栏默认折叠时间线，展开后按父子运行关系缩进，并显示真实耗时、重试、确认、失败、取消和超时；原始参数和结果仍只在确认卡片中按既有规则展示，不进入时间线事件。
 
 服务端示例为每次聊天返回 `requestId` 和顶层 `runId`，工具及子 Agent 事件携带 `runId` / `parentRunId` 以便关联。失败事件使用 `AgentErrorInfo`，区分模型、MCP 连接、MCP 工具、工具参数、子 Agent 委派、校验、取消和超时；错误卡片显示错误码、requestId、阶段、是否可重试及下一步建议，不展示完整上游响应或敏感工具参数。
+
+`onSessionDelete` 用于删除会话：组件在历史记录每一行提供删除按钮，点击后弹出二次确认，宿主确认后负责移除会话并切换 `activeSessionId`；删除失败时弹窗保留并显示错误。
 
 `onSkillImport` 用于接管聊天侧栏的 Skill 上传；Skill 的编辑、导入、收藏和删除统一由「设置 → Skills」页面接管。
 
