@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AgentExecutionEvent, AgentSkill, AgentToolCall } from '../../../src/index';
 import { defaultModelConfiguration, effectiveCapabilities, enabledBindings, validateModelConfiguration, type ModelConfiguration } from '../../../src/components/settings/model-config';
@@ -12,6 +13,8 @@ import { LocalStorage, validateClientState, type ClientState } from './storage';
 import { SubAgentThreadLocks, continueSubAgentConversation } from './subagent-conversations';
 import { handleWorkspaceProjectRequest } from './projects';
 import { ProjectStore } from './project-store';
+import { EpisodeStore } from './episode-store';
+import { createEpisodeApi } from './episode-api';
 import { createMediaJobsApi } from './media-jobs-api';
 import { DEFAULT_AUTO_CONFIRM, validateAutoConfirmSettings, shouldConfirmMcp, type AutoConfirmSettings } from './approval-settings';
 
@@ -190,6 +193,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const storage = new LocalStorage(directory);
   const subAgentLocks = new SubAgentThreadLocks();
   const projectStore = new ProjectStore(storage.path);
+  const episodeStore = new EpisodeStore(storage.path);
   const mediaJobs = createMediaJobsApi(storage.path, () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), () => storage.getConfig<StoredProvider[]>('providers') || []);
   const confirmations = new ToolConfirmations();
   const connectionManager = new McpConnectionManager(connectApplicationWithRetry);
@@ -216,6 +220,28 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const loadDefaultMediaSelection = (): DefaultMediaSelection => validateDefaultMediaSelection(storage.getConfig<unknown>('defaultMediaModels') || defaultMediaSelection);
   const update = async (mutate: (providers: StoredProvider[]) => StoredProvider[]) => storage.setConfig('providers', mutate(await load()));
   const saveAgents = async (next: StoredAgent[]) => storage.setConfig('agents', next);
+  const handleEpisodes = createEpisodeApi(episodeStore, async (agentId, script, signal) => {
+    const agent = loadAgents(storage).find((entry) => entry.id === agentId && !entry.builtIn && entry.enabled !== false);
+    if (!agent) throw new Error('请选择在「设置 → Agents」中配置并启用的专业 Agent');
+    const providers = await load();
+    const configuration = await loadModelConfiguration();
+    const resolved = resolveAgentTextModel(providers, configuration, agent.providerId, agent.modelId);
+    if (!resolved) throw new Error('该 Agent 的文本模型未启用或不可用');
+    if (!resolved.provider.apiKey) throw new Error('请先设置 Agent 对应供应商的 API Key');
+    if (script.length > contextCharBudget(resolved.model.capabilities?.contextWindow))
+      throw new Error('剧本超过当前 Agent 模型的上下文范围，请分集处理');
+    const task = readFileSync(resolve(dirname(promptFile), 'workspace-breakdown.md'), 'utf8');
+    const skillList = (storage.getConfig<ClientState>('clientState')?.skills || []) as AgentSkill[];
+    const skills = skillList.filter((skill) => agent.skillIds?.includes(skill.id)).map((skill) => '技能：' + skill.name + '\n' + skill.instructions).join('\n\n');
+    const instructions = [agent.instructions, skills].filter(Boolean).join('\n\n');
+    const messages = [{ role: 'user' as const, content: task + '\n\n<剧本原文>\n' + script + '\n</剧本原文>' }];
+    let output = '';
+    for await (const chunk of generate(resolved.provider, resolved.model, messages, instructions, undefined, signal)) {
+      output += chunk;
+      if (output.length > 2_000_000) throw new Error('分镜结果超过最大长度');
+    }
+    return output;
+  });
   return async (request: IncomingMessage, response: ServerResponse, next: () => void) => {
     if (!request.url?.startsWith('/api/')) return next();
     const send = (status: number, data: unknown) => {
@@ -228,6 +254,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     const host = request.headers.host || '';
     const origin = request.headers.origin;
     if (portOf(host) !== '5197' || (origin && portOf(origin) !== '5197')) return send(403, { error: '仅允许本服务端口同源访问' });
+    if (await handleEpisodes(request, response)) return;
     if (await handleWorkspaceProjectRequest(request, response, projectStore)) return;
     if (await mediaJobs.handle(request, response)) return;
     const controller = new AbortController();
