@@ -2,6 +2,8 @@ import { readFile, mkdir, writeFile, rename } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { OAuthClientProvider, OAuthDiscoveryState } from '@modelcontextprotocol/sdk/client/auth.js';
+import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentApplication } from '../../../src/index';
 import { safeError, type ChatMessage } from './models';
@@ -11,8 +13,62 @@ export interface McpApplicationConfig {
   name: string;
   url: string;
   apiKey?: string;
+  oauth?: {
+    clientInformation?: OAuthClientInformationMixed;
+    tokens?: OAuthTokens;
+    codeVerifier?: string;
+    discoveryState?: OAuthDiscoveryState;
+  };
   /** Host-reviewed exceptions for servers without readOnlyHint annotations. */
   readOnlyTools?: string[];
+}
+
+export const MCP_OAUTH_CALLBACK_PATH = '/api/mcp-oauth/callback';
+export const MCP_OAUTH_CALLBACK_URL = `http://127.0.0.1:5197${MCP_OAUTH_CALLBACK_PATH}`;
+
+type PersistOAuth = (oauth: NonNullable<McpApplicationConfig['oauth']>) => Promise<void>;
+
+/** OAuth provider backed by the local MCP configuration file. Tokens never leave the server. */
+export function createMcpOAuthProvider(
+  app: McpApplicationConfig,
+  onRedirect: (url: URL) => void | Promise<void>,
+  persist?: PersistOAuth,
+): OAuthClientProvider {
+  let oauth = { ...(app.oauth || {}) };
+  const save = async (patch: Partial<typeof oauth>) => {
+    oauth = { ...oauth, ...patch };
+    app.oauth = oauth;
+    await persist?.(oauth);
+  };
+  return {
+    get redirectUrl() { return MCP_OAUTH_CALLBACK_URL; },
+    clientMetadata: {
+      client_name: 'Darl UI Agent Chat',
+      redirect_uris: [MCP_OAUTH_CALLBACK_URL],
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+      token_endpoint_auth_method: 'none',
+    } satisfies OAuthClientMetadata,
+    state: () => crypto.randomUUID(),
+    clientInformation: () => oauth.clientInformation,
+    saveClientInformation: (value) => save({ clientInformation: value }),
+    tokens: () => oauth.tokens,
+    saveTokens: (value) => save({ tokens: value }),
+    redirectToAuthorization: onRedirect,
+    saveCodeVerifier: (value) => save({ codeVerifier: value }),
+    codeVerifier: () => {
+      if (!oauth.codeVerifier) throw new Error('MCP OAuth 校验信息已过期，请重新授权');
+      return oauth.codeVerifier;
+    },
+    saveDiscoveryState: (value) => save({ discoveryState: value }),
+    discoveryState: () => oauth.discoveryState,
+    invalidateCredentials: async (scope) => {
+      if (scope === 'tokens' || scope === 'all') await save({ tokens: undefined });
+      if (scope === 'client' || scope === 'all') await save({ clientInformation: undefined });
+      if (scope === 'verifier' || scope === 'all') await save({ codeVerifier: undefined });
+      if (scope === 'discovery' || scope === 'all') await save({ discoveryState: undefined });
+    },
+  };
 }
 
 export function conversationApplications(configs: McpApplicationConfig[], applicationIds: string[], messages: ChatMessage[]) {
@@ -76,7 +132,7 @@ export function toolRisk(app: McpApplicationConfig, tool: Tool): 'read' | 'write
 }
 
 export function applicationConfigFingerprint(app: McpApplicationConfig) {
-  return JSON.stringify([app.id, app.name, app.url, app.apiKey || '', [...(app.readOnlyTools || [])].sort()]);
+  return JSON.stringify([app.id, app.name, app.url, app.apiKey || '', app.oauth?.tokens?.access_token || '', [...(app.readOnlyTools || [])].sort()]);
 }
 
 type McpConnection = Awaited<ReturnType<typeof connectApplication>>;
@@ -152,7 +208,11 @@ export class McpConnectionManager {
 }
 
 export async function connectApplication(app: McpApplicationConfig, signal: AbortSignal) {
+  const oauthProvider = !app.apiKey && app.oauth?.tokens
+    ? createMcpOAuthProvider(app, () => { throw new Error('MCP OAuth 已过期，请在设置中重新授权'); })
+    : undefined;
   const transport = new StreamableHTTPClientTransport(new URL(app.url), {
+    authProvider: oauthProvider,
     requestInit: { ...(app.apiKey ? { headers: { Authorization: `Bearer ${app.apiKey}` } } : {}), redirect: 'error' },
     fetch: (url, init) => fetch(url, { ...init, signal: AbortSignal.any([signal, ...(init?.signal ? [init.signal] : [])]) }),
   });
@@ -201,7 +261,14 @@ export async function connectApplication(app: McpApplicationConfig, signal: Abor
 export async function applicationCatalog(directory: string, signal?: AbortSignal): Promise<AgentApplication[]> {
   const configs = await loadApplications(directory);
   void signal;
-  return configs.map((app) => ({ id: app.id, name: app.name, url: app.url, description: 'MCP 工具按需发现', tools: [] }));
+  return configs.map((app) => ({
+    id: app.id,
+    name: app.name,
+    url: app.url,
+    status: app.oauth?.tokens ? 'connected' : app.oauth?.clientInformation ? 'needs-auth' : undefined,
+    description: 'MCP 工具按需发现',
+    tools: [],
+  }));
 }
 
 export class ToolConfirmations {

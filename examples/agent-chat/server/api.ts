@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AgentExecutionEvent, AgentSkill, AgentToolCall } from '../../../src/index';
 import { defaultModelConfiguration, effectiveCapabilities, enabledBindings, validateModelConfiguration, type ModelConfiguration } from '../../../src/components/settings/model-config';
-import { applicationCatalog, connectApplication, conversationApplications, loadApplications, saveApplications, McpConnectionManager, toolRisk, ToolConfirmations } from './mcp';
+import { auth } from '@modelcontextprotocol/sdk/client/auth.js';
+import { applicationCatalog, connectApplication, conversationApplications, createMcpOAuthProvider, loadApplications, saveApplications, MCP_OAUTH_CALLBACK_PATH, McpConnectionManager, toolRisk, ToolConfirmations } from './mcp';
 import { loadAgents, publicAgent, validateAgent, validateAgents, type StoredAgent } from './agents';
 import { generate, generateWithToolLoop, listModels, publicProvider, runToolLoopAgent, safeError, validateProvider, type AgentDelegation, type ChatImage, type ChatMessage, type StoredProvider, type ToolExecution } from './models';
 import { AgentFailure, createAgentError, failure } from './errors';
@@ -191,6 +192,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const mediaJobs = createMediaJobsApi(storage.path, () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), () => storage.getConfig<StoredProvider[]>('providers') || []);
   const confirmations = new ToolConfirmations();
   const connectionManager = new McpConnectionManager(connectApplicationWithRetry);
+  const pendingMcpOAuth = new Map<string, { appId: string; app: Awaited<ReturnType<typeof loadApplications>>[number]; provider: ReturnType<typeof createMcpOAuthProvider> }>();
   const validatePrompt = (value: unknown): string => {
     if (typeof value !== 'string' || !value.trim()) throw new Error('系统提示词不能为空');
     return value;
@@ -269,6 +271,30 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         storage.setConfig('systemPrompt', systemPrompt);
         return send(200, { systemPrompt });
       }
+      if (path === MCP_OAUTH_CALLBACK_PATH && request.method === 'GET') {
+        const callback = new URL(request.url, 'http://localhost');
+        const state = callback.searchParams.get('state');
+        const code = callback.searchParams.get('code');
+        const oauthError = callback.searchParams.get('error');
+        const pending = state ? pendingMcpOAuth.get(state) : undefined;
+        const finish = (ok: boolean, message: string) => {
+          const safeMessage = message.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character] || character));
+          response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+          response.end(`<!doctype html><meta charset="utf-8"><title>MCP OAuth</title><p>${safeMessage}</p><script>window.opener?.postMessage(${JSON.stringify({ type: 'mcp-oauth-complete', appId: pending?.appId, ok })}, '*'); window.close();</script>`);
+        };
+        if (!pending || !state) return finish(false, '授权会话已过期，请回到设置重新授权。');
+        pendingMcpOAuth.delete(state);
+        if (oauthError || !code) return finish(false, `Notion 授权未完成：${oauthError || '缺少授权码'}`);
+        try {
+          const result = await auth(pending.provider, { serverUrl: pending.app.url, authorizationCode: code });
+          if (result !== 'AUTHORIZED') throw new Error('OAuth 授权未完成');
+          await connectionManager.invalidateAll();
+          finish(true, '授权成功，可以关闭此窗口。');
+        } catch (error) {
+          finish(false, `授权失败：${safeError(error, pending.app.apiKey)}`);
+        }
+        return;
+      }
       if (path === '/api/applications' && request.method === 'POST') {
         const body = await readBody(request) as { id?: unknown; name?: unknown; url?: unknown; apiKey?: unknown };
         if (typeof body.id !== 'string' || typeof body.name !== 'string' || typeof body.url !== 'string') throw new Error('请填写应用 ID、名称和 MCP 地址');
@@ -280,6 +306,28 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         return send(200, await applicationCatalog(directory, signal));
       }
       const applicationConfigRoute = path.match(/^\/api\/applications\/([\w-]+)$/);
+      const applicationOAuthRoute = path.match(/^\/api\/applications\/([\w-]+)\/oauth\/start$/);
+      if (applicationOAuthRoute && request.method === 'POST') {
+        const configs = await loadApplications(directory);
+        const app = configs.find((item) => item.id === applicationOAuthRoute[1]);
+        if (!app) return send(404, { error: '应用不存在' });
+        let authorizationUrl = '';
+        const persist = async (oauth: NonNullable<typeof app.oauth>) => {
+          const latest = await loadApplications(directory);
+          await saveApplications(directory, latest.map((item) => item.id === app.id ? { ...item, oauth } : item));
+        };
+        const provider = createMcpOAuthProvider(app, (url) => { authorizationUrl = url.toString(); }, persist);
+        const result = await auth(provider, { serverUrl: app.url });
+        if (result === 'AUTHORIZED') {
+          await connectionManager.invalidateAll();
+          return send(200, { authorized: true });
+        }
+        if (!authorizationUrl) throw new Error('MCP OAuth 未返回授权地址');
+        const state = new URL(authorizationUrl).searchParams.get('state');
+        if (!state) throw new Error('MCP OAuth 授权地址缺少 state');
+        pendingMcpOAuth.set(state, { appId: app.id, app, provider });
+        return send(200, { authorized: false, authorizationUrl });
+      }
       if (applicationConfigRoute && request.method === 'PUT') {
         const body = await readBody(request) as { name?: unknown; url?: unknown; apiKey?: unknown };
         if (typeof body.name !== 'string' || typeof body.url !== 'string') throw new Error('请填写名称和 MCP 地址');

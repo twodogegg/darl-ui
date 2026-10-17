@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { applicationCatalog, conversationApplications, loadApplications, McpConnectionManager, toolRisk, ToolConfirmations, type McpApplicationConfig } from '../examples/agent-chat/server/mcp';
+import { applicationCatalog, conversationApplications, createMcpOAuthProvider, loadApplications, MCP_OAUTH_CALLBACK_URL, McpConnectionManager, toolRisk, ToolConfirmations, type McpApplicationConfig } from '../examples/agent-chat/server/mcp';
 import { safeError } from '../examples/agent-chat/server/models';
 
 const app = { id: 'catalog', name: 'Catalog', url: 'https://example.test/mcp', readOnlyTools: ['search'] };
@@ -15,6 +15,17 @@ describe('MCP host policy', () => {
       await writeFile(join(directory, 'applications.json'), JSON.stringify([app]));
       expect(await applicationCatalog(directory)).toEqual([{ id: app.id, name: app.name, url: app.url, description: 'MCP 工具按需发现', tools: [] }]);
     } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
+  it('persists OAuth client state and tokens without exposing them in the catalog', async () => {
+    const value: McpApplicationConfig = { id: 'notion', name: 'Notion', url: 'https://mcp.notion.com/mcp' };
+    let saved: McpApplicationConfig['oauth'];
+    const provider = createMcpOAuthProvider(value, () => {}, async (oauth) => { saved = oauth; });
+    await provider.saveClientInformation?.({ client_id: 'client-1' });
+    await provider.saveTokens({ access_token: 'secret', token_type: 'bearer' });
+    expect(provider.clientMetadata.redirect_uris).toEqual([MCP_OAUTH_CALLBACK_URL]);
+    expect(saved?.tokens?.access_token).toBe('secret');
+    expect(value.oauth?.tokens?.access_token).toBe('secret');
   });
 
   it('reuses concurrent and sequential connections only within a user/session scope', async () => {
