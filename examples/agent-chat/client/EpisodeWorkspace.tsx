@@ -225,7 +225,7 @@ export function EpisodeWorkspace({projectId,agents}:{projectId:number;agents:Age
               {Object.entries(types).map(([type,name])=><option key={type} value={type}>{name}</option>)}
             </select></label>
             <label>涉及镜头（编号，逗号分隔）
-              <input value={asset.shotNumbers.join(', ')} onChange={e=>updateAsset(i,'shotNumbers',e.target.value)}/>
+              <input key={asset.name+":"+i} defaultValue={asset.shotNumbers.join(', ')} onBlur={e=>updateAsset(i,'shotNumbers',e.target.value)}/>
             </label>
             <span className="workspace-asset-state">{library.some(item=>item.name===asset.name&&item.type===asset.type)?'项目资产已存在':'待准备资产'}</span>
             <button type="button" onClick={()=>setDraft(prev=>prev&&({...prev,assets:prev.assets.filter((_,j)=>j!==i)}))}>移除</button>
