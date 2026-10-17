@@ -207,7 +207,15 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const loadPrompt = async () => validatePrompt(storage.getConfig<string>('systemPrompt'));
   const load = async (): Promise<StoredProvider[]> => storage.getConfig<StoredProvider[]>('providers') || initial;
   const loadModelConfiguration = async (): Promise<ModelConfiguration> => {
-    const value = storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration();
+    const stored = storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration();
+    // Persisted configurations from before media adapters existed retain implemented=false.
+    // Installed adapter availability is owned by the host, not by the saved UI snapshot.
+    const builtin = defaultModelConfiguration().protocols;
+    const value: ModelConfiguration = { ...stored, protocols: stored.protocols.map((protocol) => {
+      const installed = builtin.find((item) => item.key === protocol.key);
+      return installed && (protocol.key === 'openai-images' || protocol.key === 'darl-h3-flash-unified')
+        ? { ...protocol, implemented: true, description: installed.description } : protocol;
+    }) };
     if (validateModelConfiguration(value).length) throw new Error('模型配置已损坏，请重新保存模型配置');
     return value;
   };
@@ -312,7 +320,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const errors = validateModelConfiguration(incoming as ModelConfiguration);
         if (errors.length) throw new Error(errors[0].message);
         const next = incoming as ModelConfiguration;
-        storage.setConfig('modelConfiguration', next);
+        storage.setConfig('modelConfiguration', { ...next, protocols: next.protocols.map((protocol) => (protocol.key === 'openai-images' || protocol.key === 'darl-h3-flash-unified') ? { ...protocol, implemented: true } : protocol) });
         return send(200, next);
       }
       if (path === '/api/agents' && request.method === 'GET') return send(200, agents.map(publicAgent));
