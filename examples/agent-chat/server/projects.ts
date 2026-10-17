@@ -1,18 +1,13 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { ProjectStore } from './project-store';
 
 const MAX_BODY_BYTES = 12 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const allowedTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
-function upstreamPath(path: string, method: string): string | null {
-  if (path === '/api/workspace/styles' && method === 'GET') return '/styles';
-  if (path === '/api/workspace/projects' && ['GET', 'POST'].includes(method)) return '/projects';
-  const project = path.match(/^\/api\/workspace\/projects\/(\d+)$/);
-  if (project && ['GET', 'PATCH', 'DELETE'].includes(method)) return `/projects/${project[1]}`;
-  const covers = path.match(/^\/api\/workspace\/projects\/(\d+)\/covers\/upload$/);
-  if (covers && method === 'POST') return `/projects/${covers[1]}/covers/upload`;
-  const choose = path.match(/^\/api\/workspace\/projects\/(\d+)\/covers\/(\d+)\/select$/);
-  if (choose && method === 'POST') return `/projects/${choose[1]}/covers/${choose[2]}/select`;
-  return null;
+class RequestError extends Error {
+  constructor(readonly status: number, message: string) { super(message); }
 }
 
 async function readLimited(request: IncomingMessage): Promise<Buffer> {
@@ -21,95 +16,141 @@ async function readLimited(request: IncomingMessage): Promise<Buffer> {
   for await (const part of request) {
     const chunk = Buffer.isBuffer(part) ? part : Buffer.from(part);
     size += chunk.length;
-    if (size > MAX_BODY_BYTES) throw new Error('上传内容超过 12MB 限制');
+    if (size > MAX_BODY_BYTES) throw new RequestError(413, '上传内容超过 12MB 限制');
     parts.push(chunk);
   }
   return Buffer.concat(parts);
 }
 
-/** Private local-development bridge. The backend owns authentication and all project data. */
+async function readJson(request: IncomingMessage): Promise<unknown> {
+  if (!(request.headers['content-type'] || '').startsWith('application/json'))
+    throw new RequestError(415, '请求内容必须为 JSON');
+  try { return JSON.parse((await readLimited(request)).toString('utf8')); }
+  catch (error) {
+    if (error instanceof RequestError) throw error;
+    throw new RequestError(400, 'JSON 格式无效');
+  }
+}
+
+function checkImage(type: string, bytes: Buffer) {
+  if (!allowedTypes.has(type) || !bytes.length || bytes.length > MAX_IMAGE_BYTES)
+    throw new RequestError(422, '只接受不超过 10MB 的 PNG、JPG 或 WebP 图片');
+  const valid = type === 'image/png' ? bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))
+    : type === 'image/jpeg' ? bytes.subarray(0, 3).equals(Buffer.from('ffd8ff', 'hex'))
+    : bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP';
+  if (!valid) throw new RequestError(422, '图片文件与格式不一致');
+}
+
+async function readUpload(request: IncomingMessage, field: string, required: boolean) {
+  const type = request.headers['content-type'] || '';
+  if (!type.startsWith('multipart/form-data;')) throw new RequestError(415, '请使用表单上传');
+  let form: FormData;
+  try {
+    const body = await readLimited(request);
+    form = await new Request('http://localhost/upload', { method: 'POST',
+      headers: { 'Content-Type': type }, body: Uint8Array.from(body).buffer as ArrayBuffer }).formData();
+  } catch (error) {
+    if (error instanceof RequestError) throw error;
+    throw new RequestError(400, '上传表单格式无效');
+  }
+  const file = form.get(field);
+  if ((!file || typeof file === 'string') && required) throw new RequestError(422, '请选择图片');
+  if (!file || typeof file === 'string') return { form };
+  const bytes = Buffer.from(await file.arrayBuffer());
+  checkImage(file.type, bytes);
+  return { form, image: { type: file.type, bytes } };
+}
+
+function numeric(value: string): number {
+  const n = Number(value);
+  if (!Number.isSafeInteger(n) || n <= 0) throw new RequestError(400, '编号无效');
+  return n;
+}
+
+/** First-phase single-user local SQLite API; Tools/Agents never bypass the main chat runtime. */
 export async function handleWorkspaceProjectRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  env: Record<string, string>,
+  store: ProjectStore,
 ): Promise<boolean> {
-  const url = new URL(request.url || '/', 'http://localhost');
-  if (!url.pathname.startsWith('/api/workspace/')) return false;
-  const reply = (status: number, error: string) => {
-    response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-    response.end(JSON.stringify({ error }));
+  const path = new URL(request.url || '/', 'http://localhost').pathname;
+  if (!path.startsWith('/api/workspace/')) return false;
+  const send = (status: number, data: unknown) => {
+    response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+    response.end(JSON.stringify(data));
   };
-  const method = request.method || 'GET';
-  const storageMatch = url.pathname.match(/^\/api\/workspace\/storage\/(.+)$/);
-  if (storageMatch) {
-    if (!LOOPBACK.has(request.socket.remoteAddress || '')) {
-      reply(403, '仅允许本机访问项目图片'); return true;
-    }
-    const parts = storageMatch[1].split('/');
-    if (method !== 'GET' || parts.some((part) => !/^[a-zA-Z0-9_.-]+$/.test(part) || part === '.' || part === '..')) {
-      reply(400, '图片路径无效'); return true;
-    }
-    const base = env.PROJECT_API_BASE_URL?.trim();
-    const token = env.PROJECT_API_TOKEN?.trim();
-    if (!base || !token) { reply(503, '项目服务尚未配置'); return true; }
-    try {
-      const origin = new URL(base);
-      const target = new URL('/storage/' + parts.map(encodeURIComponent).join('/'), origin);
-      if (!['http:', 'https:'].includes(target.protocol)) throw new Error('invalid');
-      const result = await fetch(target, {
-        headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000), redirect: 'error',
-      });
-      if (!result.ok) { reply(result.status, '项目图片加载失败'); return true; }
-      const type = result.headers.get('content-type') || '';
-      if (!/^image\/(png|jpeg|webp)$/i.test(type)) { reply(502, '图片类型不受支持'); return true; }
-      const bytes = Buffer.from(await result.arrayBuffer());
-      if (bytes.length > 12 * 1024 * 1024) { reply(502, '图片文件过大'); return true; }
-      response.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'private, max-age=120', 'X-Content-Type-Options': 'nosniff' });
-      response.end(bytes);
-    } catch { reply(502, '无法读取项目图片'); }
+  if (!LOOPBACK.has(request.socket.remoteAddress || '')) {
+    send(403, { error: '本地项目数据只允许本机访问' });
     return true;
   }
-  const path = upstreamPath(url.pathname, method);
-  if (!path) { reply(404, '未提供该项目接口'); return true; }
-  if (!LOOPBACK.has(request.socket.remoteAddress || '')) {
-    reply(403, '项目 API 的本地开发代理仅允许本机访问'); return true;
-  }
-  const base = env.PROJECT_API_BASE_URL?.trim();
-  const token = env.PROJECT_API_TOKEN?.trim();
-  if (!base || !token) {
-    reply(503, '请在服务端配置 PROJECT_API_BASE_URL 和 PROJECT_API_TOKEN'); return true;
-  }
-  let target: URL;
+
+  const method = request.method || 'GET';
   try {
-    target = new URL(path.slice(1), base.replace(/\/+$/, '') + '/');
-    if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) throw new Error();
-  } catch {
-    reply(503, 'PROJECT_API_BASE_URL 配置不合法'); return true;
-  }
-  try {
-    const body = method === 'GET' || method === 'DELETE' ? undefined : await readLimited(request);
-    const result = await fetch(target, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(body?.length ? { 'Content-Type': request.headers['content-type'] || 'application/json' } : {}),
-        Accept: 'application/json',
-      },
-      ...(body ? { body: Uint8Array.from(body).buffer as ArrayBuffer } : {}),
-      signal: AbortSignal.timeout(25_000),
-      redirect: 'error',
-    });
-    const data = await result.arrayBuffer();
-    if (data.byteLength > 2_000_000) throw new Error('后端响应过大');
-    response.writeHead(result.status, {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
-    });
-    response.end(Buffer.from(data));
+    const image = path.match(/^\/api\/workspace\/storage\/(covers|styles)\/(\d+)$/);
+    if (image && method === 'GET') {
+      const file = store.image(image[1] as 'covers' | 'styles', numeric(image[2]));
+      if (!file) throw new RequestError(404, '图片不存在');
+      response.writeHead(200, { 'Content-Type': file.mime,
+        'Cache-Control': 'private, max-age=120', 'X-Content-Type-Options': 'nosniff' });
+      response.end(Buffer.from(file.data));
+      return true;
+    }
+    if (path === '/api/workspace/styles' && method === 'GET') {
+      send(200, { code: 'OK', data: store.styles() }); return true;
+    }
+    if (path === '/api/workspace/styles' && method === 'POST') {
+      const { form, image: file } = await readUpload(request, 'reference_image', false);
+      const name = form.get('name'), prompt = form.get('prompt');
+      if (typeof name !== 'string' || typeof prompt !== 'string')
+        throw new RequestError(422, '请填写风格名称和描述');
+      const style = store.createStyle({ name, prompt, image: file?.bytes, mimeType: file?.type });
+      send(201, { code: 'CREATED', data: style }); return true;
+    }
+    if (path === '/api/workspace/projects' && method === 'GET') {
+      const items = store.list();
+      send(200, { code: 'OK', data: { items, total: items.length } }); return true;
+    }
+    if (path === '/api/workspace/projects' && method === 'POST') {
+      const project = store.create(ProjectStore.validate(await readJson(request)));
+      send(201, { code: 'CREATED', data: project }); return true;
+    }
+    const project = path.match(/^\/api\/workspace\/projects\/(\d+)$/);
+    if (project) {
+      const id = numeric(project[1]);
+      if (method === 'GET') {
+        const value = store.get(id);
+        if (!value) throw new RequestError(404, '项目不存在');
+        send(200, { code: 'OK', data: value }); return true;
+      }
+      if (method === 'PATCH') {
+        const value = store.update(id, ProjectStore.validate(await readJson(request)));
+        if (!value) throw new RequestError(404, '项目不存在');
+        send(200, { code: 'OK', data: value }); return true;
+      }
+      if (method === 'DELETE') {
+        if (!store.archive(id)) throw new RequestError(404, '项目不存在');
+        send(200, { code: 'OK', data: { project_id: id } }); return true;
+      }
+    }
+    const upload = path.match(/^\/api\/workspace\/projects\/(\d+)\/covers\/upload$/);
+    if (upload && method === 'POST') {
+      const file = (await readUpload(request, 'image', true)).image;
+      if (!file) throw new RequestError(422, '请选择图片');
+      const value = store.uploadCover(numeric(upload[1]), file.type, file.bytes);
+      if (!value) throw new RequestError(404, '项目不存在');
+      send(201, { code: 'CREATED', data: value }); return true;
+    }
+    const select = path.match(/^\/api\/workspace\/projects\/(\d+)\/covers\/(\d+)\/select$/);
+    if (select && method === 'POST') {
+      const value = store.selectCover(numeric(select[1]), numeric(select[2]));
+      if (!value) throw new RequestError(404, '项目或封面不存在');
+      send(200, { code: 'OK', data: value }); return true;
+    }
+    send(404, { error: '未提供该项目接口' });
   } catch (error) {
-    reply(error instanceof Error && error.message.includes('12MB') ? 413 : 502,
-      error instanceof Error && error.message.includes('12MB') ? error.message : '无法连接项目后端，请检查服务地址及后端状态');
+    const status = error instanceof RequestError ? error.status : error instanceof SyntaxError ? 400 : 422;
+    send(status, { error: error instanceof Error ? error.message : '项目操作失败' });
   }
   return true;
 }
