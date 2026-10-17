@@ -41,7 +41,7 @@ const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_DATA_URL_LENGTH = 64 + 4 * Math.ceil(MAX_IMAGE_BYTES / 3);
 type DefaultMediaSelection = {
   image: { modelId: 'gpt-image-2'; resolution: '1K' | '2K' | '4K'; aspectRatio: '1:1' | '3:4' | '4:3' | '16:9' | '9:16' };
-  video: { modelId: 'minimax-h3-flash'; resolution: '480P'; aspectRatio: '16:9' };
+  video: { modelId: 'minimax-h3-flash'; resolution: '480P' | '768P'; aspectRatio: '16:9' | '9:16' };
 };
 const defaultMediaSelection: DefaultMediaSelection = {
   image: { modelId: 'gpt-image-2', resolution: '2K', aspectRatio: '16:9' },
@@ -59,10 +59,10 @@ function validateDefaultMediaSelection(value: unknown): DefaultMediaSelection {
   const imageResolutions = ['1K', '2K', '4K'];
   const imageRatios = ['1:1', '3:4', '4:3', '16:9', '9:16'];
   if (imageChoice.modelId !== 'gpt-image-2' || !imageResolutions.includes(String(imageChoice.resolution)) || !imageRatios.includes(String(imageChoice.aspectRatio))) throw new Error('默认图片模型参数不受支持');
-  if (videoChoice.modelId !== 'minimax-h3-flash' || videoChoice.resolution !== '480P' || videoChoice.aspectRatio !== '16:9') throw new Error('默认视频模型参数不受支持');
+  if (videoChoice.modelId !== 'minimax-h3-flash' || !['480P','768P'].includes(String(videoChoice.resolution)) || !['16:9','9:16'].includes(String(videoChoice.aspectRatio))) throw new Error('默认视频模型参数不受支持');
   return {
     image: { modelId: 'gpt-image-2', resolution: imageChoice.resolution as DefaultMediaSelection['image']['resolution'], aspectRatio: imageChoice.aspectRatio as DefaultMediaSelection['image']['aspectRatio'] },
-    video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' },
+    video: { modelId: 'minimax-h3-flash', resolution: videoChoice.resolution as DefaultMediaSelection['video']['resolution'], aspectRatio: videoChoice.aspectRatio as DefaultMediaSelection['video']['aspectRatio'] },
   };
 }
 
@@ -510,7 +510,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
               callSignal.throwIfAborted();
               call.status = 'running'; call.startedAt = new Date().toISOString(); emitTool(call);
               try {
-                const result = runMediaTool(mediaRuntime, native.name, args, images);
+                const result = runMediaTool(mediaRuntime, native.name, args, images, loadDefaultMediaSelection());
                 call.status = 'success'; call.endedAt = new Date().toISOString(); emitTool(call);
                 emitExecution?.({ id: crypto.randomUUID(), source: 'tool', status: 'success', name: native.name,
                   timestamp: call.endedAt, startedAt: call.startedAt, endedAt: call.endedAt, runId: executionRunId,
