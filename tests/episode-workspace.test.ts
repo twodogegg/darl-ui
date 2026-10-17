@@ -35,7 +35,7 @@ const output=()=>JSON.stringify({
 describe('episode screenplay + shot and asset planning',()=>{
   it('saves the original script without Agent confirmation and survives store reopening',()=>{
     const episode=store.create(projectId,'第 01 集')!;
-    const script='<路明非> 坐在卧室前，他说：还没结束。';
+    const script='  <路明非> 坐在卧室前，他说：还没结束。\n\n';
     expect(store.saveScript(episode.id,script,0)?.script).toBe(script);
     expect(store.get(episode.id)?.scriptRevision).toBe(1);
     expect(new EpisodeStore(path).get(episode.id)?.script).toBe(script);
