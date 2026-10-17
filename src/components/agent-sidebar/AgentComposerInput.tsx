@@ -79,6 +79,30 @@ export function AgentComposerInput({ value, onChange, onSubmit, insertion, onIns
     const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range);
     remember(); sync(); setMention(null);
   };
+  const deleteAdjacentReference = (key: 'Backspace' | 'Delete') => {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount || !selection.isCollapsed || !editor.current?.contains(selection.anchorNode)) return false;
+    const range = selection.getRangeAt(0);
+    const container = range.startContainer;
+    const offset = range.startOffset;
+    let adjacent: Node | null = null;
+    if (container.nodeType === Node.TEXT_NODE) {
+      if (key === 'Backspace' && offset === 0) adjacent = container.previousSibling;
+      if (key === 'Delete' && offset === (container.textContent?.length ?? 0)) adjacent = container.nextSibling;
+    } else {
+      adjacent = container.childNodes[key === 'Backspace' ? offset - 1 : offset] ?? null;
+    }
+    if (!(adjacent instanceof HTMLElement) || !adjacent.dataset.reference || !adjacent.parentNode) return false;
+    const parent = adjacent.parentNode;
+    const index = Array.prototype.indexOf.call(parent.childNodes, adjacent) as number;
+    parent.removeChild(adjacent);
+    range.setStart(parent, index);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    sync();
+    return true;
+  };
   const choose = (index: number) => {
     const item = options[index];
     if (!item || !mention) return;
@@ -96,6 +120,7 @@ export function AgentComposerInput({ value, onChange, onSubmit, insertion, onIns
     const range = selection.getRangeAt(0); range.deleteContents(); const text = document.createTextNode(event.clipboardData.getData('text/plain')); range.insertNode(text); range.setStartAfter(text); range.collapse(true); remember(); sync();
   }} onKeyDown={(event) => {
     if (event.nativeEvent.isComposing || composing.current) return;
+    if ((event.key === 'Backspace' || event.key === 'Delete') && deleteAdjacentReference(event.key)) { event.preventDefault(); setMention(null); return; }
     if (mention) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setActiveIndex((current) => options.length ? (current + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length : 0); return; }
       if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') { event.preventDefault(); choose(activeIndex); return; }

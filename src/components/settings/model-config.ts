@@ -177,9 +177,9 @@ export function enabledBindings(configuration: ModelConfiguration, model: Logica
 
 export function toAgentModels(configuration: ModelConfiguration, providers: ModelProvider[] = []): AgentModel[] {
   return configuration.models.filter((model) => model.enabled !== false).flatMap((model) => {
-    const binding = enabledBindings(configuration, model)[0];
-    if (!binding) return [];
+    return enabledBindings(configuration, model).flatMap((binding) => {
     const provider = providers.find((item) => item.id === binding.providerId);
+    if (providers.length && !provider) return [];
     const capabilities = effectiveCapabilities(configuration, model, binding);
     const text = model.type === 'text' && capabilities && 'reasoningEfforts' in capabilities ? capabilities : undefined;
     const media = capabilities && !('reasoningEfforts' in capabilities) ? capabilities : undefined;
@@ -200,6 +200,7 @@ export function toAgentModels(configuration: ModelConfiguration, providers: Mode
       },
       providerName: provider?.name,
     } as AgentModel];
+    });
   });
 }
 

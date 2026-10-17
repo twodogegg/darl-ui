@@ -9,6 +9,29 @@ import { AgentFailure, createAgentError, failure } from './errors';
 import { compactContextMessages, contextCharBudget, normalizeContextPolicy, selectedContext } from './context';
 import { LocalStorage, validateClientState, type ClientState } from './storage';
 
+/** Resolve Agent models against the same enabled logical bindings used by the Models page. */
+function resolveAgentTextModel(providers: StoredProvider[], configuration: ModelConfiguration, providerId: string, modelId: string) {
+  const provider = providers.find((item) => item.id === providerId);
+  if (!provider) return undefined;
+  const configured = configuration.models.filter((item) => item.enabled !== false && item.type === 'text')
+    .flatMap((item) => enabledBindings(configuration, item)
+      .filter((binding) => binding.providerId === providerId && binding.upstreamModelId === modelId)
+      .map((binding) => ({ item, binding })))[0];
+  if (!configured) return undefined;
+  const effective = effectiveCapabilities(configuration, configured.item, configured.binding);
+  const text = effective && 'reasoningEfforts' in effective ? effective : undefined;
+  const directory = provider.models.find((item) => item.id === modelId && item.type === 'text');
+  return {
+    provider,
+    model: {
+      ...directory,
+      id: modelId, name: configured.item.displayName, type: 'text' as const, providerId, enabled: true,
+      reasoningEfforts: text?.reasoningEfforts.filter((effort) => effort !== 'none') ?? [],
+      capabilities: { ...directory?.capabilities, tools: text?.tools, contextWindow: text?.contextWindow },
+    },
+  };
+}
+
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_DATA_URL_LENGTH = 64 + 4 * Math.ceil(MAX_IMAGE_BYTES / 3);
 
@@ -254,10 +277,9 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const incoming = body?.agent ?? body;
         const existing = agents.find((item) => item.id === incoming?.id);
         const agent = validateAgent(incoming, agents.filter((item) => item.id !== existing?.id));
-        const agentProvider = providers.find((provider) => provider.id === agent.providerId);
-        const agentModel = agentProvider?.models.find((model) => model.id === agent.modelId && model.type === 'text' && model.enabled !== false);
-        if (!agentProvider || !agentModel) throw new Error('Agent 选择的文本模型不存在或未启用');
-        if (agent.reasoningEfforts?.some((effort) => !agentModel.reasoningEfforts?.includes(effort))) throw new Error('Agent 推理强度不受模型支持');
+        const resolved = resolveAgentTextModel(providers, modelConfiguration, agent.providerId, agent.modelId);
+        if (!resolved) throw new Error('Agent 选择的文本模型不存在或未启用');
+        if (agent.reasoningEfforts?.some((effort) => !resolved.model.reasoningEfforts.includes(effort))) throw new Error('Agent 推理强度不受模型支持');
         const next = agents.some((item) => item.id === agent.id) ? agents.map((item) => item.id === agent.id ? agent : item) : [...agents, agent];
         if (agent.isDefault) next.forEach((item) => { item.isDefault = item.id === agent.id; });
         else {
@@ -318,28 +340,12 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         mcpScopeKey = `${userId}:${sessionId}`;
         const selectedAgent = body.agentId === undefined ? agents.find((item) => item.isDefault && item.enabled !== false) : body.agentId === null ? undefined : agents.find((item) => item.id === body.agentId);
         if (body.agentId !== undefined && body.agentId !== null && (!selectedAgent || selectedAgent.enabled === false)) throw new Error('请选择已启用的 Agent');
-        const provider = providers.find((item) => item.id === (selectedAgent?.providerId || body.providerId));
-        if (!provider) throw new Error('请选择已保存的模型提供方');
-        secret = provider.apiKey;
+        const providerId = selectedAgent?.providerId || body.providerId;
         const requestedModelId = selectedAgent?.modelId || body.modelId;
-        const providerModel = provider.models.find((item) => item.id === requestedModelId && item.type === 'text' && item.enabled !== false);
-        const configuredModel = modelConfiguration.models.find((item) => item.type === 'text' && item.enabled !== false && enabledBindings(modelConfiguration, item).some((binding) => binding.providerId === provider.id && binding.upstreamModelId === requestedModelId));
-        const configuredBinding = configuredModel && enabledBindings(modelConfiguration, configuredModel).find((binding) => binding.providerId === provider.id && binding.upstreamModelId === requestedModelId);
-        const configuredCapabilities = configuredModel && configuredBinding ? effectiveCapabilities(modelConfiguration, configuredModel, configuredBinding) : undefined;
-        const configuredText = configuredCapabilities && 'reasoningEfforts' in configuredCapabilities ? configuredCapabilities : undefined;
-        const model = providerModel ? {
-          ...providerModel,
-          ...(configuredText ? { reasoningEfforts: configuredText.reasoningEfforts, capabilities: { ...providerModel.capabilities, vision: configuredText.vision, tools: configuredText.tools, contextWindow: configuredText.contextWindow } } : {}),
-        } : (configuredModel && configuredBinding ? {
-          id: configuredBinding.upstreamModelId,
-          name: configuredModel.displayName,
-          providerId: provider.id,
-          type: 'text' as const,
-          enabled: true,
-          reasoningEfforts: configuredText?.reasoningEfforts,
-          capabilities: configuredText ? { vision: configuredText.vision, tools: configuredText.tools, contextWindow: configuredText.contextWindow } : undefined,
-        } : undefined);
-        if (!model) throw new Error('请选择已启用的文本模型');
+        const resolved = resolveAgentTextModel(providers, modelConfiguration, providerId, requestedModelId);
+        if (!resolved) throw new Error('请选择已启用的文本模型');
+        const { provider, model } = resolved;
+        secret = provider.apiKey;
         const effort = selectedAgent?.reasoningEfforts?.[0] || body.effort;
         if (effort && !model.reasoningEfforts?.includes(effort)) throw new Error('模型不支持此推理强度');
         if (!Array.isArray(body.messages) || !body.messages.length || body.messages.length > 200) throw new Error('对话消息数量无效');
@@ -363,9 +369,6 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           if (!content.some((item) => item.type === 'image')) throw new Error('图片消息不能为空');
           return { role: message.role, content };
         });
-        if (messages.some((message) => Array.isArray(message.content) && message.content.some((item) => item.type === 'image')) && model.capabilities?.vision === false) {
-          throw new Error('当前模型未启用视觉输入，请在模型设置中开启 vision 或选择支持图片的模型');
-        }
         if (!Array.isArray(body.skills) || body.skills.length > 30) throw new Error('Skills 格式无效');
         const requestedSkillIds = body.skillIds ?? [];
         if (!Array.isArray(requestedSkillIds) || requestedSkillIds.length > 30 || requestedSkillIds.some((id: unknown) => typeof id !== 'string')) throw new Error('Skills 格式无效');
@@ -524,9 +527,9 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const execution = await createExecution(scopedApps, restrictedAgent?.id, attachedImages, restrictedAgent?.applicationTools);
         const delegations: AgentDelegation[] = [];
         for (const child of agents.filter((item) => item.id !== selectedAgent?.id && item.enabled !== false && !item.builtIn)) {
-          const childProvider = providers.find((item) => item.id === child.providerId);
-          const childModel = childProvider?.models.find((item) => item.id === child.modelId && item.type === 'text' && item.enabled !== false);
-          if (!childProvider || !childModel) continue;
+          const childResolved = resolveAgentTextModel(providers, modelConfiguration, child.providerId, child.modelId);
+          if (!childResolved) continue;
+          const { provider: childProvider, model: childModel } = childResolved;
           const childApps = scopedApps.filter((app) => (child.applicationIds || []).includes(app.id));
           delegations.push({
             name: `ask_${child.id}`,

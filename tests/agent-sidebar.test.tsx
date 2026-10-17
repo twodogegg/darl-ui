@@ -69,6 +69,39 @@ describe('AgentSidebar', () => {
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 
+  it('Backspace 和 Delete 可以整块删除 MCP / Skill 引用并同步状态', () => {
+    const appChanges = vi.fn();
+    const skillChanges = vi.fn();
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one"
+      applications={apps} skills={skills} onSelectedApplicationIdsChange={appChanges} onSelectedSkillIdsChange={skillChanges} />);
+    const editor = screen.getByRole('textbox', { name: '输入消息' });
+    const setCaret = (node: Node, offset: number) => {
+      const range = document.createRange();
+      range.setStart(node, offset); range.collapse(true);
+      const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range);
+    };
+    const add = (text: string) => {
+      const node = document.createTextNode(text); editor.append(node);
+      setCaret(node, text.length); fireEvent.input(editor);
+    };
+    add('@客');
+    fireEvent.click(screen.getByRole('option', { name: /客户系统/ }));
+    expect(appChanges).toHaveBeenLastCalledWith(['crm']);
+    const appToken = editor.querySelector('[data-reference]')!;
+    setCaret(appToken.parentNode!, Array.prototype.indexOf.call(appToken.parentNode!.childNodes, appToken) + 1);
+    fireEvent.keyDown(editor, { key: 'Backspace' });
+    expect(editor.querySelector('.darl-agent-inline-reference--app')).toBeNull();
+    expect(appChanges).toHaveBeenLastCalledWith([]);
+    add('/客');
+    fireEvent.click(screen.getByRole('option', { name: /客户摘要/ }));
+    expect(skillChanges).toHaveBeenLastCalledWith(['summary']);
+    const skillToken = editor.querySelector('[data-reference]')!;
+    setCaret(skillToken.parentNode!, Array.prototype.indexOf.call(skillToken.parentNode!.childNodes, skillToken));
+    fireEvent.keyDown(editor, { key: 'Delete' });
+    expect(editor.querySelector('.darl-agent-inline-reference--skill')).toBeNull();
+    expect(skillChanges).toHaveBeenLastCalledWith([]);
+  });
+
   it('根据动态应用和 Skill 数据选择能力并提交消息', async () => {
     const onSend = vi.fn();
     render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" onSend={onSend} applications={apps} skills={skills} models={[{ id: 'model', name: '通用模型', reasoningEfforts: ['低', '高'] }]} />);
@@ -106,9 +139,13 @@ describe('AgentSidebar', () => {
     render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" onSend={onSend} />);
     fireEvent.click(screen.getByRole('button', { name: '添加材料或能力' }));
     fireEvent.click(screen.getByRole('button', { name: /上传图片/ }));
+    const createObjectURL = vi.fn(() => 'blob:agent-image-preview');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
     const image = new File(['image-bytes'], '参考图.png', { type: 'image/png' });
     fireEvent.change(screen.getByLabelText('选择上传文件'), { target: { files: [image] } });
-    expect(screen.getByText('参考图.png')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('参考图.png')).not.toBeInTheDocument());
+    expect(createObjectURL).toHaveBeenCalledWith(image);
+    expect(screen.getByRole('button', { name: '移除附件 参考图.png' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
     await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ content: '', files: [image], attachments: [expect.objectContaining({ name: '参考图.png', type: 'image/png', data: expect.stringMatching(/^data:image\/png;base64,/) })] })));
   });
