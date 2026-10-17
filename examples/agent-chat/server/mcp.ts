@@ -55,7 +55,7 @@ export async function saveApplications(directory: string, configs: McpApplicatio
   if (configs.length > 20) throw new Error('MCP 应用最多配置 20 个');
   const ids = new Set<string>();
   for (const app of configs) {
-    if (!/^[\\w-]{1,80}$/.test(app.id) || !app.name?.trim() || ids.has(app.id)) throw new Error('MCP 应用 ID 或名称无效');
+    if (!/^[\w-]{1,80}$/.test(app.id) || !app.name?.trim() || ids.has(app.id)) throw new Error('MCP 应用 ID 或名称无效');
     ids.add(app.id);
     const url = new URL(app.url);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('MCP 地址无效');
@@ -65,7 +65,7 @@ export async function saveApplications(directory: string, configs: McpApplicatio
   await mkdir(directory, { recursive: true });
   const target = resolve(directory, 'applications.json');
   const temporary = resolve(directory, `applications.${process.pid}.${crypto.randomUUID()}.tmp`);
-  await writeFile(temporary, JSON.stringify(configs, null, 2) + '\\n', { mode: 0o600, flag: 'wx' });
+  await writeFile(temporary, JSON.stringify(configs, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
   await rename(temporary, target);
 }
 
