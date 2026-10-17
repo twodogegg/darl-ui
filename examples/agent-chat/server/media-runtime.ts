@@ -190,7 +190,7 @@ export class MediaRuntime {
         if (!marked.changes) continue;
         counts.set(job.model_id, active + 1);
         free--;
-        void this.execute({ ...job, status: 'running', phase: 'submitting', lease_token: token });
+        void this.execute({ ...job, status: 'running', phase: 'submitting', lease_token: token, attempts: job.attempts + 1 });
       }
       let polls = Math.max(0, settings.pollConcurrency - this.polling.size);
       const due = this.rows("SELECT * FROM generation_jobs WHERE status='running' AND remote_id IS NOT NULL AND next_poll_at<=? ORDER BY next_poll_at LIMIT 2000", Date.now());
@@ -219,7 +219,15 @@ export class MediaRuntime {
         this.db.prepare("UPDATE generation_jobs SET remote_id=?,phase='remote',lease_token=NULL,next_poll_at=?,updated_at=? WHERE id=? AND status='running'")
           .run(created.id, now + this.settings().pollSeconds * 1000, now, job.id);
       }
-    } catch (error) { this.fail(job, error); }
+    } catch (error) {
+      const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 0;
+      if (status === 429 && job.attempts < 5) {
+        // HTTP 429 means upstream refused this request. Safely retry with persisted backoff.
+        const delay = Math.min(120000, 5000 * 2 ** (job.attempts - 1));
+        this.db.prepare("UPDATE generation_jobs SET status='queued',phase='rate-limited',error=?,available_at=?,lease_token=NULL,updated_at=? WHERE id=? AND status='running'")
+          .run('供应商限流，稍后自动重试', Date.now() + delay, Date.now(), job.id);
+      } else this.fail(job, error);
+    }
     finally { this.submitting.delete(job.id); this.schedule(); }
   }
   private async poll(job: Job) {
