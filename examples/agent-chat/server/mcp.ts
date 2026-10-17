@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdir, writeFile, rename } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -48,6 +48,25 @@ export async function loadApplications(directory: string): Promise<McpApplicatio
     ids.add(app.id);
   }
   return value;
+}
+
+/** Persist the local development host's MCP catalog without leaking server credentials. */
+export async function saveApplications(directory: string, configs: McpApplicationConfig[]) {
+  if (configs.length > 20) throw new Error('MCP 应用最多配置 20 个');
+  const ids = new Set<string>();
+  for (const app of configs) {
+    if (!/^[\\w-]{1,80}$/.test(app.id) || !app.name?.trim() || ids.has(app.id)) throw new Error('MCP 应用 ID 或名称无效');
+    ids.add(app.id);
+    const url = new URL(app.url);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('MCP 地址无效');
+    if (app.apiKey !== undefined && typeof app.apiKey !== 'string') throw new Error('MCP 密钥格式无效');
+    if (app.readOnlyTools && (!Array.isArray(app.readOnlyTools) || app.readOnlyTools.some((name) => typeof name !== 'string'))) throw new Error('只读工具配置无效');
+  }
+  await mkdir(directory, { recursive: true });
+  const target = resolve(directory, 'applications.json');
+  const temporary = resolve(directory, `applications.${process.pid}.${crypto.randomUUID()}.tmp`);
+  await writeFile(temporary, JSON.stringify(configs, null, 2) + '\\n', { mode: 0o600, flag: 'wx' });
+  await rename(temporary, target);
 }
 
 export function toolRisk(app: McpApplicationConfig, tool: Tool): 'read' | 'write' | 'dangerous' {
