@@ -68,6 +68,8 @@ export interface ModelBinding {
   enabled?: boolean;
   priority?: number;
   weight?: number;
+  /** Maximum number of in-flight generations for this model's single provider. */
+  maxConcurrency?: number;
 }
 
 export interface LogicalModel {
@@ -103,8 +105,8 @@ export interface ModelConfigurationError {
 export const BUILTIN_PROTOCOLS: ProtocolAdapterDefinition[] = [
   { key: 'openai-completions', label: 'OpenAI Chat Completions', types: ['text'], implemented: true },
   { key: 'openai-responses', label: 'OpenAI Responses', types: ['text'], implemented: true },
-  { key: 'openai-images', label: 'OpenAI Images', types: ['image'], implemented: false, description: '由宿主图片适配器提供' },
-  { key: 'darl-h3-flash-unified', label: 'Darl H3 Flash（新版统一视频）', types: ['video'], implemented: false, description: '新版 /v1/files → /v1/videos 合同' },
+  { key: 'openai-images', label: 'OpenAI Images', types: ['image'], implemented: true, description: '宿主接入 GPT Image 2' },
+  { key: 'darl-h3-flash-unified', label: 'Darl H3 Flash（新版统一视频）', types: ['video'], implemented: true, description: '宿主接入 H3 Flash；首尾帧尚未验证' },
 ];
 
 export const BUILTIN_TEMPLATES: CapabilityTemplate[] = [
@@ -123,7 +125,7 @@ export const BUILTIN_TEMPLATES: CapabilityTemplate[] = [
   {
     id: 'gpt-image-2', name: 'GPT Image 2', type: 'image',
     capabilities: {
-      supportsTextToImage: true, supportsReferenceEdit: true, maxReferenceImages: 16, maxOutputs: 4,
+      supportsTextToImage: true, supportsReferenceEdit: true, maxReferenceImages: 16, maxOutputs: 10,
       sizes: ['auto', '1024x1024', '1536x1024', '1024x1536'], aspectRatios: ['1:1', '3:2', '2:3'], qualities: ['auto', 'low', 'medium', 'high'], formats: ['png', 'jpeg', 'webp'], transparentBackground: true,
     },
     defaults: { size: 'auto', quality: 'auto', count: 1 },
@@ -295,12 +297,16 @@ export function validateModelConfiguration(configuration: ModelConfiguration): M
     const templateMatches = template.type === model.type;
     if (!templateMatches) errors.push({ path: `${path}.capabilityTemplateId`, message: '能力模板类型与模型不一致' });
     const bindingIds = new Set<string>();
+    if ((model.type === 'image' || model.type === 'video') && model.bindings.filter((b) => b.enabled !== false).length > 1)
+      errors.push({ path: path + '.bindings', message: '图片和视频模型只能配置一个有效供应商' });
     if (!Array.isArray(model.bindings)) { errors.push({ path: `${path}.bindings`, message: '渠道绑定必须是数组' }); continue; }
     for (const [bindingIndex, binding] of model.bindings.entries()) {
       const bindingPath = `${path}.bindings[${bindingIndex}]`;
       if (!binding || typeof binding !== 'object') { errors.push({ path: bindingPath, message: '渠道绑定结构无效' }); continue; }
       if (bindingIds.has(binding.id)) errors.push({ path: `${bindingPath}.id`, message: '渠道绑定 ID 必须唯一' });
       bindingIds.add(binding.id);
+      if (binding.maxConcurrency !== undefined && (!Number.isSafeInteger(binding.maxConcurrency) || binding.maxConcurrency < 1 || binding.maxConcurrency > 100000))
+        errors.push({ path: bindingPath + '.maxConcurrency', message: '最大并发必须为 1-100000 的整数' });
       const protocol = protocols.get(binding.protocolKey);
       if (!protocol) errors.push({ path: `${bindingPath}.protocolKey`, message: '协议未安装或尚未由宿主注册' });
       else if (!protocol.types.includes(model.type)) errors.push({ path: `${bindingPath}.protocolKey`, message: '协议与模型类型不匹配' });

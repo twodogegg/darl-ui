@@ -9,6 +9,9 @@ import { AgentFailure, createAgentError, failure } from './errors';
 import { compactContextMessages, contextCharBudget, normalizeContextPolicy, selectedContext } from './context';
 import { LocalStorage, validateClientState, type ClientState } from './storage';
 import { handleWorkspaceProjectRequest } from './projects';
+import { MediaRuntime } from './media-runtime';
+import { handleMediaRequest } from './media-api';
+import { mediaToolDefinitions, runMediaTool } from './media-tools';
 import { ProjectStore } from './project-store';
 
 /** Resolve Agent models against the same enabled logical bindings used by the Models page. */
@@ -38,7 +41,7 @@ const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_DATA_URL_LENGTH = 64 + 4 * Math.ceil(MAX_IMAGE_BYTES / 3);
 type DefaultMediaSelection = {
   image: { modelId: 'gpt-image-2'; resolution: '1K' | '2K' | '4K'; aspectRatio: '1:1' | '3:4' | '4:3' | '16:9' | '9:16' };
-  video: { modelId: 'minimax-h3-flash'; resolution: '480P'; aspectRatio: '16:9' };
+  video: { modelId: 'minimax-h3-flash'; resolution: '480P' | '768P'; aspectRatio: '16:9' | '9:16' };
 };
 const defaultMediaSelection: DefaultMediaSelection = {
   image: { modelId: 'gpt-image-2', resolution: '2K', aspectRatio: '16:9' },
@@ -56,10 +59,10 @@ function validateDefaultMediaSelection(value: unknown): DefaultMediaSelection {
   const imageResolutions = ['1K', '2K', '4K'];
   const imageRatios = ['1:1', '3:4', '4:3', '16:9', '9:16'];
   if (imageChoice.modelId !== 'gpt-image-2' || !imageResolutions.includes(String(imageChoice.resolution)) || !imageRatios.includes(String(imageChoice.aspectRatio))) throw new Error('默认图片模型参数不受支持');
-  if (videoChoice.modelId !== 'minimax-h3-flash' || videoChoice.resolution !== '480P' || videoChoice.aspectRatio !== '16:9') throw new Error('默认视频模型参数不受支持');
+  if (videoChoice.modelId !== 'minimax-h3-flash' || !['480P','768P'].includes(String(videoChoice.resolution)) || !['16:9','9:16'].includes(String(videoChoice.aspectRatio))) throw new Error('默认视频模型参数不受支持');
   return {
     image: { modelId: 'gpt-image-2', resolution: imageChoice.resolution as DefaultMediaSelection['image']['resolution'], aspectRatio: imageChoice.aspectRatio as DefaultMediaSelection['image']['aspectRatio'] },
-    video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' },
+    video: { modelId: 'minimax-h3-flash', resolution: videoChoice.resolution as DefaultMediaSelection['video']['resolution'], aspectRatio: videoChoice.aspectRatio as DefaultMediaSelection['video']['aspectRatio'] },
   };
 }
 
@@ -185,6 +188,7 @@ export function findAttachedImageForUpload(tool: McpToolDescriptor, args: Record
 export function createApi(directory: string, env: Record<string, string>, promptFile: string) {
   const storage = new LocalStorage(directory);
   const projectStore = new ProjectStore(storage.path);
+  const mediaRuntime = new MediaRuntime({ dbPath: storage.path, directory, config: () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), providers: () => storage.getConfig<StoredProvider[]>('providers') || [] });
   const confirmations = new ToolConfirmations();
   const connectionManager = new McpConnectionManager(connectApplicationWithRetry);
   const validatePrompt = (value: unknown): string => {
@@ -196,13 +200,22 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   if (!storage.getConfig<StoredProvider[]>('providers')) storage.setConfig('providers', initial);
   if (!storage.getConfig<ModelConfiguration>('modelConfiguration')) storage.setConfig('modelConfiguration', defaultModelConfiguration());
   if (!storage.getConfig<DefaultMediaSelection>('defaultMediaModels')) storage.setConfig('defaultMediaModels', defaultMediaSelection);
+  mediaRuntime.start();
   if (!storage.getConfig<string>('systemPrompt')) {
     storage.setConfig('systemPrompt', validatePrompt(readFileSync(promptFile, 'utf8')));
   }
   const loadPrompt = async () => validatePrompt(storage.getConfig<string>('systemPrompt'));
   const load = async (): Promise<StoredProvider[]> => storage.getConfig<StoredProvider[]>('providers') || initial;
   const loadModelConfiguration = async (): Promise<ModelConfiguration> => {
-    const value = storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration();
+    const stored = storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration();
+    // Persisted configurations from before media adapters existed retain implemented=false.
+    // Installed adapter availability is owned by the host, not by the saved UI snapshot.
+    const builtin = defaultModelConfiguration().protocols;
+    const value: ModelConfiguration = { ...stored, protocols: stored.protocols.map((protocol) => {
+      const installed = builtin.find((item) => item.key === protocol.key);
+      return installed && (protocol.key === 'openai-images' || protocol.key === 'darl-h3-flash-unified')
+        ? { ...protocol, implemented: true, description: installed.description } : protocol;
+    }) };
     if (validateModelConfiguration(value).length) throw new Error('模型配置已损坏，请重新保存模型配置');
     return value;
   };
@@ -222,6 +235,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     const origin = request.headers.origin;
     if (portOf(host) !== '5197' || (origin && portOf(origin) !== '5197')) return send(403, { error: '仅允许本服务端口同源访问' });
     if (await handleWorkspaceProjectRequest(request, response, projectStore)) return;
+    if (await handleMediaRequest(request, response, mediaRuntime)) return;
     const controller = new AbortController();
     response.on('close', () => controller.abort());
     const requestId = crypto.randomUUID();
@@ -306,7 +320,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const errors = validateModelConfiguration(incoming as ModelConfiguration);
         if (errors.length) throw new Error(errors[0].message);
         const next = incoming as ModelConfiguration;
-        storage.setConfig('modelConfiguration', next);
+        storage.setConfig('modelConfiguration', { ...next, protocols: next.protocols.map((protocol) => (protocol.key === 'openai-images' || protocol.key === 'darl-h3-flash-unified') ? { ...protocol, implemented: true } : protocol) });
         return send(200, next);
       }
       if (path === '/api/agents' && request.method === 'GET') return send(200, agents.map(publicAgent));
@@ -470,9 +484,44 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           const functions = ownedConnections.flatMap((connection, appIndex) => connection.tools.filter((tool) => !applicationTools?.[connection.app.id] || applicationTools[connection.app.id].includes(tool.name)).map((tool, index) => ({ name: `mcp_${appIndex}_${index}`, connection, tool })));
           if (functions.length > 128) throw new Error('所选应用合计超过 128 个工具，请减少应用数量');
           const execution: ToolExecution = {
-          tools: functions.map(({ name, connection, tool }) => ({ name, description: `${connection.app.name} / ${tool.title || tool.name} (${tool.name}): ${tool.description || ''}`, parameters: tool.inputSchema })),
+          tools: [...functions.map(({ name, connection, tool }) => ({ name, description: `${connection.app.name} / ${tool.title || tool.name} (${tool.name}): ${tool.description || ''}`, parameters: tool.inputSchema })), ...mediaToolDefinitions],
           execute: async (request: { name: string; arguments: string }, toolSignal = signal) => {
             const callSignal = AbortSignal.any([signal, toolSignal]);
+            const native = mediaToolDefinitions.find((item) => item.name === request.name);
+            if (native) {
+              let args: Record<string, unknown>;
+              try { args = JSON.parse(request.arguments || '{}') as Record<string, unknown>; }
+              catch { throw new Error('媒体工具参数 JSON 不合法'); }
+              if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('媒体工具参数格式无效');
+              const isRead = native.name === 'media_get_task';
+              const call: AgentToolCall = { id: crypto.randomUUID(), appId: 'native:media', appName: '媒体任务', toolName: native.name,
+                input: args, status: 'pending', attempt: 1, runId: executionRunId, ...(ownerAgentId ? { agentId: ownerAgentId } : {}) };
+              const now = new Date().toISOString();
+              emitExecution?.({ id: crypto.randomUUID(), source: 'tool', status: 'started', name: native.name, timestamp: now,
+                runId: executionRunId, parentRunId: executionRunId, requestId, toolCallId: call.id });
+              emitTool(call);
+              if (!isRead) {
+                call.status = 'confirmation';
+                emitExecution?.({ id: crypto.randomUUID(), source: 'tool', status: 'confirmation', name: native.name,
+                  timestamp: new Date().toISOString(), runId: executionRunId, parentRunId: executionRunId, requestId, toolCallId: call.id });
+                emitTool(call);
+                if (!await confirmations.wait(call.id, callSignal)) throw new Error('用户拒绝了此次生成请求');
+              }
+              callSignal.throwIfAborted();
+              call.status = 'running'; call.startedAt = new Date().toISOString(); emitTool(call);
+              try {
+                const result = runMediaTool(mediaRuntime, native.name, args, images, loadDefaultMediaSelection());
+                call.status = 'success'; call.endedAt = new Date().toISOString(); emitTool(call);
+                emitExecution?.({ id: crypto.randomUUID(), source: 'tool', status: 'success', name: native.name,
+                  timestamp: call.endedAt, startedAt: call.startedAt, endedAt: call.endedAt, runId: executionRunId,
+                  parentRunId: executionRunId, requestId, toolCallId: call.id });
+                return JSON.stringify(result);
+              } catch (error) {
+                call.status = 'error'; call.error = error instanceof Error ? error.message : '媒体任务提交失败';
+                call.endedAt = new Date().toISOString(); emitTool(call);
+                return JSON.stringify({ isError: true, error: call.error });
+              }
+            }
             const selected = functions.find((item) => item.name === request.name);
             if (!selected) throw failure('tool-validation', 'TOOL_NOT_AUTHORIZED', '模型请求了未授权的工具', false);
             const { connection, tool } = selected;
@@ -560,7 +609,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
             }
           },
           };
-          return functions.length ? execution : undefined;
+          return functions.length || mediaToolDefinitions.length ? execution : undefined;
         };
         const execution = await createExecution(scopedApps, restrictedAgent?.id, attachedImages, restrictedAgent?.applicationTools);
         const delegations: AgentDelegation[] = [];
