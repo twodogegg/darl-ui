@@ -103,8 +103,8 @@ export interface ModelConfigurationError {
 export const BUILTIN_PROTOCOLS: ProtocolAdapterDefinition[] = [
   { key: 'openai-completions', label: 'OpenAI Chat Completions', types: ['text'], implemented: true },
   { key: 'openai-responses', label: 'OpenAI Responses', types: ['text'], implemented: true },
-  { key: 'openai-images', label: 'OpenAI Images', types: ['image'], implemented: false, description: '由宿主图片适配器提供' },
-  { key: 'darl-h3-flash-unified', label: 'Darl H3 Flash（新版统一视频）', types: ['video'], implemented: false, description: '新版 /v1/files → /v1/videos 合同' },
+  { key: 'openai-images', label: 'OpenAI Images', types: ['image'], implemented: true, description: '宿主已接通基础文生图；参考图编辑仍待网关验收' },
+  { key: 'darl-h3-flash-unified', label: 'Darl H3 Flash（新版统一视频）', types: ['video'], implemented: true, description: '宿主已接通基础文生视频；参考素材与首尾帧仍待网关验收' },
 ];
 
 export const BUILTIN_TEMPLATES: CapabilityTemplate[] = [
