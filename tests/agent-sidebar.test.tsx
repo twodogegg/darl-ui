@@ -45,8 +45,7 @@ describe('AgentSidebar', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('确认请求失败');
     fireEvent.click(screen.getByRole('button', { name: '拒绝' }));
     await waitFor(() => expect(onToolConfirm).toHaveBeenLastCalledWith('write-call', false));
-    expect(screen.getByRole('button', { name: '允许执行' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled();
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '确认执行 MCP 工具' })).not.toBeInTheDocument());
   });
 
   it('输入 @ 时显示能力建议并可插入引用', () => {
