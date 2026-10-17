@@ -199,6 +199,10 @@
 .darl-agent-skill-file-editor > textarea { flex: 1; min-height: 100px; padding: 10px; border: 0; border-radius: 0; resize: none; font: 11px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .darl-agent-skill-file-editor > textarea::placeholder { color: var(--darl-agent-muted); opacity: .7; }
 .darl-agent-skill-manager-feedback { min-height: 26px; padding: 7px 0 0; color: var(--darl-agent-muted); font-size: 10px; }
+.darl-agent-skill-invocation-hint { color: var(--darl-agent-muted); font-size: 11px; }
+.darl-agent-skill-auto-invocation { display: grid; gap: 4px; }
+.darl-agent-skill-auto-invocation .darl-switch { width: fit-content; color: var(--darl-agent-text); font-size: 11px; }
+.darl-agent-skill-auto-invocation small { color: var(--darl-agent-muted); font-size: 10px; }
 .darl-agent-skill-manager-feedback .is-error { color: var(--darl-danger, #dc2626); }
 .darl-agent-skill-manager-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 9px; color: var(--darl-agent-muted); font-size: 10px; }
 .darl-agent-skill-manager-footer > div { display: flex; gap: 6px; }

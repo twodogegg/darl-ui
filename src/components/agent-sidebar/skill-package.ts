@@ -123,12 +123,15 @@ export async function importSkillPackage(files: File[]): Promise<AgentSkill> {
       resources.push({ path, content: btoa(binary), encoding: 'base64' });
     }
   }
-  const skill: AgentSkill = { id: newId(), ...parsed, slug: parsed.name, frontmatter: markdown.match(/^\uFEFF?---[^\S\r\n]*\r?\n([\s\S]*?)\r?\n---/)?.[1], resources, category: '通用', enabled: true, scope: 'custom', version: '1.0' };
+  const skill: AgentSkill = { id: newId(), ...parsed, slug: parsed.name, frontmatter: markdown.match(/^\uFEFF?---[^\S\r\n]*\r?\n([\s\S]*?)\r?\n---/)?.[1], resources, category: '通用', allowImplicitInvocation: true, scope: 'custom', version: '1.0' };
   const presentation = resources.find((item) => item.path === 'agents/openai.yaml' && !item.encoding);
   if (presentation) {
     const doc = yaml(presentation.content);
     const displayName: unknown = doc.getIn(['interface', 'display_name']);
     if (typeof displayName === 'string' && displayName.trim()) skill.name = displayName.trim();
+    const allowImplicitInvocation: unknown = doc.getIn(['policy', 'allow_implicit_invocation']);
+    if (allowImplicitInvocation !== undefined && typeof allowImplicitInvocation !== 'boolean') throw new Error('agents/openai.yaml 的 allow_implicit_invocation 必须是布尔值');
+    if (typeof allowImplicitInvocation === 'boolean') skill.allowImplicitInvocation = allowImplicitInvocation;
   }
   validateSkill(skill);
   return skill;
@@ -140,7 +143,7 @@ export function skillMarkdown(skill: Pick<AgentSkill, 'name' | 'slug' | 'frontma
   return `---\n${doc.toString().trimEnd()}\n---\n\n${(skill.instructions || '').trim()}\n`;
 }
 export function newSkillDraft(): AgentSkill {
-  return { id: newId(), name: '', description: '', instructions: '', resources: [], category: '通用', enabled: true, scope: 'custom', version: '0.0' };
+  return { id: newId(), name: '', description: '', instructions: '', resources: [], category: '通用', allowImplicitInvocation: true, scope: 'custom', version: '0.0' };
 }
 export function nextSkillVersion(version = '0.0') {
   if (!/^\d+(\.\d+)*$/.test(version)) return `${version}.1`;

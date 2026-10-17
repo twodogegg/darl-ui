@@ -49,23 +49,19 @@ describe('AgentSidebar', () => {
     expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled();
   });
 
-  it('输入 @ 和 / 时显示对应建议并可插入不同颜色的引用', () => {
+  it('输入 @ 时显示能力建议并可插入引用', () => {
     render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" applications={apps} skills={skills} onSend={vi.fn()} />);
     const editor = screen.getByRole('textbox', { name: '输入消息' });
     const type = (text: string) => { const node = document.createTextNode(text); editor.append(node); const range = document.createRange(); range.setStart(node, text.length); range.collapse(true); const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); fireEvent.input(editor); fireEvent.keyUp(editor, { key: 'a' }); };
     type('@客');
-    expect(screen.getByRole('listbox', { name: '应用建议' })).toBeInTheDocument();
+    expect(screen.getByRole('listbox', { name: '能力建议' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('option', { name: /客户系统/ }));
     expect(editor.querySelector('.darl-agent-inline-reference--app')).toHaveTextContent('@客户系统');
-    type('/客');
-    expect(screen.getByRole('listbox', { name: 'Skill 建议' })).toBeInTheDocument();
-    fireEvent.keyDown(editor, { key: 'Enter' });
-    expect(editor.querySelector('.darl-agent-inline-reference--skill')).toHaveTextContent('/客户摘要');
-    type(' @没有匹配');
-    expect(screen.getByText('没有匹配的可用应用')).toBeInTheDocument();
-    fireEvent.keyDown(editor, { key: 'Enter' });
-    expect(screen.getByRole('listbox', { name: '应用建议' })).toBeInTheDocument();
-    fireEvent.keyDown(editor, { key: 'Escape' });
+    type('@客');
+    expect(screen.getByRole('listbox', { name: '能力建议' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: /客户摘要/ }));
+    expect(editor.querySelector('.darl-agent-inline-reference--skill')).toHaveTextContent('@客户摘要');
+    type(' /没有匹配');
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 
@@ -92,7 +88,7 @@ describe('AgentSidebar', () => {
     fireEvent.keyDown(editor, { key: 'Backspace' });
     expect(editor.querySelector('.darl-agent-inline-reference--app')).toBeNull();
     expect(appChanges).toHaveBeenLastCalledWith([]);
-    add('/客');
+    add('@客');
     fireEvent.click(screen.getByRole('option', { name: /客户摘要/ }));
     expect(skillChanges).toHaveBeenLastCalledWith(['summary']);
     const skillToken = editor.querySelector('[data-reference]')!;
@@ -120,10 +116,12 @@ describe('AgentSidebar', () => {
   it('以角色卡选择并切换主 Agent，不显示额外的主 Agent 占位项', async () => {
     const onSend = vi.fn();
     const agents = [{ id: 'art', name: '美术 Agent', description: '处理美术任务' }, { id: 'writer', name: '文案 Agent', description: '处理文案任务' }];
-    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" onSend={onSend} agents={agents} models={[{ id: 'model', name: '通用模型' }]} />);
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" onSend={onSend} agents={agents} models={[{ id: 'model', name: '通用模型', reasoningEfforts: ['低', '高'] }]} />);
     fireEvent.click(screen.getByRole('button', { name: '选择 Agent' }));
     expect(screen.queryByRole('button', { name: /主 Agent/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /美术 Agent/ }));
+    expect(screen.getByRole('button', { name: /通用模型/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /思考：/ })).toBeInTheDocument();
     fireEvent.input(screen.getByRole('textbox', { name: '输入消息' }), { target: { textContent: '设计一个角色' } });
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
     await waitFor(() => expect(onSend).toHaveBeenLastCalledWith(expect.objectContaining({ agentId: 'art' })));
@@ -303,19 +301,12 @@ describe('AgentSidebar', () => {
     expect(screen.queryByRole('button', { name: /思考：/ })).toBeNull();
   });
 
-  it('Skill 保存失败保留原列表并显示错误', async () => {
-    const onSkillSave = vi.fn().mockRejectedValue(new Error('存储不可用'));
-    const existing = { ...skills[0], instructions: '原有指令', version: '1.0' };
-    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} skills={[existing]} onSkillSave={onSkillSave} />);
+  it('聊天侧栏不再显示 Skill 管理入口', () => {
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} skills={skills} />);
     fireEvent.click(screen.getByRole('button', { name: '添加材料或能力' }));
     fireEvent.click(screen.getByRole('button', { name: /选择 Skill/ }));
-    fireEvent.click(screen.getByRole('button', { name: '管理 Skill' }));
-    expect(screen.getByRole('dialog', { name: '管理 Skill' })).toBeInTheDocument();
-    fireEvent.change(screen.getByRole('textbox', { name: '名称' }), { target: { value: '失败的更改' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
-    await screen.findByText('存储不可用');
-    expect(screen.getByRole('button', { name: /客户摘要 整理客户信息/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /失败的更改 整理客户信息/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: '管理 Skill' })).toBeNull();
+    expect(screen.getByRole('button', { name: /上传/ })).toBeInTheDocument();
   });
 
 });

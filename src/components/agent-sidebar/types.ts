@@ -65,6 +65,9 @@ export interface AgentSkill {
   /** Original YAML metadata, preserved when exporting SKILL.md. */
   frontmatter?: string;
   category?: string;
+  /** OpenAI Skills policy. Defaults to true when omitted. */
+  allowImplicitInvocation?: boolean;
+  /** @deprecated Skills are always available; kept for persisted data compatibility. */
   enabled?: boolean;
   scope?: 'builtin' | 'custom';
   favorite?: boolean;
@@ -188,9 +191,6 @@ export interface AgentSidebarProps {
   skills?: AgentSkill[];
   onSkillUpload?: (file: File) => void | Promise<void>;
   onSkillImport?: (skill: AgentSkill) => void | Promise<void>;
-  onSkillSave?: (skill: AgentSkill) => void | Promise<void>;
-  onSkillDelete?: (skillId: string) => void | Promise<void>;
-  onSkillFavoriteChange?: (skillId: string, favorite: boolean) => void | Promise<void>;
   onFileUpload?: (files: File[]) => void | Promise<void>;
   models?: AgentModel[];
   selectedApplicationIds?: string[];

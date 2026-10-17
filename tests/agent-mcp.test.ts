@@ -68,7 +68,7 @@ describe('MCP host policy', () => {
     const other = { ...app, id: 'other', name: 'Other' };
     const messages = [{ role: 'user' as const, content: '[素材库](app:catalog) 能做什么？' }, { role: 'assistant' as const, content: '可以查询素材。' }, { role: 'user' as const, content: '我有哪些素材？' }];
     expect(conversationApplications([app, other], [], JSON.parse(JSON.stringify(messages)))).toEqual([app]);
-    expect(conversationApplications([app, other], ['other', 'catalog'], messages)).toEqual([other, app]);
+    expect(conversationApplications([app, other], ['other', 'catalog'], messages)).toEqual([app]);
   });
 
   it('isolates new conversations and excludes references after a regenerated turn', () => {

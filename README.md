@@ -293,17 +293,17 @@ import '@darl/ui/styles.css';
 
 服务端示例为每次聊天返回 `requestId` 和顶层 `runId`，工具及子 Agent 事件携带 `runId` / `parentRunId` 以便关联。失败事件使用 `AgentErrorInfo`，区分模型、MCP 连接、MCP 工具、工具参数、子 Agent 委派、校验、取消和超时；错误卡片显示错误码、requestId、阶段、是否可重试及下一步建议，不展示完整上游响应或敏感工具参数。
 
-`onSkillImport`、`onSkillSave`、`onSkillDelete` 和 `onSkillFavoriteChange` 用于接管 Skill 库变更；不传这些回调时，侧栏仍会在当前组件实例内完成本地编辑和选择。
+`onSkillImport` 用于接管聊天侧栏的 Skill 上传；Skill 的编辑、导入、收藏和删除统一由「设置 → Skills」页面接管。
 
-组件保留各会话的本地草稿和待发送附件，支持 DarlUIProvider 主题。桌面固定在右侧，手机端全屏。Skill 管理器支持新建、编辑、停用、删除，以及导入 `SKILL.md` 或包含 `references/`、`scripts/`、`assets/`、`agents/` 的 ZIP / 文件集合；导入会校验 frontmatter、资源路径和大小，不执行 Skill 内的脚本。Skill 版本在保存时递增，真实存储由宿主通过 `onSkillImport/onSkillSave/onSkillDelete` 接管。演示中的历史和 Skill 保存在当前页面内存中，示例回复和工具记录均为本地演示，附件不上传。真实模型、MCP 执行、账号鉴权和服务端历史留给宿主接入。
+组件保留各会话的本地草稿和待发送附件，支持 DarlUIProvider 主题。桌面固定在右侧，手机端全屏。Skill 管理器在「设置 → Skills」中支持新建、编辑、收藏、删除，以及导入 `SKILL.md` 或包含 `references/`、`scripts/`、`assets/`、`agents/` 的 ZIP / 文件集合；导入会校验 frontmatter、资源路径和大小，不执行 Skill 内的脚本。Skill 版本在保存时递增，真实存储由宿主通过 `onSkillImport/onSkillSave/onSkillDelete` 接管。演示中的历史和 Skill 保存在当前页面内存中，示例回复和工具记录均为本地演示，附件不上传。真实模型、MCP 执行、账号鉴权和服务端历史留给宿主接入。
 
-应用和 Skill 从选择面板插入输入光标处，作为正文内引用，不显示输入框上方标签，也不自动传入当前页面。输入 `@` 引用应用，输入 `/` 引用 Skill；继续输入名称或简介关键词可以筛选，上下方向键选择，Enter / Tab 插入，Esc 关闭建议。应用引用为蓝色，Skill 引用为紫色，可用 `--darl-agent-app` / `--darl-agent-skill` 覆盖。引用编码为 `[显示名称](app:ID)` / `[显示名称](skill:ID)`，发送时从正文派生应用和 Skill ID；删除引用即取消本次使用。
+应用和 Skill 从选择面板插入输入光标处，作为正文内引用，不显示输入框上方标签，也不自动传入当前页面。输入 `@` 引用应用或 Skill；继续输入名称或简介关键词可以筛选，上下方向键选择，Enter / Tab 插入，Esc 关闭建议。应用引用为蓝色，Skill 引用为紫色，可用 `--darl-agent-app` / `--darl-agent-skill` 覆盖。引用编码为 `[显示名称](app:ID)` / `[显示名称](skill:ID)`，发送时从正文派生应用和 Skill ID；删除引用即取消本次使用。
 
 ## Agent 配置与 Sub Agent 委派
 
-`examples/agent-chat` 的设置中心提供独立的 Agents 页面。每个 Agent 在服务端保存名称、系统提示词、文本模型、推理强度、允许的 Skills 和 MCP 应用 / 工具；API Key 仍只保存在服务端。设置默认 Agent 后，聊天可以直接选择专业 Agent，也可以由主 Agent 通过 AI SDK 7 `ToolLoopAgent` 按需委派给其他已启用的 Agent。
+`examples/agent-chat` 的设置中心提供独立的 Agents 页面。每个 Agent 在服务端保存名称、系统提示词和 MCP 应用 / 工具；模型与推理强度在聊天输入框旁按当前会话选择。Skills 默认对所有 Agent 可用，支持自动调用或在聊天中手动 @ 引用；API Key 仍只保存在服务端。设置默认 Agent 后，聊天可以直接选择专业 Agent，也可以由主 Agent 通过 AI SDK 7 `ToolLoopAgent` 按需委派给其他已启用的 Agent。
 
-设置中心的模型页面顶部同时提供默认媒体模型设置，目前只配置图片和视频：默认图片为 `gpt-image-2`（2K、16:9），默认视频为 `minimax-h3-flash`（480P、16:9）。配置保存在示例服务的本地 SQLite 中；文本模型仍由 Agent 自身配置管理。
+设置中心的模型页面顶部同时提供默认媒体模型设置，目前只配置图片和视频：默认图片为 `gpt-image-2`（2K、16:9），默认视频为 `minimax-h3-flash`（480P、16:9）。配置保存在示例服务的本地 SQLite 中；文本模型在聊天输入框旁选择。
 
 每次委派只把任务说明传给子 Agent，子 Agent 使用自己的模型、提示词和工具权限，完成后只返回最终摘要。MCP 写操作继续复用宿主的 `ToolConfirmations`，因此允许、拒绝、停止和超时都在服务端生效；NDJSON 工具事件包含 `runId`、`parentRunId` 和 `agentId`，现有侧栏会显示委派、执行和审批状态。Agent 配置保存在 `.local/agent-chat/data.sqlite`，不会写入浏览器存储。
 

@@ -68,6 +68,12 @@ body { margin: 0; background: #101113; }
 @media (max-width: 749px) { .with-agent { visibility: hidden; } .chat-example .darl-agent-sidebar { width: 100%; } .example-guide { padding: 20px 16px 56px; } .guide-layout { display: block; padding-top: 22px; } .guide-nav { position: static; display: flex; overflow-x: auto; margin: 0 -4px 30px; padding: 0 4px 4px; } .guide-nav button { flex: none; white-space: nowrap; } .guide-section { padding-bottom: 48px; } .guide-grid, .guide-split, .guide-mcp-grid, .guide-checklist-grid { grid-template-columns: 1fr; } }
 
 .example-model-settings { display: grid; gap: 18px; max-width: 1180px; min-width: 0; }
+.example-skills-settings { display: grid; gap: 18px; max-width: 1180px; min-width: 0; }
+.example-skills-settings > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 20px; border: 1px solid var(--darl-border); border-radius: 14px; background: var(--darl-surface); }
+.example-skills-settings h2 { margin: 6px 0 5px; font-size: 19px; }
+.example-skills-settings p { margin: 0; color: var(--darl-muted); font-size: 12px; line-height: 1.6; }
+.example-skills-settings-summary { display: grid; gap: 6px; padding: 16px 20px; border: 1px solid var(--darl-border); border-radius: 12px; background: var(--darl-surface); }
+.example-skills-settings-summary span { color: var(--darl-muted); font-size: 12px; }
 .example-default-models { padding: 20px; border: 1px solid var(--darl-border); border-radius: 14px; background: var(--darl-surface); }
 .example-default-models header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .example-default-models h2 { margin: 6px 0 5px; font-size: 19px; }

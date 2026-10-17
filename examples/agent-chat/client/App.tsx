@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { AgentSidebar, AgentsSettingsCard, DefaultModelSelector, DarlUIProvider, ModelManagementCard, SettingsPage, defaultModelConfiguration, toAgentModels, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentErrorInfo, type AgentExecutionEvent, type AgentToolCall, type AgentSendRequest, type AgentSession, type AgentSkill, type DefaultModelDraft, type DefaultModelOption, type DefaultModelSelection, type ModelConfiguration, type ModelProvider } from '@darl/ui';
-import { ArrowLeft, BookOpen, Bot, MessageSquare, Settings2, Wrench } from 'lucide-react';
+import { AgentSidebar, AgentsSettingsCard, DefaultModelSelector, DarlUIProvider, ModelManagementCard, SettingsPage, SkillManager, defaultModelConfiguration, toAgentModels, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentErrorInfo, type AgentExecutionEvent, type AgentToolCall, type AgentSendRequest, type AgentSession, type AgentSkill, type DefaultModelDraft, type DefaultModelOption, type DefaultModelSelection, type ModelConfiguration, type ModelProvider } from '@darl/ui';
+import { ArrowLeft, BookOpen, Bot, MessageSquare, Settings2, Sparkles, Wrench } from 'lucide-react';
 import { lines } from '../stream';
 import { Guide } from './Guide';
 import { ProjectsPage } from './ProjectsPage';
@@ -65,6 +65,7 @@ export function App() {
   const [, setApplicationsLoading] = useState(false);
   const [, setApplicationError] = useState('');
   const [settingsSection, setSettingsSection] = useState('models');
+  const [skillManagerOpen, setSkillManagerOpen] = useState(false);
   const [modelId, setModelId] = useState('');
   const [agentId, setAgentId] = useState<string | undefined>();
   const [effort, setEffort] = useState<string | undefined>();
@@ -193,7 +194,9 @@ export function App() {
       if (running.current === controller) { running.current = null; setGenerating(false); }
     };
     try {
-      const usedSkills = skills.filter((skill) => skill.enabled !== false && (request.skillIds.includes(skill.id) || history.some((message) => message.role === 'user' && message.content.includes(`(skill:${encodeURIComponent(skill.id)})`))));
+      const usedSkills = skills.filter((skill) => request.skillIds.includes(skill.id)
+        || skill.allowImplicitInvocation !== false
+        || history.some((message) => message.role === 'user' && message.content.includes(`(skill:${encodeURIComponent(skill.id)})`)));
       if (usedSkills.some((skill) => !skill.instructions?.trim())) throw new Error('选中的 Skill 没有指令，请先编辑');
       const apiMessages = history.filter((message) => message.content || message.attachments?.length || ('toolCalls' in message && message.toolCalls?.length)).map((message) => {
         const { role, content, attachments } = message;
@@ -290,6 +293,8 @@ export function App() {
     await api('state', { sessions: persistedSessions(sessions), activeId, skills: next });
     setSkills(next);
   };
+  const buttonClass = 'darl-button darl-button--outline darl-button-size--default';
+  const skillsSettings = <section className="example-skills-settings" aria-labelledby="example-skills-settings-title"><header><div><span className="example-eyebrow">SKILL LIBRARY</span><h2 id="example-skills-settings-title">Skills</h2><p>所有 Skill 默认可用。模型可按 Skill 的 OpenAI policy 自动调用，也可以在聊天中手动 @ 引用。</p></div><button className={buttonClass} onClick={() => setSkillManagerOpen(true)}><Sparkles size={15} />管理 Skills</button></header><div className="example-skills-settings-summary"><strong>{skills.length} 个 Skill</strong><span>聊天侧栏只负责引用和上传，编辑、导入、收藏与删除统一在这里完成。</span></div>{skillManagerOpen && <SkillManager open skills={skills} onClose={() => setSkillManagerOpen(false)} onImport={saveSkill} onSave={saveSkill} onDelete={async (id) => { const next = skills.filter((skill) => skill.id !== id); await api('state', { sessions: persistedSessions(sessions), activeId, skills: next }); setSkills(next); }} onFavoriteChange={async (id, favorite) => { const skill = skills.find((item) => item.id === id); if (skill) await saveSkill({ ...skill, favorite }); }} />}</section>;
   const showSettings = () => { setOpen(false); setGuide(false); setSettings(true); };
   const showGuide = () => { setOpen(false); setSettings(false); setGuide(true); };
   const renameSession = (sessionId: string, title: string) => {
@@ -300,12 +305,11 @@ export function App() {
     setDefaultMediaSelection(saved);
     setDefaultMediaModelsOpen(false);
   };
-  const buttonClass = 'darl-button darl-button--outline darl-button-size--default';
   const defaultModelSettings = <section className="example-default-models" aria-labelledby="example-default-models-title">
     <header><div><span className="example-eyebrow">DEFAULT MEDIA MODELS</span><h2 id="example-default-models-title">默认模型</h2><p>为网站开发设置默认图片和视频模型，暂不配置文本与音频。</p></div><button className={buttonClass} onClick={() => setDefaultMediaModelsOpen(true)}><Settings2 size={15} />配置默认模型</button></header>
     <div className="example-default-model-grid"><div><span>图片</span><strong>{defaultMediaSelection.image?.modelId || '未设置'} · {defaultMediaSelection.image?.resolution || '—'} · {defaultMediaSelection.image?.aspectRatio || '—'}</strong></div><div><span>视频</span><strong>{defaultMediaSelection.video?.modelId || '未设置'} · {defaultMediaSelection.video?.resolution || '—'} · {defaultMediaSelection.video?.aspectRatio || '—'}</strong></div></div>
   </section>;
-  const agentsSettings = <AgentsSettingsCard agents={agents} models={models.map((model) => ({ ...model, id: model.upstreamModelId || model.id, providerId: model.providerId || '', type: 'text' as const }))} applications={applications} skills={skills} onSave={async (agent) => setAgents(await api<AgentConfig[]>('agents', { agent }))} onDelete={async (id) => setAgents(await api<AgentConfig[]>(`agents/${id}`, undefined, 'DELETE'))} />;
+  const agentsSettings = <AgentsSettingsCard agents={agents} models={models.map((model) => ({ ...model, id: model.upstreamModelId || model.id, providerId: model.providerId || '', type: 'text' as const }))} applications={applications} onSave={async (agent) => setAgents(await api<AgentConfig[]>('agents', { agent }))} onDelete={async (id) => setAgents(await api<AgentConfig[]>(`agents/${id}`, undefined, 'DELETE'))} />;
   const modelSettings = <div className="example-model-settings">{defaultModelSettings}<DefaultModelSelector models={defaultMediaModels} kinds={['image', 'video']} value={defaultMediaSelection} onChange={setDefaultMediaSelection} open={defaultMediaModelsOpen} onOpenChange={setDefaultMediaModelsOpen} onComplete={saveDefaultMediaModels} /><MediaConcurrencySettings /><ModelManagementCard configuration={modelConfiguration} providers={providers}
     onSave={async (configuration) => setModelConfiguration(await api<ModelConfiguration>('model-config', { configuration }))}
     onProviderSave={async (provider, apiKey) => setProviders(await api<ModelProvider[]>('providers', { provider, apiKey }))}
@@ -317,16 +321,14 @@ export function App() {
     <div className={`example-page ${open ? 'with-agent' : ''}`}>
       <header className="example-header"><a href="http://localhost:5188">Darl UI <span>/ Agent Chat</span></a><div><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setProjectsVisible(false); setMediaJobsVisible(true); setOpen(true); }}>生成任务</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setMediaJobsVisible(false); setProjectsVisible(true); setOpen(true); }}><BookOpen size={16} />项目</button><button className={buttonClass} onClick={showGuide}><BookOpen size={16} />开发说明</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />设置</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setOpen((value) => !value); }}><MessageSquare size={16} />聊天</button></div></header>
       {error && <p className="example-error" role="alert">{error}</p>}
-      {mediaJobsVisible ? <MediaJobsPage onBack={() => setMediaJobsVisible(false)} /> : projectsVisible ? <ProjectsPage onBack={() => setProjectsVisible(false)} /> : guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : settings ? <main className="example-settings"><button className={buttonClass} onClick={() => { setSettings(false); setOpen(true); }}><ArrowLeft size={15} />返回聊天</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'agents', label: 'Agents', icon: <Bot /> }, { id: 'applications', label: '应用 / MCP', icon: <Wrench /> }]}>{settingsSection === 'agents' ? agentsSettings : settingsSection === 'applications' ? <McpSettings applications={applications} onChanged={() => setApplicationRevision((value) => value + 1)} /> : modelSettings}</SettingsPage></main> : <main className="example-home"><span className="example-eyebrow">AGENT CHAT EXAMPLE</span><h1>让网站助手<br />真正开始工作。</h1><p>使用现有聊天 UI，连接真实模型。对话、历史和 Skills 保存在本机 SQLite。</p><div className="example-actions"><button className="darl-button darl-button--default darl-button-size--default" onClick={() => setOpen(true)}><MessageSquare size={16} />打开助手</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />模型设置</button></div><div className="example-info"><div><span>模型</span><strong>{models.find((model) => model.id === availableModelId)?.name || '尚未配置'}</strong></div><div><span>会话</span><strong>{sessions.length}</strong></div><div><span>Skills</span><strong>{skills.length}</strong></div></div><small>支持文本和图片消息与 MCP 工具调用。用 @ 引用一次即可在本对话持续使用；写入或未知工具执行前需要确认。Skill 指令会发送给模型，图片由支持视觉输入的模型处理。</small></main>}
+      {mediaJobsVisible ? <MediaJobsPage onBack={() => setMediaJobsVisible(false)} /> : projectsVisible ? <ProjectsPage onBack={() => setProjectsVisible(false)} /> : guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : settings ? <main className="example-settings"><button className={buttonClass} onClick={() => { setSettings(false); setOpen(true); }}><ArrowLeft size={15} />返回聊天</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'skills', label: 'Skills', icon: <Sparkles /> }, { id: 'agents', label: 'Agents', icon: <Bot /> }, { id: 'applications', label: '应用 / MCP', icon: <Wrench /> }]}>{settingsSection === 'agents' ? agentsSettings : settingsSection === 'skills' ? skillsSettings : settingsSection === 'applications' ? <McpSettings applications={applications} onChanged={() => setApplicationRevision((value) => value + 1)} /> : modelSettings}</SettingsPage></main> : <main className="example-home"><span className="example-eyebrow">AGENT CHAT EXAMPLE</span><h1>让网站助手<br />真正开始工作。</h1><p>使用现有聊天 UI，连接真实模型。对话、历史和 Skills 保存在本机 SQLite。</p><div className="example-actions"><button className="darl-button darl-button--default darl-button-size--default" onClick={() => setOpen(true)}><MessageSquare size={16} />打开助手</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />模型设置</button></div><div className="example-info"><div><span>模型</span><strong>{models.find((model) => model.id === availableModelId)?.name || '尚未配置'}</strong></div><div><span>会话</span><strong>{sessions.length}</strong></div><div><span>Skills</span><strong>{skills.length}</strong></div></div><small>支持文本和图片消息与 MCP 工具调用。用 @ 引用一次即可在本对话持续使用；写入或未知工具执行前需要确认。Skill 指令会发送给模型，图片由支持视觉输入的模型处理。</small></main>}
     </div>
     <AgentSidebar open={open} onOpenChange={setOpen} sessions={sessions} activeSessionId={activeId} onSessionChange={setActiveId} onSessionRename={renameSession}
       onNewSession={() => { const session = newSession(); setSessions((current) => [session, ...current]); setActiveId(session.id); }}
       onSend={run} onStop={() => running.current?.abort()} isGenerating={generating} onRegenerate={regenerate}
       applications={applications} onToolConfirm={async (id, approved) => { await api(`tool-confirmations/${id}`, { approved }); }}
       agents={agents} selectedAgentId={agentId} onSelectedAgentIdChange={setAgentId} models={models} selectedModelId={availableModelId} onSelectedModelIdChange={setModelId} selectedReasoningEffort={effort} onSelectedReasoningEffortChange={setEffort}
-      skills={skills} onSkillImport={saveSkill} onSkillSave={saveSkill}
-      onSkillDelete={async (id) => { const next = skills.filter((skill) => skill.id !== id); await api('state', { sessions: persistedSessions(sessions), activeId, skills: next }); setSkills(next); }}
-      onSkillFavoriteChange={async (id, favorite) => { const skill = skills.find((item) => item.id === id); if (skill) await saveSkill({ ...skill, favorite }); }}
+      skills={skills} onSkillImport={saveSkill}
     />
   </DarlUIProvider>;
 }

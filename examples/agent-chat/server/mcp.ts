@@ -72,14 +72,16 @@ export function createMcpOAuthProvider(
 }
 
 export function conversationApplications(configs: McpApplicationConfig[], applicationIds: string[], messages: ChatMessage[]) {
-  const selected = new Set(applicationIds);
+  const configured = new Set(configs.map((app) => app.id));
+  for (const id of applicationIds) if (!configured.has(id)) throw new Error('所选应用不存在，请刷新应用列表');
+  const selected = new Set<string>();
   for (const message of messages) {
     if (message.role !== 'user') continue;
     const text = typeof message.content === 'string' ? message.content : message.content.filter((item) => item.type === 'text').map((item) => item.text).join('\n');
     for (const match of text.matchAll(/\[[^\]]+\]\(app:([^\s)]+)\)/g)) {
       let id: string;
       try { id = decodeURIComponent(match[1]); } catch { continue; }
-      if (configs.some((app) => app.id === id)) selected.add(id);
+      if (configured.has(id)) selected.add(id);
     }
   }
   return [...selected].map((id) => {

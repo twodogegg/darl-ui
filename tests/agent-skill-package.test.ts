@@ -19,6 +19,18 @@ describe('Agent Skill package', () => {
     expect(skill.resources).toEqual([{ path: 'references/check.md', content: '检查权限和数据安全。' }]);
   });
 
+  it('reads OpenAI implicit invocation policy and defaults to allowed', async () => {
+    const files = [
+      file('---\nname: 自动整理\ndescription: 自动整理材料\n---\n\n执行整理。', 'demo/SKILL.md'),
+      file('interface:\n  display_name: 自动整理\npolicy:\n  allow_implicit_invocation: false\n', 'demo/agents/openai.yaml', 'text/yaml'),
+    ];
+    Object.defineProperty(files[0], 'webkitRelativePath', { value: 'demo/SKILL.md' });
+    Object.defineProperty(files[1], 'webkitRelativePath', { value: 'demo/agents/openai.yaml' });
+    await expect(importSkillPackage(files)).resolves.toMatchObject({ name: '自动整理', allowImplicitInvocation: false });
+    const defaultSkill = await importSkillPackage([file('---\nname: 默认\ndescription: 默认\n---\n\n执行。', 'default/SKILL.md')]);
+    expect(defaultSkill.allowImplicitInvocation).toBe(true);
+  });
+
   it('rejects a package without a manifest', async () => {
     await expect(importSkillPackage([file('内容', 'notes.md')])).rejects.toThrow('缺少 SKILL.md');
   });
