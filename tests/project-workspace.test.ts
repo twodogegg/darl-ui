@@ -89,18 +89,26 @@ describe('SQLite project workspace', () => {
   });
 
   it('saves optional manually uploaded cover image and makes it visible', async () => {
+    console.info('cover-step: begin');
     const id = (await createProject()).data.data.project_id;
+    console.info('cover-step: created');
     const onePixelPng = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==', 'base64');
     const form = new FormData();
     form.append('image', new Blob([onePixelPng], { type: 'image/png' }), 'cover.png');
+    console.info('cover-step: uploading');
     const uploaded = await request('projects/' + id + '/covers/upload', { method: 'POST', body: form });
+    console.info('cover-step: uploaded', uploaded.status);
     expect(uploaded.status).toBe(201);
     const coverId = uploaded.data.data.id;
+    console.info('cover-step: selecting');
     const select = await request('projects/' + id + '/covers/' + coverId + '/select', { method: 'POST' });
+    console.info('cover-step: selected',select.status);
     expect(select.status).toBe(200);
     expect(select.data.data.cover_asset.storage_key).toBe('covers/' + coverId);
+    console.info('cover-step: fetching');
     const image = await fetch(base + 'storage/covers/' + coverId);
+    console.info('cover-step: fetched',image.status);
     expect(image.status).toBe(200);
     expect(image.headers.get('content-type')).toBe('image/png');
     expect(Buffer.from(await image.arrayBuffer())).toEqual(onePixelPng);
