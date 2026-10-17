@@ -317,9 +317,9 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         if (url.searchParams.get('refresh') === '1') await connectionManager.invalidate(scopeKey, app.id);
         try {
           const connection = await connectionManager.get(scopeKey, app, signal);
-          return send(200, { id: app.id, name: app.name, status: 'connected', description: `${connection.tools.length} 个 MCP 工具`, tools: connection.tools.map((tool) => ({ name: tool.name, title: tool.title || tool.annotations?.title, description: tool.description, risk: toolRisk(app, tool), inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, annotations: tool.annotations })) });
+          return send(200, { id: app.id, name: app.name, url: app.url, status: 'connected', description: `${connection.tools.length} 个 MCP 工具`, tools: connection.tools.map((tool) => ({ name: tool.name, title: tool.title || tool.annotations?.title, description: tool.description, risk: toolRisk(app, tool), inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, annotations: tool.annotations })) });
         } catch (error) {
-          return send(200, { id: app.id, name: app.name, status: 'disconnected', description: safeError(error, app.apiKey), tools: [] });
+          return send(200, { id: app.id, name: app.name, url: app.url, status: 'disconnected', description: safeError(error, app.apiKey), tools: [] });
         }
       }
       const confirmation = path.match(/^\/api\/tool-confirmations\/([\w-]+)$/);
