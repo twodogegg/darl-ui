@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { ArrowRight, X } from 'lucide-react';
 import { Button } from '../ui/Button';
@@ -24,6 +24,8 @@ export interface InteractiveConfirmDialogProps {
   title: string;
   description?: string;
   questions: ConfirmQuestion[];
+  /** Optional read-only action details. */
+  details?: ReactNode;
   confirmText?: string;
   cancelText?: string;
   showCancel?: boolean;
@@ -45,7 +47,7 @@ function startingAnswers(questions: ConfirmQuestion[]): ConfirmAnswers {
 }
 
 export function InteractiveConfirmDialog({
-  open, onOpenChange, title, description, questions, confirmText = '确认', cancelText = '取消',
+  open, onOpenChange, title, description, questions, details, confirmText = '确认', cancelText = '取消',
   showCancel = false, onConfirm, onCancel, accentColor, className = '',
 }: InteractiveConfirmDialogProps) {
   const headingId = useId();
@@ -131,6 +133,7 @@ export function InteractiveConfirmDialog({
         </div>
         <form onSubmit={submit} noValidate>
           <div className="darl-confirm-questions">
+            {details && <div className="darl-action-confirm-details">{details}</div>}
             {questions.map((question) => {
               const value = answers[question.id];
               const hasError = invalid.includes(question.id);
