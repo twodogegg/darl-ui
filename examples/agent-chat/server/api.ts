@@ -360,9 +360,6 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           if (!content.some((item) => item.type === 'image')) throw new Error('图片消息不能为空');
           return { role: message.role, content };
         });
-        if (messages.some((message) => Array.isArray(message.content) && message.content.some((item) => item.type === 'image')) && model.capabilities?.vision === false) {
-          throw new Error('当前模型未启用视觉输入，请在模型设置中开启 vision 或选择支持图片的模型');
-        }
         if (!Array.isArray(body.skills) || body.skills.length > 30) throw new Error('Skills 格式无效');
         const requestedSkillIds = body.skillIds ?? [];
         if (!Array.isArray(requestedSkillIds) || requestedSkillIds.length > 30 || requestedSkillIds.some((id: unknown) => typeof id !== 'string')) throw new Error('Skills 格式无效');
