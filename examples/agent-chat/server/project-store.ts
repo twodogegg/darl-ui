@@ -121,6 +121,11 @@ export class ProjectStore {
     return row ? this.serialize(row) : null;
   }
 
+  private episodeCount(projectId: number): number {
+    const exists = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_episodes'").get();
+    if (!exists) return 0;
+    return Number((this.db.prepare('SELECT COUNT(*) AS count FROM workspace_episodes WHERE project_id=?').get(projectId) as { count:number }).count);
+  }
   private serialize(row: StoredRow) {
     const coverId = row.cover_asset_id ? Number(row.cover_asset_id) : null;
     const style = this.db.prepare('SELECT id, name FROM workspace_styles WHERE id = ?')
@@ -129,7 +134,7 @@ export class ProjectStore {
       id: Number(row.id), name: String(row.name), description: row.description ?? null,
       aspect_ratio: String(row.aspect_ratio), style_catalog_id: Number(row.style_catalog_id),
       cover_asset_id: coverId, cover_asset: coverId ? { storage_key: 'covers/' + coverId } : null,
-      style: style || null, episode_count: 0,
+      style: style || null, episode_count: this.episodeCount(Number(row.id)),
       created_at: row.created_at, updated_at: row.updated_at,
     };
   }
