@@ -40,10 +40,13 @@ async function limitedBinary(response: Response, limit: number): Promise<Buffer>
   const chunks: Buffer[] = [];
   let size = 0;
   if (!response.body) throw new Error('供应商未返回媒体内容');
-  for await (const item of response.body) {
-    const chunk = Buffer.from(item);
+  const reader = response.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = Buffer.from(value);
     size += chunk.length;
-    if (size > limit) { await response.body.cancel().catch(() => {}); throw new Error('生成媒体文件超过大小上限'); }
+    if (size > limit) { await reader.cancel().catch(() => {}); throw new Error('生成媒体文件超过大小上限'); }
     chunks.push(chunk);
   }
   return Buffer.concat(chunks);
