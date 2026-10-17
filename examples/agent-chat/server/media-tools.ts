@@ -25,8 +25,18 @@ export const mediaToolDefinitions: FunctionTool[] = [
     }, required: ['taskId'] } },
 ];
 
+const imageSizes: Record<string, Record<string, string>> = {
+  '1K': { '1:1': '1024x1024', '3:4': '768x1024', '4:3': '1024x768', '16:9': '1280x720', '9:16': '720x1280' },
+  '2K': { '1:1': '2048x2048', '3:4': '1536x2048', '4:3': '2048x1536', '16:9': '2048x1152', '9:16': '1152x2048' },
+  '4K': { '1:1': '2880x2880', '3:4': '2448x3264', '4:3': '3264x2448', '16:9': '3840x2160', '9:16': '2160x3840' },
+};
+interface MediaDefaults {
+  image: { resolution: string; aspectRatio: string };
+  video: { resolution: string; aspectRatio: string };
+}
+
 export function runMediaTool(
-  runtime: MediaRuntime, name: string, raw: Record<string, unknown>, images: ChatImage[],
+  runtime: MediaRuntime, name: string, raw: Record<string, unknown>, images: ChatImage[], defaults?: MediaDefaults,
 ): object {
   if (name === 'media_get_task') {
     if (typeof raw.taskId !== 'string') throw new Error('任务编号无效');
@@ -38,14 +48,14 @@ export function runMediaTool(
   const projectId = raw.projectId === undefined ? undefined : Number(raw.projectId);
   if (raw.projectId !== undefined && (!Number.isSafeInteger(projectId) || Number(projectId) <= 0)) throw new Error('项目编号无效');
   if (name === 'media_generate_image') {
-    const opts: MediaOptions = {};
+    const opts: MediaOptions = { size: imageSizes[defaults?.image.resolution || '2K']?.[defaults?.image.aspectRatio || '16:9'] || '1024x1024' };
     if (raw.size !== undefined) opts.size = String(raw.size);
     if (raw.quality !== undefined) opts.quality = raw.quality as MediaOptions['quality'];
     if (raw.count !== undefined) opts.count = Number(raw.count);
     return runtime.enqueue('image', { prompt: raw.prompt, projectId, options: opts }, images);
   }
   if (name === 'media_generate_video') {
-    const opts: MediaOptions = {};
+    const opts: MediaOptions = { resolution: defaults?.video.resolution === '480P' ? '480' : '768', aspectRatio: defaults?.video.aspectRatio === '9:16' ? '9:16' : '16:9' };
     if (raw.seconds !== undefined) opts.seconds = Number(raw.seconds);
     if (raw.resolution !== undefined) opts.resolution = raw.resolution as MediaOptions['resolution'];
     if (raw.aspectRatio !== undefined) opts.aspectRatio = raw.aspectRatio as MediaOptions['aspectRatio'];
