@@ -40,6 +40,35 @@ export async function handleWorkspaceProjectRequest(
     response.end(JSON.stringify({ error }));
   };
   const method = request.method || 'GET';
+  const storageMatch = url.pathname.match(/^\/api\/workspace\/storage\/(.+)$/);
+  if (storageMatch) {
+    if (!LOOPBACK.has(request.socket.remoteAddress || '')) {
+      reply(403, '仅允许本机访问项目图片'); return true;
+    }
+    const parts = storageMatch[1].split('/');
+    if (method !== 'GET' || parts.some((part) => !/^[a-zA-Z0-9_.-]+$/.test(part) || part === '.' || part === '..')) {
+      reply(400, '图片路径无效'); return true;
+    }
+    const base = env.PROJECT_API_BASE_URL?.trim();
+    const token = env.PROJECT_API_TOKEN?.trim();
+    if (!base || !token) { reply(503, '项目服务尚未配置'); return true; }
+    try {
+      const origin = new URL(base);
+      const target = new URL('/storage/' + parts.map(encodeURIComponent).join('/'), origin);
+      if (!['http:', 'https:'].includes(target.protocol)) throw new Error('invalid');
+      const result = await fetch(target, {
+        headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000), redirect: 'error',
+      });
+      if (!result.ok) { reply(result.status, '项目图片加载失败'); return true; }
+      const type = result.headers.get('content-type') || '';
+      if (!/^image\/(png|jpeg|webp)$/i.test(type)) { reply(502, '图片类型不受支持'); return true; }
+      const bytes = Buffer.from(await result.arrayBuffer());
+      if (bytes.length > 12 * 1024 * 1024) { reply(502, '图片文件过大'); return true; }
+      response.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'private, max-age=120', 'X-Content-Type-Options': 'nosniff' });
+      response.end(bytes);
+    } catch { reply(502, '无法读取项目图片'); }
+    return true;
+  }
   const path = upstreamPath(url.pathname, method);
   if (!path) { reply(404, '未提供该项目接口'); return true; }
   if (!LOOPBACK.has(request.socket.remoteAddress || '')) {
