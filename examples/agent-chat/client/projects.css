@@ -1,0 +1,35 @@
+.workspace-projects { margin: 0 auto; padding: 28px clamp(16px, 4vw, 48px) 72px; max-width: 1250px; color: var(--darl-text); }
+.workspace-projects-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 24px; }
+.workspace-projects h1 { font-size: clamp(26px, 4vw, 36px); margin: 8px 0; font-weight: 600; }
+.workspace-projects p { color: var(--darl-muted); line-height: 1.6; }
+.workspace-link { background: none; border: 0; color: var(--darl-muted); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 4px 0; }
+.workspace-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: var(--darl-primary); color: var(--darl-primary-foreground); border: 0; border-radius: 8px; padding: 10px 15px; cursor: pointer; }
+.workspace-primary:disabled { opacity: .55; cursor: not-allowed; }
+.workspace-project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px),1fr)); gap: 16px; }
+.workspace-project-card { min-width: 0; border: 1px solid var(--darl-border); border-radius: 12px; overflow: hidden; background: var(--darl-surface); }
+.workspace-card-open { display: block; width: 100%; padding: 0 0 14px; text-align: left; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.workspace-card-image, .workspace-card-placeholder { display: block; width: 100%; height: 170px; object-fit: cover; background: var(--darl-background); }
+.workspace-card-placeholder { display: grid; place-items: center; color: var(--darl-muted); font-size: 13px; }
+.workspace-card-open h2, .workspace-card-open p, .workspace-card-open small { display: block; margin: 12px 16px 0; overflow-wrap: anywhere; }
+.workspace-card-open h2 { font-size: 17px; font-weight: 600; }
+.workspace-card-open p { font-size: 13px; }
+.workspace-card-open small { color: var(--darl-muted); }
+.workspace-project-actions { display: flex; gap: 10px; padding: 12px 16px; flex-wrap: wrap; }
+.workspace-project-actions button, .workspace-form-actions > button:not(.workspace-primary) { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--darl-border); border-radius: 7px; background: transparent; padding: 8px 12px; color: inherit; cursor: pointer; }
+.workspace-detail { display: flex; flex-direction: column; }
+.workspace-cover { width: 100%; max-height: 330px; object-fit: contain; background: var(--darl-background); }
+.workspace-project-meta { padding: 20px; }
+.workspace-empty { border: 1px dashed var(--darl-border); padding: 55px 25px; text-align: center; border-radius: 12px; color: var(--darl-muted); }
+.workspace-error { color: var(--darl-danger) !important; }
+.workspace-notice { color: var(--darl-text) !important; }
+.workspace-modal-backdrop { position: fixed; inset: 0; z-index: 120; padding: 16px; display: grid; place-items: center; background: #000a; }
+.workspace-modal { width: min(100%, 520px); max-height: 92dvh; overflow: auto; padding: 25px; border: 1px solid var(--darl-border); border-radius: 14px; background: var(--darl-surface); box-shadow: 0 18px 50px #0005; }
+.workspace-modal h2 { margin: 0 0 20px; font-size: 20px; }
+.workspace-modal form { display: grid; gap: 15px; }
+.workspace-modal label { display: grid; gap: 8px; font-size: 13px; font-weight: 500; }
+.workspace-modal input:not([type=file]), .workspace-modal textarea, .workspace-modal select, .workspace-style-picker { width: 100%; box-sizing: border-box; border: 1px solid var(--darl-border); border-radius: 8px; background: var(--darl-background); color: var(--darl-text); padding: 10px; font: inherit; }
+.workspace-style-picker { text-align: left; cursor: pointer; }
+.workspace-file-label { display: inline-flex; align-items: center; gap: 8px; color: var(--darl-muted); font-size: 12px; overflow-wrap: anywhere; }
+.workspace-modal input[type=file] { max-width: 100%; }
+.workspace-form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; }
+@media (max-width: 600px) { .workspace-modal { padding: 18px; } .workspace-projects-heading { align-items: start; } }
