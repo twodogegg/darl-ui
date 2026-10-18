@@ -251,7 +251,7 @@ export function EpisodeWorkspace({projectId,agents,onEditAgent}:{projectId:numbe
                     onChange={e=>updateShot(index,'duration',Number(e.target.value))}/></label>
               </div>
               <div className="workspace-asset-chips" aria-label="镜头关联资产">
-                {draft.assets.filter(a=>a.shotNumbers.includes(index+1)).map(a=><button type="button" key={a.type+':'+a.name} onClick={()=>{setWorkTab('assets');setAssetDetail(library.find(x=>x.name===a.name&&x.type===a.type)?.id||null);}}>
+                {draft.assets.filter(a=>a.shotNumbers.includes(index+1)).map(a=><button type="button" key={a.type+':'+a.name} onClick={()=>{setWorkTab('assets');const asset=library.find(x=>x.name===a.name&&x.type===a.type);if(asset)void openAsset(asset.id);}}>
                   @{a.name}</button>)}
               </div>
               <p className="workspace-episode-hint">场景/画面只显示一次。输入 @资产名称可引用草案中的资产，标签上方不再重复渲染预览。</p>
