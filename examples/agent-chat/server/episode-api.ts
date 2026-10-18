@@ -28,7 +28,8 @@ export function createEpisodeApi(store:EpisodeStore, analyze:Analyze) {
     if (!path.startsWith('/api/workspace/')) return false;
     const project=path.match(/^\/api\/workspace\/projects\/(\d+)\/(episodes|assets)$/);
     const episode=path.match(/^\/api\/workspace\/episodes\/(\d+)(?:\/(script|analyze|plan))?$/);
-    if (!project && !episode) return false;
+    const asset=path.match(/^\/api\/workspace\/projects\/(\d+)\/assets\/([0-9a-f-]{36})(?:\/(states))?$/i);
+    if (!project && !episode && !asset) return false;
     const send=(code:number,data:unknown)=>{
       res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
       res.end(JSON.stringify(data));
@@ -36,6 +37,26 @@ export function createEpisodeApi(store:EpisodeStore, analyze:Analyze) {
     if(!LOCAL.has(req.socket.remoteAddress||'')){send(403,{error:'项目工作台仅允许本机访问'});return true;}
     try {
       const method=req.method || 'GET';
+      if(asset){
+        const projectId=num(asset[1]),assetId=asset[2];
+        if(asset[3]==='states' && method==='GET'){
+          const value=store.assetStates(projectId,assetId);
+          if(!value)throw new HttpError(404,'资产不存在');
+          send(200,{code:'OK',data:value});return true;
+        }
+        if(asset[3]==='states' && method==='POST'){
+          const input=await readJson(req);
+          const value=store.saveAssetState(projectId,assetId,input);
+          if(!value)throw new HttpError(404,'资产不存在');
+          send(201,{code:'CREATED',data:value});return true;
+        }
+        if(!asset[3] && method==='PATCH'){
+          const input=await readJson(req);
+          const value=store.saveAssetDescription(projectId,assetId,input.description);
+          if(!value)throw new HttpError(404,'资产不存在');
+          send(200,{code:'OK',data:value});return true;
+        }
+      }
       if(project){
         const id=num(project[1]);
         if(project[2]==='assets' && method==='GET'){
