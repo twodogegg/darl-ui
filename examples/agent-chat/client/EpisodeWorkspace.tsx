@@ -51,7 +51,7 @@ function AssetText({value,onAsset,assets}:{value:string;onAsset:(name:string)=>v
   return <span className="workspace-mentions">{nodes}</span>;
 }
 
-export function EpisodeWorkspace({projectId,agents}:{projectId:number;agents:AgentConfig[]}){
+export function EpisodeWorkspace({projectId,agents,onEditAgent}:{projectId:number;agents:AgentConfig[];onEditAgent:(agentId:string)=>void}){
   const [episodes,setEpisodes]=useState<Episode[]>([]);
   const [selectedId,setSelectedId]=useState<number|null>(null);
   const selectedIdRef=useRef<number|null>(null);
@@ -198,6 +198,7 @@ export function EpisodeWorkspace({projectId,agents}:{projectId:number;agents:Age
               {availableAgents.map(agent=><option key={agent.id} value={agent.id}>{agent.name}{agent.isDefault ? "（默认）" : ""}</option>)}
             </select>
           </label>
+          <button type="button" onClick={()=>onEditAgent(agentId)} disabled={!!busy||!agentId} title="在现有 Agents 设置中编辑系统提示词">编辑拆镜 Agent</button>
           <button type="button" className="workspace-primary" onClick={()=>void analyze()}
             disabled={!!busy||!agentId||!episode.script.trim()||script!==episode.script}>
             {busy==='analyze'?'Agent 正在分析…':'AI 智能拆镜 + 提取资产'}
