@@ -38,7 +38,7 @@ const storageImage = (key?: string | null): string | undefined => {
 const projectCover = (project: Project): string | undefined =>
   storageImage(project.cover_asset?.storage_key) || storageImage(project.cover_url) || storageImage(project.cover?.url) || undefined;
 
-export function ProjectsPage({ onBack, agents }: { onBack: () => void; agents: AgentConfig[] }) {
+export function ProjectsPage({ onBack, agents, onEditAgent, hidden = false }: { onBack: () => void; agents: AgentConfig[]; onEditAgent: (agentId: string) => void; hidden?: boolean }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [styles, setStyles] = useState<StyleOption[]>([]);
   const [draft, setDraft] = useState<Draft>(blank);
@@ -156,7 +156,7 @@ export function ProjectsPage({ onBack, agents }: { onBack: () => void; agents: A
     finally { setBusy(false); }
   };
 
-  return <main className="workspace-projects">
+  return <main className="workspace-projects" style={hidden ? { display: 'none' } : undefined}>
     <div className="workspace-projects-heading">
       <div><button type="button" className="workspace-link" onClick={onBack}><ArrowLeft size={16} />返回</button>
         <h1>{detail ? detail.name : '我的项目'}</h1>
@@ -178,7 +178,7 @@ export function ProjectsPage({ onBack, agents }: { onBack: () => void; agents: A
           <button type="button" onClick={() => setDetail(null)}>返回列表</button>
         </div>
       </div>
-    </section><EpisodeWorkspace key={detail.id} projectId={detail.id} agents={agents} /></> : projects.length ? <div className="workspace-project-grid">
+    </section><EpisodeWorkspace key={detail.id} projectId={detail.id} agents={agents} onEditAgent={onEditAgent} /></> : projects.length ? <div className="workspace-project-grid">
       {projects.map((item) => <article className="workspace-project-card" key={item.id}>
         <button className="workspace-card-open" type="button" onClick={() => void backend<Project>(`projects/${item.id}`).then(setDetail).catch((failure) => setError(failure.message))}>
           {projectCover(item) ? <img className="workspace-card-image" src={projectCover(item)} alt="" /> : <div className="workspace-card-placeholder">未上传封面</div>}
