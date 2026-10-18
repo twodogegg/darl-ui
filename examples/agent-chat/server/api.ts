@@ -220,10 +220,27 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const loadDefaultMediaSelection = (): DefaultMediaSelection => validateDefaultMediaSelection(storage.getConfig<unknown>('defaultMediaModels') || defaultMediaSelection);
   const update = async (mutate: (providers: StoredProvider[]) => StoredProvider[]) => storage.setConfig('providers', mutate(await load()));
   const saveAgents = async (next: StoredAgent[]) => storage.setConfig('agents', next);
+  // Keep the episode workbench's Agent list identical to /api/agents and /api/chat.
+  // The built-in default Agent may not have a persisted entry in 'agents'.
+  const activeAgents = async (providers: StoredProvider[], configured: StoredAgent[]): Promise<StoredAgent[]> => {
+    const provider = providers.find((item) => item.models.some((model) => model.type === 'text' && model.enabled !== false)) || providers[0];
+    const model = provider?.models.find((item) => item.type === 'text' && item.enabled !== false);
+    const savedDefault = configured.find((agent) => agent.id === 'default' && agent.builtIn);
+    const systemDefault: StoredAgent = {
+      id: 'default', name: '网站助手', avatar: '/agent-default-avatar.png',
+      description: '系统默认 Agent', instructions: await loadPrompt(),
+      providerId: provider?.id || 'darl', modelId: model?.id || env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash',
+      skillIds: [], applicationIds: [], applicationTools: {},
+      contextPolicy: { childContext: 'task-only', historyMode: 'summary', toolResultMode: 'standard' },
+      enabled: true, isDefault: !configured.some((agent) => agent.isDefault), builtIn: true, ...savedDefault,
+    };
+    return [systemDefault, ...configured.filter((agent) => agent.id !== systemDefault.id)];
+  };
   const handleEpisodes = createEpisodeApi(episodeStore, async (agentId, script, signal) => {
-    const agent = loadAgents(storage).find((entry) => entry.id === agentId && !entry.builtIn && entry.enabled !== false);
-    if (!agent) throw new Error('请选择在「设置 → Agents」中配置并启用的专业 Agent');
     const providers = await load();
+    const agent = (await activeAgents(providers, loadAgents(storage)))
+      .find((entry) => entry.id === agentId && entry.enabled !== false);
+    if (!agent) throw new Error('所选 Agent 不存在或未启用，请重新选择');
     const configuration = await loadModelConfiguration();
     const resolved = resolveAgentTextModel(providers, configuration, agent.providerId, agent.modelId);
     if (!resolved) throw new Error('该 Agent 的文本模型未启用或不可用');
@@ -277,11 +294,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       const providers = await load();
       const modelConfiguration = await loadModelConfiguration();
       const configuredAgents = loadAgents(storage);
-      const defaultProvider = providers.find((provider) => provider.models.some((model) => model.type === 'text' && model.enabled !== false)) || providers[0];
-      const defaultModel = defaultProvider?.models.find((model) => model.type === 'text' && model.enabled !== false);
-      const savedDefault = configuredAgents.find((agent) => agent.id === 'default' && agent.builtIn);
-      const defaultAgent: StoredAgent = { id: 'default', name: '网站助手', avatar: '/agent-default-avatar.png', description: '系统默认 Agent', instructions: await loadPrompt(), providerId: defaultProvider?.id || 'darl', modelId: defaultModel?.id || env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash', skillIds: [], applicationIds: [], applicationTools: {}, contextPolicy: { childContext: 'task-only', historyMode: 'summary', toolResultMode: 'standard' }, enabled: true, isDefault: !configuredAgents.some((agent) => agent.isDefault), builtIn: true, ...savedDefault };
-      const agents = [defaultAgent, ...configuredAgents.filter((agent) => agent.id !== defaultAgent.id)];
+      const agents = await activeAgents(providers, configuredAgents);
       const path = request.url.split('?')[0];
       if (path === '/api/auto-confirm' && request.method === 'GET') return send(200, storage.getConfig<AutoConfirmSettings>('autoConfirm') || DEFAULT_AUTO_CONFIRM);
       if (path === '/api/auto-confirm' && request.method === 'POST') {
