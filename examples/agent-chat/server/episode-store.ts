@@ -222,17 +222,28 @@ export class EpisodeStore {
     }
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      this.db.prepare('DELETE FROM workspace_shot_assets WHERE shot_id IN (SELECT id FROM workspace_shots WHERE episode_id=?)').run(episodeId);
-      this.db.prepare('DELETE FROM workspace_shots WHERE episode_id=?').run(episodeId);
+      // Update retained shot IDs in place: downstream takes and edits must not lose their parents.
+      const incomingIds=new Set(draft.shots.map(s=>s.id));
+      const oldShots=this.shots(episodeId);
+      const removeShot=this.db.prepare('DELETE FROM workspace_shots WHERE id=? AND episode_id=?');
+      for(const old of oldShots)if(!incomingIds.has(old.id))removeShot.run(old.id,episodeId);
+      const updateShot=this.db.prepare('UPDATE workspace_shots SET position=?,framing=?,camera=?,cut=?,scene=?,visual=?,dialogue=?,sound=?,duration=? WHERE id=? AND episode_id=?');
       const insertShot=this.db.prepare('INSERT INTO workspace_shots (id,episode_id,position,framing,camera,cut,scene,visual,dialogue,sound,duration) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
-      draft.shots.forEach((s,i)=>insertShot.run(s.id,episodeId,i+1,s.framing,s.camera,s.cut,s.scene,s.visual,s.dialogue,s.sound,s.duration));
+      draft.shots.forEach((s,i)=>{
+        if(existingIds.has(s.id))updateShot.run(i+1,s.framing,s.camera,s.cut,s.scene,s.visual,s.dialogue,s.sound,s.duration,s.id,episodeId);
+        else insertShot.run(s.id,episodeId,i+1,s.framing,s.camera,s.cut,s.scene,s.visual,s.dialogue,s.sound,s.duration);
+      });
+      this.db.prepare('DELETE FROM workspace_shot_assets WHERE shot_id IN (SELECT id FROM workspace_shots WHERE episode_id=?)').run(episodeId);
       const insertAsset=this.db.prepare('INSERT OR IGNORE INTO workspace_assets (id,project_id,type,name,description) VALUES (?,?,?,?,?)');
       const findAsset=this.db.prepare('SELECT id FROM workspace_assets WHERE project_id=? AND type=? AND name=?');
+      const saveDescription=this.db.prepare('UPDATE workspace_assets SET description=? WHERE id=? AND project_id=?');
       const link=this.db.prepare('INSERT OR IGNORE INTO workspace_shot_assets (shot_id,asset_id) VALUES (?,?)');
       draft.assets.forEach((a)=>{
         insertAsset.run(randomUUID(),episode.projectId,a.type,a.name,a.description||'');
         const row=findAsset.get(episode.projectId,a.type,a.name) as {id:string};
-        a.shotNumbers.forEach((number)=>link.run(draft.shots[number-1].id,row.id));
+        // The draft description is intentionally authoritative when explicitly provided.
+        if(typeof a.description==='string')saveDescription.run(a.description,row.id,episode.projectId);
+        a.shotNumbers.forEach(number=>link.run(draft.shots[number-1].id,row.id));
       });
       this.db.prepare('UPDATE workspace_episodes SET plan_revision=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(episode.scriptRevision,episodeId);
       this.db.exec('COMMIT');
