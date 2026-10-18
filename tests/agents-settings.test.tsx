@@ -3,6 +3,20 @@ import { describe, expect, it, vi } from 'vitest';
 import { AgentsSettingsCard } from '../src';
 
 describe('AgentsSettingsCard', () => {
+  it('opens the selected existing Agent system prompt directly', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<AgentsSettingsCard initialEditingAgentId="director"
+      agents={[{ id: 'director', name: '拆镜导演', instructions: '用户定义的原始拆镜规则', providerId: 'gateway', modelId: 'text', enabled: true }]}
+      models={[{ id: 'text', name: '文本模型', providerId: 'gateway', type: 'text' }]} onSave={onSave} />);
+    const prompt = screen.getByRole('textbox', { name: '系统提示词' });
+    expect(prompt).toHaveValue('用户定义的原始拆镜规则');
+    fireEvent.change(prompt, { target: { value: '更新后的镜头规则' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存 Agent' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'director', instructions: '更新后的镜头规则',
+    })));
+  });
+
   it('creates an Agent with an isolated model and prompt', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<AgentsSettingsCard agents={[]} models={[{ id: 'text', name: '文本模型', providerId: 'gateway', type: 'text', reasoningEfforts: ['low'] }]} skills={[{ id: 'skill', name: 'Skill' }]} applications={[{ id: 'app', name: '应用', tools: [{ name: 'read', title: '读取' }] }]} onSave={onSave} />);
