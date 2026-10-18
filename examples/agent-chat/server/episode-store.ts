@@ -5,7 +5,7 @@ export type ShotDraft = {
   id: string; framing: string; camera: string; cut: string; scene: string;
   visual: string; dialogue: string; sound: string; duration: number;
 };
-export type AssetDraft = { name: string; type: 'character' | 'scene' | 'prop'; shotNumbers: number[] };
+export type AssetDraft = { name: string; type: 'character' | 'scene' | 'prop'; shotNumbers: number[]; description?: string };
 export type BreakdownDraft = { shots: ShotDraft[]; assets: AssetDraft[] };
 export type EpisodeRecord = {
   id: number; projectId: number; title: string; script: string; scriptRevision: number;
@@ -57,7 +57,7 @@ export function validateBreakdown(input: unknown): BreakdownDraft {
     const existing = names.get(key);
     const numbers = [...new Set(asset.shotNumbers as number[])].sort((a,b) => a-b);
     if (existing) existing.shotNumbers = [...new Set([...existing.shotNumbers,...numbers])].sort((a,b)=>a-b);
-    else names.set(key,{name, type:asset.type as AssetDraft['type'],shotNumbers:numbers});
+    else names.set(key,{name, type:asset.type as AssetDraft['type'],shotNumbers:numbers, description:text(asset.description,5000)||''});
   }
   // An asset mentioned in a shot must be present in the structured requirements.
   const all = [...names.values()];
@@ -104,8 +104,14 @@ export class EpisodeStore {
       CREATE INDEX IF NOT EXISTS workspace_shots_episode_idx ON workspace_shots(episode_id,position);
       CREATE TABLE IF NOT EXISTS workspace_assets (
         id TEXT PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES workspace_projects(id),
-        type TEXT NOT NULL, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        type TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(project_id,type,name)
+      );
+      CREATE TABLE IF NOT EXISTS workspace_asset_states (
+        id TEXT PRIMARY KEY, asset_id TEXT NOT NULL REFERENCES workspace_assets(id) ON DELETE CASCADE,
+        name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_main INTEGER NOT NULL DEFAULT 0,
+        source_note TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(asset_id,name)
       );
       CREATE TABLE IF NOT EXISTS workspace_shot_assets (
         shot_id TEXT NOT NULL REFERENCES workspace_shots(id) ON DELETE CASCADE,
@@ -113,6 +119,8 @@ export class EpisodeStore {
         PRIMARY KEY(shot_id,asset_id)
       );
     `);
+    const columns=this.db.prepare('PRAGMA table_info(workspace_assets)').all() as DBRow[];
+    if(!columns.some(col=>col.name==='description')) this.db.exec("ALTER TABLE workspace_assets ADD COLUMN description TEXT NOT NULL DEFAULT ''");
   }
   private projectExists(projectId: number): boolean {
     return Boolean(this.db.prepare("SELECT 1 FROM workspace_projects WHERE id=? AND status='active'").get(projectId));
@@ -156,22 +164,50 @@ export class EpisodeStore {
   assets(projectId: number) {
     if (!this.projectExists(projectId)) return null;
     return (this.db.prepare('SELECT * FROM workspace_assets WHERE project_id=? ORDER BY type,name').all(projectId) as DBRow[])
-      .map((a)=>({id:String(a.id),name:String(a.name),type:String(a.type)}));
+      .map((a)=>({id:String(a.id),name:String(a.name),type:String(a.type),description:String(a.description||'')}));
   }
   plan(episodeId: number) {
     const episode=this.get(episodeId);
     if (!episode) return null;
     const shots=this.shots(episodeId);
-    const raw=this.db.prepare(`SELECT sa.shot_id,sa.asset_id,a.name,a.type FROM workspace_shot_assets sa
+    const raw=this.db.prepare(`SELECT sa.shot_id,sa.asset_id,a.name,a.type,a.description FROM workspace_shot_assets sa
       JOIN workspace_shots s ON s.id=sa.shot_id JOIN workspace_assets a ON a.id=sa.asset_id WHERE s.episode_id=?`).all(episodeId) as DBRow[];
     const assets=new Map<string,AssetDraft>();
     raw.forEach((row)=>{
       const key=String(row.asset_id);
-      if (!assets.has(key)) assets.set(key,{name:String(row.name),type:row.type as AssetDraft['type'],shotNumbers:[]});
+      if (!assets.has(key)) assets.set(key,{name:String(row.name),type:row.type as AssetDraft['type'],shotNumbers:[],description:String(row.description||'')});
       const position=shots.findIndex((shot)=>shot.id===row.shot_id)+1;
       if (position>0) assets.get(key)!.shotNumbers.push(position);
     });
     return {episode, shots, assets:[...assets.values()], totalSeconds:shots.reduce((n,s)=>n+s.duration,0)};
+  }
+  assetStates(projectId:number,assetId:string) {
+    if(!this.projectExists(projectId))return null;
+    const asset=this.db.prepare('SELECT id FROM workspace_assets WHERE id=? AND project_id=?').get(assetId,projectId);
+    if(!asset)return null;
+    return this.db.prepare('SELECT * FROM workspace_asset_states WHERE asset_id=? ORDER BY is_main DESC,position,name').all(assetId);
+  }
+  saveAssetDescription(projectId:number,assetId:string,description:unknown) {
+    if(!this.projectExists(projectId))return null;
+    if(typeof description!=='string'||description.length>5000)throw new Error('资产描述最多 5000 字');
+    const updated=this.db.prepare('UPDATE workspace_assets SET description=? WHERE id=? AND project_id=?').run(description,assetId,projectId);
+    return updated.changes ? this.assets(projectId)?.find(asset=>asset.id===assetId) : null;
+  }
+  saveAssetState(projectId:number,assetId:string,input:unknown) {
+    if(!this.projectExists(projectId))return null;
+    const asset=this.db.prepare('SELECT id,type FROM workspace_assets WHERE id=? AND project_id=?').get(assetId,projectId) as DBRow|undefined;
+    if(!asset)return null;
+    if(!input||typeof input!=='object'||Array.isArray(input))throw new Error('状态格式无效');
+    const value=input as Record<string,unknown>;
+    const name=text(value.name,80),description=text(value.description,5000);
+    if(!name||description===null)throw new Error('请填写状态名称和描述');
+    const existing=this.assetStates(projectId,assetId) as DBRow[];
+    if(existing.length>=30)throw new Error('状态数量达到上限');
+    if(asset.type==='prop'&&existing.length>=1)throw new Error('道具默认仅有一个主要形象；额外状态需在后续有明确剧本依据时开启');
+    const isMain=existing.length===0?1:0;
+    const id=randomUUID();
+    this.db.prepare('INSERT INTO workspace_asset_states(id,asset_id,name,description,is_main,position) VALUES(?,?,?,?,?,?)').run(id,assetId,name,description,isMain,existing.length);
+    return {id,assetId,name,description,isMain:Boolean(isMain)};
   }
   savePlan(episodeId:number, scriptRevision:unknown, input:unknown) {
     const draft=validateBreakdown(input);
@@ -190,11 +226,11 @@ export class EpisodeStore {
       this.db.prepare('DELETE FROM workspace_shots WHERE episode_id=?').run(episodeId);
       const insertShot=this.db.prepare('INSERT INTO workspace_shots (id,episode_id,position,framing,camera,cut,scene,visual,dialogue,sound,duration) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
       draft.shots.forEach((s,i)=>insertShot.run(s.id,episodeId,i+1,s.framing,s.camera,s.cut,s.scene,s.visual,s.dialogue,s.sound,s.duration));
-      const insertAsset=this.db.prepare('INSERT OR IGNORE INTO workspace_assets (id,project_id,type,name) VALUES (?,?,?,?)');
+      const insertAsset=this.db.prepare('INSERT OR IGNORE INTO workspace_assets (id,project_id,type,name,description) VALUES (?,?,?,?,?)');
       const findAsset=this.db.prepare('SELECT id FROM workspace_assets WHERE project_id=? AND type=? AND name=?');
       const link=this.db.prepare('INSERT OR IGNORE INTO workspace_shot_assets (shot_id,asset_id) VALUES (?,?)');
       draft.assets.forEach((a)=>{
-        insertAsset.run(randomUUID(),episode.projectId,a.type,a.name);
+        insertAsset.run(randomUUID(),episode.projectId,a.type,a.name,a.description||'');
         const row=findAsset.get(episode.projectId,a.type,a.name) as {id:string};
         a.shotNumbers.forEach((number)=>link.run(draft.shots[number-1].id,row.id));
       });
