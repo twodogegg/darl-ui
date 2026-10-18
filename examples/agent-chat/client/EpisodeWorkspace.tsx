@@ -5,7 +5,8 @@ import './episodes.css';
 
 type Episode = { id:number; projectId:number; title:string; script:string; scriptRevision:number; planRevision:number|null; updatedAt:string };
 type PlanResponse = { episode:Episode;shots:ShotDraft[];assets:AssetDraft[];totalSeconds:number };
-type LibraryAsset = { id:string;name:string;type:AssetDraft['type'] };
+type LibraryAsset = { id:string;name:string;type:AssetDraft['type'];description?:string };
+type AssetState = { id:string;asset_id:string;name:string;description:string;is_main:number };
 type Preview = { plan:BreakdownDraft;scriptRevision:number;totalSeconds:number };
 
 async function get<T>(url:string, method='GET', body?:unknown):Promise<T>{
@@ -63,6 +64,12 @@ export function EpisodeWorkspace({projectId,agents,onEditAgent}:{projectId:numbe
   const [draft,setDraft]=useState<BreakdownDraft|null>(null);
   const [draftRevision,setDraftRevision]=useState<number|null>(null);
   const [library,setLibrary]=useState<LibraryAsset[]>([]);
+  const [workTab,setWorkTab]=useState<'shots'|'assets'>('shots');
+  const [selectedShot,setSelectedShot]=useState(0);
+  const [assetDetail,setAssetDetail]=useState<string|null>(null);
+  const [assetStates,setAssetStates]=useState<AssetState[]>([]);
+  const [stateName,setStateName]=useState('');
+  const [stateDescription,setStateDescription]=useState('');
   const [busy,setBusy]=useState('');
   const [error,setError]=useState('');
   const [notice,setNotice]=useState('');
@@ -170,9 +177,13 @@ export function EpisodeWorkspace({projectId,agents,onEditAgent}:{projectId:numbe
     if(index<0){setError('资产「'+name+'」尚未列入需求清单');return;}
     document.getElementById('episode-asset-'+index)?.scrollIntoView({behavior:'smooth',block:'center'});
   };
+  const openedAsset=library.find(a=>a.id===assetDetail);
+  const openAsset=async(id:string)=>{setAssetDetail(id);setAssetStates([]);try{setAssetStates(await get<AssetState[]>(`projects/${projectId}/assets/${id}/states`));}catch(e){setError((e as Error).message);}};
+  const saveAssetDescription=async(asset:LibraryAsset,description:string)=>{try{await get(`projects/${projectId}/assets/${asset.id}`,'PATCH',{description});setLibrary(items=>items.map(a=>a.id===asset.id?{...a,description}:a));setNotice('资产描述已保存');}catch(e){setError((e as Error).message);}};
+  const addAssetState=async()=>{if(!openedAsset||!stateName.trim())return;try{await get(`projects/${projectId}/assets/${openedAsset.id}/states`,'POST',{name:stateName,description:stateDescription});setAssetStates(await get<AssetState[]>(`projects/${projectId}/assets/${openedAsset.id}/states`));setStateName('');setStateDescription('');}catch(e){setError((e as Error).message);}};
   const total=draft?.shots.reduce((sum,s)=>sum+(Number.isFinite(s.duration)?s.duration:0),0)??0;
   return <section className="workspace-episodes" aria-label="剧集与智能拆镜">
-    <header><h2>剧集 · 剧本与智能拆镜</h2><p>用户剧本为准。通过你配置的专业 Agent，一次输出九列分镜和资产需求。</p></header>
+    <header><h2>剧集 · 剧本与智能拆镜</h2><p>原稿不由 AI 改写。分镜与美术资产分开整理，完成后再统一交给生图 Agent。</p></header>
     <div className="workspace-episode-create">
       <input aria-label="新剧集名称" placeholder="例如：第 01 集" maxLength={100} value={newTitle} onChange={e=>setNewTitle(e.target.value)}/>
       <button type="button" onClick={()=>void create()} disabled={!!busy||!newTitle.trim()}>添加剧集</button>
@@ -208,54 +219,80 @@ export function EpisodeWorkspace({projectId,agents,onEditAgent}:{projectId:numbe
         {script!==episode.script&&<p className="workspace-episode-hint">剧本有未保存修改，请先保存后再执行智能拆镜。</p>}
       </div>
       {draft&&<div className="workspace-episode-panel">
-        <div className="workspace-episode-title"><h3>九列分镜脚本</h3>
-          <strong>{draft.shots.length} 镜 · 预计 {Number(total.toFixed(2))} 秒</strong></div>
-        {draftRevision!==episode.scriptRevision&&<p className="workspace-episode-hint">这份分镜基于旧版剧本；如果要保存，请先用最新剧本重新拆镜。</p>}
-        <p className="workspace-episode-hint">编辑器显示 @资产名；保存时由代码转回 &lt;资产名&gt;，并可点击下方资产标签定位需求。</p>
-        <div className="workspace-shot-scroll"><table className="workspace-shot-table">
-          <thead><tr><th>镜头编号</th><th>景别</th><th>运镜</th><th>切镜方式</th><th>场景</th><th>画面</th><th>台词/对白</th><th>音效</th><th>时长（秒）</th></tr></thead>
-          <tbody>{draft.shots.map((shot,i)=><tr key={shot.id}>
-            <td><strong>{String(i+1).padStart(2,'0')}</strong><div className="workspace-shot-ops">
-              <button title="上移" onClick={()=>reorder(i,-1)} disabled={i===0}>↑</button>
-              <button title="下移" onClick={()=>reorder(i,1)} disabled={i===draft.shots.length-1}>↓</button>
-              <button title="删除镜头" onClick={()=>removeShot(i)} disabled={draft.shots.length===1}>×</button>
-            </div></td>
-            {fields.map(({key,label})=><td key={key}>
-              <label className="workspace-shot-field"><span>{label}</span>
-                <textarea aria-label={`镜头 ${i+1} ${label}`} rows={key==='visual'?4:2} value={(key==='visual'||key==='scene')?toVisible(shot[key]):shot[key]}
-                  onChange={e=>updateShot(i,key,(key==='visual'||key==='scene')?toStored(e.target.value,draft.assets):e.target.value)}/>
-              </label>
-              {(key==='visual'||key==='scene')&&<div className="workspace-shot-preview">
-                <AssetText value={shot[key]} assets={draft.assets} onAsset={assetFocus}/>
-              </div>}
-            </td>)}
-            <td><input aria-label={`镜头 ${i+1} 时长`} type="number" min="0.1" step="0.1" max="600" value={shot.duration}
-              onChange={e=>updateShot(i,'duration',Number(e.target.value))}/></td>
-          </tr>)}</tbody></table></div>
-        <button type="button" onClick={addShot}>+ 添加镜头</button>
-      </div>}
-      {draft&&<div className="workspace-episode-panel">
-        <div className="workspace-episode-title"><h3>美术资产需求</h3><small>按项目去重 · 仅规划，不生成图片</small></div>
-        {draft.assets.length===0&&<p>尚无资产需求。</p>}
-        <div className="workspace-asset-list">{draft.assets.map((asset,i)=>
-          <div id={'episode-asset-'+i} className="workspace-asset-item" key={i}>
-            <label>名称<input value={asset.name} onChange={e=>updateAsset(i,'name',e.target.value)}/></label>
-            <label>类型<select value={asset.type} onChange={e=>updateAsset(i,'type',e.target.value)}>
-              {Object.entries(types).map(([type,name])=><option key={type} value={type}>{name}</option>)}
-            </select></label>
-            <label>涉及镜头（编号，逗号分隔）
-              <input key={asset.name+":"+i} defaultValue={asset.shotNumbers.join(', ')} onBlur={e=>updateAsset(i,'shotNumbers',e.target.value)}/>
-            </label>
-            <span className="workspace-asset-state">{library.some(item=>item.name===asset.name&&item.type===asset.type)?'项目资产已存在':'待准备资产'}</span>
-            <button type="button" onClick={()=>setDraft(prev=>prev&&({...prev,assets:prev.assets.filter((_,j)=>j!==i)}))}>移除</button>
-          </div>)}</div>
-        <button type="button" onClick={()=>setDraft(prev=>prev&&({...prev,assets:[...prev.assets,{name:'',type:'prop',shotNumbers:[]}]}))}>+ 添加资产需求</button>
-        <div className="workspace-episode-actions">
-          <button type="button" className="workspace-primary" onClick={()=>void savePlan()}
-            disabled={!!busy||draftRevision!==episode.scriptRevision}>
-            {busy==='plan'?'正在保存…':'保存分镜与资产'}
-          </button>
+        <div className="workspace-episode-title"><h3>制作草案</h3><strong>{draft.shots.length} 镜 · 预计 {Number(total.toFixed(2))} 秒</strong></div>
+        {draftRevision!==episode.scriptRevision&&<p className="workspace-episode-hint">当前草案基于旧剧本。保留现有镜头，如需更新请重新拆镜。</p>}
+        <div className="workspace-work-tabs" role="tablist" aria-label="分镜与资产">
+          <button type="button" role="tab" aria-selected={workTab==='shots'} className={workTab==='shots'?'active':''} onClick={()=>setWorkTab('shots')}>分镜 · {draft.shots.length}</button>
+          <button type="button" role="tab" aria-selected={workTab==='assets'} className={workTab==='assets'?'active':''} onClick={()=>setWorkTab('assets')}>美术资产 · {draft.assets.length}</button>
         </div>
+        {workTab==='shots'?<div className="workspace-shot-layout">
+          <aside className="workspace-shot-list" aria-label="镜头列表">
+            {draft.shots.map((shot,i)=><button type="button" key={shot.id} className={selectedShot===i?'active':''} onClick={()=>setSelectedShot(i)}>
+              <strong>{String(i+1).padStart(2,'0')}</strong><span>{shot.visual.replace(/<([^<>]+)>/g,'@$1').slice(0,55)||'未填写画面'}</span><small>{shot.duration}s</small>
+            </button>)}
+            <button type="button" onClick={()=>{addShot();setSelectedShot(draft.shots.length);}}>＋ 添加镜头</button>
+          </aside>
+          {draft.shots[Math.min(selectedShot,draft.shots.length-1)]&&(()=>{
+            const index=Math.min(selectedShot,draft.shots.length-1),shot=draft.shots[index];
+            return <div className="workspace-shot-detail">
+              <div className="workspace-episode-title"><h4>镜头 {String(index+1).padStart(2,'0')}</h4><div className="workspace-shot-ops">
+                <button title="上移" onClick={()=>{reorder(index,-1);setSelectedShot(Math.max(0,index-1));}} disabled={index===0}>↑</button>
+                <button title="下移" onClick={()=>{reorder(index,1);setSelectedShot(Math.min(draft.shots.length-1,index+1));}} disabled={index===draft.shots.length-1}>↓</button>
+                <button title="删除镜头" onClick={()=>{removeShot(index);setSelectedShot(Math.max(0,index-1));}} disabled={draft.shots.length===1}>删除</button>
+              </div></div>
+              <div className="workspace-shot-fields">
+                {fields.map(({key,label})=><label key={key} className={'workspace-shot-field workspace-field-'+key}>
+                  <span>{label}</span>
+                  <textarea aria-label={`镜头 ${index+1} ${label}`} rows={key==='visual'?5:2} value={(key==='visual'||key==='scene')?toVisible(shot[key]):shot[key]}
+                    onChange={e=>updateShot(index,key,(key==='visual'||key==='scene')?toStored(e.target.value,draft.assets):e.target.value)}/>
+                </label>)}
+                <label className="workspace-shot-field"><span>时长（秒）</span>
+                  <input aria-label={`镜头 ${index+1} 时长`} type="number" min="0.1" max="600" step="0.1" value={shot.duration}
+                    onChange={e=>updateShot(index,'duration',Number(e.target.value))}/></label>
+              </div>
+              <div className="workspace-asset-chips" aria-label="镜头关联资产">
+                {draft.assets.filter(a=>a.shotNumbers.includes(index+1)).map(a=><button type="button" key={a.type+':'+a.name} onClick={()=>{setWorkTab('assets');setAssetDetail(library.find(x=>x.name===a.name&&x.type===a.type)?.id||null);}}>
+                  @{a.name}</button>)}
+              </div>
+              <p className="workspace-episode-hint">场景/画面只显示一次。输入 @资产名称可引用草案中的资产，标签上方不再重复渲染预览。</p>
+            </div>;
+          })()}
+        </div>:<div className="workspace-asset-workspace">
+          <div className="workspace-asset-cards">
+            {draft.assets.map((a,i)=>{
+              const item=library.find(x=>x.name===a.name&&x.type===a.type);
+              return <button key={a.type+':'+a.name+i} type="button" className={assetDetail===item?.id?'active':''}
+                onClick={()=>{if(item)void openAsset(item.id);else setAssetDetail(null);}}>
+                <span className="workspace-asset-placeholder">◇</span>
+                <strong>{a.name}</strong><small>{types[a.type]} · {a.shotNumbers.length} 镜</small>
+                <p>{a.description||item?.description||'待补充视觉描述'}</p>
+                <span>{item?'已收录项目资产':'待保存到项目'}</span>
+              </button>;
+            })}
+          </div>
+          <div className="workspace-asset-editor">
+            <h4>美术资产描述</h4>
+            {draft.assets.map((asset,i)=><div className="workspace-asset-edit-row" key={i}>
+              <div><input aria-label={`资产 ${i+1} 名称`} value={asset.name} onChange={e=>updateAsset(i,'name',e.target.value)}/>
+              <select aria-label={`资产 ${i+1} 类型`} value={asset.type} onChange={e=>updateAsset(i,'type',e.target.value)}>{Object.entries(types).map(([type,name])=><option key={type} value={type}>{name}</option>)}</select></div>
+              <textarea aria-label={`资产 ${i+1} 描述`} rows={2} placeholder="只写剧本支持的视觉设定，不写生图提示词" value={asset.description||''} onChange={e=>updateAsset(i,'description',e.target.value)}/>
+              <small>涉及镜头：{asset.shotNumbers.join('、')}</small>
+              <button type="button" onClick={()=>setDraft(prev=>prev&&({...prev,assets:prev.assets.filter((_,j)=>j!==i)}))}>移除</button>
+            </div>)}
+            <button type="button" onClick={()=>setDraft(prev=>prev&&({...prev,assets:[...prev.assets,{name:'',type:'prop',shotNumbers:[],description:''}]}))}>＋ 添加资产需求</button>
+            {openedAsset&&<div className="workspace-state-editor">
+              <h4>{openedAsset.name} · 主形象与衍生状态</h4>
+              <textarea rows={3} aria-label="已收录资产描述" defaultValue={openedAsset.description||''} key={openedAsset.id}
+                onBlur={e=>{if(e.target.value!==(openedAsset.description||''))void saveAssetDescription(openedAsset,e.target.value);}}/>
+              <div className="workspace-state-list">{assetStates.map(s=><span key={s.id}>{s.name}{s.is_main?' · 主形象':''}</span>)}</div>
+              <label>新增状态名称<input value={stateName} onChange={e=>setStateName(e.target.value)} placeholder={openedAsset.type==='character'?'例如：休闲装':openedAsset.type==='scene'?'仅填写剧本中实际出现的时间状态':'道具默认只保留主形象'}/></label>
+              <label>当前状态描述<textarea value={stateDescription} onChange={e=>setStateDescription(e.target.value)} rows={2}/></label>
+              <button type="button" onClick={()=>void addAssetState()} disabled={!stateName.trim()||(openedAsset.type==='prop'&&assetStates.length>0)}>添加状态</button>
+            </div>}
+            <p className="workspace-episode-hint">本阶段只整理资产描述与状态，尚不生成生图提示词；完整资产清单由后续专业生图 Agent 统一处理。</p>
+          </div>
+        </div>}
+        <div className="workspace-episode-actions"><button type="button" className="workspace-primary" onClick={()=>void savePlan()} disabled={!!busy||draftRevision!==episode.scriptRevision}>{busy==='plan'?'正在保存…':'保存分镜与资产'}</button></div>
       </div>}
     </>}
   </section>;
