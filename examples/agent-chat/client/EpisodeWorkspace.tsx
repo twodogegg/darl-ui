@@ -66,7 +66,11 @@ export function EpisodeWorkspace({projectId,agents}:{projectId:number;agents:Age
   const [busy,setBusy]=useState('');
   const [error,setError]=useState('');
   const [notice,setNotice]=useState('');
-  const availableAgents=agents.filter(a=>!a.builtIn && a.enabled!==false);
+  const availableAgents=agents.filter(a=>a.enabled!==false);
+  useEffect(()=>{
+    setAgentId(current => availableAgents.some(agent=>agent.id===current)
+      ? current : (availableAgents.find(agent=>agent.isDefault) || availableAgents[0])?.id || '');
+  },[agents]);
 
   useEffect(()=>{
     let active=true;
@@ -190,8 +194,8 @@ export function EpisodeWorkspace({projectId,agents}:{projectId:number;agents:Age
         <div className="workspace-episode-analysis">
           <label>执行智能拆镜的专业 Agent
             <select value={agentId} onChange={e=>setAgentId(e.target.value)}>
-              <option value="">选择已配置的 Agent</option>
-              {availableAgents.map(agent=><option key={agent.id} value={agent.id}>{agent.name}</option>)}
+              <option value="">选择 Agent</option>
+              {availableAgents.map(agent=><option key={agent.id} value={agent.id}>{agent.name}{agent.isDefault ? "（默认）" : ""}</option>)}
             </select>
           </label>
           <button type="button" className="workspace-primary" onClick={()=>void analyze()}
@@ -199,7 +203,7 @@ export function EpisodeWorkspace({projectId,agents}:{projectId:number;agents:Age
             {busy==='analyze'?'Agent 正在分析…':'AI 智能拆镜 + 提取资产'}
           </button>
         </div>
-        {!availableAgents.length&&<p className="workspace-episode-hint">请先到「设置 → Agents」创建并启用用于拆镜的专业 Agent；不影响手动保存剧本。</p>}
+        {!availableAgents.length&&<p className="workspace-episode-hint">当前没有可用的 Agent。请先到「设置 → Agents」启用一个 Agent；不影响手动保存剧本。</p>}
         {script!==episode.script&&<p className="workspace-episode-hint">剧本有未保存修改，请先保存后再执行智能拆镜。</p>}
       </div>
       {draft&&<div className="workspace-episode-panel">
