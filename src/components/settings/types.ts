@@ -71,9 +71,6 @@ export interface AgentConfig {
   modelId: string;
   reasoningEfforts?: string[];
   skillIds?: string[];
-  applicationIds?: string[];
-  /** Optional per-application tool allow-list. Omitted means all discovered tools. */
-  applicationTools?: Record<string, string[]>;
   contextPolicy?: AgentContextPolicy;
   enabled?: boolean;
   isDefault?: boolean;
@@ -82,7 +79,6 @@ export interface AgentConfig {
 export interface AgentsSettingsCardProps {
   agents: AgentConfig[];
   models?: AgentModelConfig[];
-  applications?: Array<{ id: string; name: string; tools?: Array<{ name: string; title?: string }> }>;
   skills?: Array<{ id: string; name: string; enabled?: boolean }>;
   onSave?: (agent: AgentConfig) => void | Promise<void>;
   onDelete?: (agentId: string) => void | Promise<void>;

@@ -46,10 +46,6 @@ export function NativeSelect({ className = '', children, ...props }: SelectHTMLA
   return <div className="darl-native-select"><select data-slot="select" className={`darl-select ${className}`} {...props}>{children}</select></div>;
 }
 
-export const Checkbox = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & ClassNameProps>(function Checkbox({ className = '', type = 'checkbox', ...props }, ref) {
-  return <input ref={ref} type={type} data-slot="checkbox" className={`darl-checkbox ${className}`} {...props} />;
-});
-
 export function Switch({ className = '', children, ...props }: InputHTMLAttributes<HTMLInputElement> & ClassNameProps) {
   return <label className={`darl-switch ${className}`}><input type="checkbox" role="switch" {...props} /><span aria-hidden="true" /><span className="darl-switch-copy">{children}</span></label>;
 }

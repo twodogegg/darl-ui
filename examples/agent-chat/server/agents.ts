@@ -19,12 +19,6 @@ export function validateAgent(value: unknown, existing: StoredAgent[] = []): Sto
   if (typeof item.instructions !== 'string' || !item.instructions.trim()) throw new Error('Agent 系统提示词不能为空');
   if (typeof item.providerId !== 'string' || !item.providerId.trim() || typeof item.modelId !== 'string' || !item.modelId.trim()) throw new Error('Agent 必须选择模型');
   const skillIds = list(item.skillIds, 'Skill');
-  const applicationIds = list(item.applicationIds, 'MCP 应用', 20);
-  const applicationTools: Record<string, string[]> = {};
-  if (item.applicationTools !== undefined) {
-    if (!item.applicationTools || typeof item.applicationTools !== 'object' || Array.isArray(item.applicationTools)) throw new Error('MCP 工具权限配置无效');
-    for (const [appId, tools] of Object.entries(item.applicationTools)) applicationTools[appId] = list(tools, 'MCP 工具', 128);
-  }
   if (item.reasoningEfforts !== undefined && (!Array.isArray(item.reasoningEfforts) || item.reasoningEfforts.some((effort) => typeof effort !== 'string' || effort.length > 40))) throw new Error('推理强度配置无效');
   if (item.enabled !== undefined && typeof item.enabled !== 'boolean') throw new Error('Agent 启用状态无效');
   if (item.isDefault !== undefined && typeof item.isDefault !== 'boolean') throw new Error('Agent 默认状态无效');
@@ -43,8 +37,6 @@ export function validateAgent(value: unknown, existing: StoredAgent[] = []): Sto
     modelId: item.modelId.trim(),
     reasoningEfforts: [...(item.reasoningEfforts || [])],
     skillIds,
-    applicationIds,
-    applicationTools,
     contextPolicy: { ...contextPolicy },
     enabled: item.enabled !== false,
     isDefault: item.isDefault === true,
@@ -69,4 +61,4 @@ export function loadAgents(store: LocalStorage): StoredAgent[] {
   return value ? validateAgents(value) : [];
 }
 
-export function publicAgent(agent: StoredAgent): AgentConfig { return { ...agent, skillIds: [...(agent.skillIds || [])], applicationIds: [...(agent.applicationIds || [])], applicationTools: Object.fromEntries(Object.entries(agent.applicationTools || {}).map(([key, value]) => [key, [...value]])) }; }
+export function publicAgent(agent: StoredAgent): AgentConfig { return { ...agent, skillIds: [...(agent.skillIds || [])] }; }

@@ -5,11 +5,11 @@ import { AgentsSettingsCard } from '../src';
 describe('AgentsSettingsCard', () => {
   it('creates an Agent with an isolated model and prompt', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
-    render(<AgentsSettingsCard agents={[]} models={[{ id: 'text', name: '文本模型', providerId: 'gateway', type: 'text', reasoningEfforts: ['low'] }]} skills={[{ id: 'skill', name: 'Skill' }]} applications={[{ id: 'app', name: '应用', tools: [{ name: 'read', title: '读取' }] }]} onSave={onSave} />);
+    render(<AgentsSettingsCard agents={[]} models={[{ id: 'text', name: '文本模型', providerId: 'gateway', type: 'text', reasoningEfforts: ['low'] }]} skills={[{ id: 'skill', name: 'Skill' }]} onSave={onSave} />);
     fireEvent.click(screen.getByRole('button', { name: '添加 Agent' }));
     expect(screen.queryByText('允许使用的 Skills')).toBeNull();
-    expect(screen.getByRole('checkbox', { name: '应用' })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: '读取' })).toBeChecked();
+    expect(screen.queryByText('允许使用的 MCP 应用')).toBeNull();
+    expect(screen.queryByRole('checkbox')).toBeNull();
     expect(screen.queryByRole('combobox', { name: '模型' })).toBeNull();
     expect(screen.queryByRole('combobox', { name: '推理强度' })).toBeNull();
     fireEvent.change(screen.getByRole('textbox', { name: 'Agent ID' }), { target: { value: 'art' } });

@@ -6,9 +6,10 @@ const agent = (id: string) => ({ id, name: id, instructions: `负责 ${id}`, pro
 
 describe('server-managed Agent configuration', () => {
   it('normalizes lists and never exposes credentials', () => {
-    const value = validateAgent({ ...agent('art'), avatar: '🎨', skillIds: ['one', 'one'], applicationIds: ['assets'], applicationTools: { assets: ['search'] } });
-    expect(value).toMatchObject({ avatar: '🎨', skillIds: ['one'], applicationIds: ['assets'], applicationTools: { assets: ['search'] }, enabled: true });
+    const value = validateAgent({ ...agent('art'), avatar: '🎨', skillIds: ['one', 'one'] });
+    expect(value).toMatchObject({ avatar: '🎨', skillIds: ['one'], enabled: true });
     expect(publicAgent(value)).not.toHaveProperty('apiKey');
+    expect(publicAgent(value)).not.toHaveProperty('applicationIds');
   });
 
   it('accepts multiple enabled Agents without a delegation allow-list', () => {
