@@ -299,9 +299,10 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
   const modelId = controlledModelId ?? localModelId;
   const selectedModel = models.find((model) => model.id === modelId) ?? models[0];
-  const agentId = controlledAgentId ?? localAgentId;
-  const selectedAgent = agents.find((agent) => agent.id === agentId);
-  const selectableAgents = useMemo(() => agents.filter((agent) => agent.enabled !== false), [agents]);
+  const selectableAgents = useMemo(() => agents.filter((agent) => (agent.type || 'main_agent') === 'main_agent' && agent.selectable !== false && agent.enabled !== false), [agents]);
+  const requestedAgentId = controlledAgentId ?? localAgentId;
+  const selectedAgent = selectableAgents.find((agent) => agent.id === requestedAgentId);
+  const agentId = selectedAgent?.id;
   const supportedEfforts = selectedModel?.reasoningEfforts ?? [];
   const preferredEffort = controlledEffort ?? localEffort;
   const effort = supportedEfforts.includes(preferredEffort) ? preferredEffort : supportedEfforts[0];

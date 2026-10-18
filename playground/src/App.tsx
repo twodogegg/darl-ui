@@ -17,6 +17,7 @@ import { usePlaygroundTheme } from './usePlaygroundTheme';
 import { MediaWorkspaceDemo } from './MediaWorkspaceDemo';
 import { VideoCompareDemo } from './VideoCompareDemo';
 import { AgentSidebarDemo } from './AgentSidebarDemo';
+import { AgentPlazaDemo } from './AgentPlazaDemo';
 import { SettingsDemo } from './SettingsDemo';
 import { StyleSelectorDemo } from './StyleSelectorDemo';
 import { InteractiveConfirmDialogDemo } from './InteractiveConfirmDialogDemo';
@@ -30,7 +31,7 @@ const formatOptions: Record<Format, { label: string; accept: string[] }> = {
   mixed: { label: '图片 + 视频', accept: ['image/*', 'video/*'] },
   documents: { label: '文档', accept: ['.pdf', '.docx', '.txt'] },
 };
-const hashes: Record<Page, string> = { intro: 'intro', theme: 'theme', uploader: '', video: 'video-compare', media: 'media-workspace', styles: 'styles', agent: 'agent-sidebar', settings: 'settings', 'confirm-dialog': 'confirm-dialog' };
+const hashes: Record<Page, string> = { intro: 'intro', theme: 'theme', uploader: '', video: 'video-compare', media: 'media-workspace', styles: 'styles', agent: 'agent-sidebar', 'agent-plaza': 'agent-plaza', settings: 'settings', 'confirm-dialog': 'confirm-dialog' };
 const currentPage = (): Page => (Object.keys(hashes) as Page[]).find((page) => hashes[page] === location.hash.slice(1)) ?? 'uploader';
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 function mockUpload(shouldFail: boolean): UploadFn<{ fileId: string; url: string }> {
@@ -85,6 +86,7 @@ export function App() {
   return <DemoLayout selected={selected} onNavigate={navigate} mode={mode} onModeChange={setMode}>
     {selected === 'confirm-dialog' ? <InteractiveConfirmDialogDemo />
       : selected === 'agent' ? <AgentSidebarDemo />
+      : selected === 'agent-plaza' ? <AgentPlazaDemo />
       : selected === 'settings' ? <SettingsDemo />
       : selected === 'media' ? <MediaWorkspaceDemo mode={mode} color={color} onColorChange={setColor} />
       : selected === 'video' ? <VideoCompareDemo color={color} mode={mode} />

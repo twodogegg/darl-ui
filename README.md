@@ -303,6 +303,23 @@ import '@darl/ui/styles.css';
 
 应用和 Skill 从选择面板插入输入光标处，作为正文内引用，不显示输入框上方标签，也不自动传入当前页面。输入 `@` 引用应用或 Skill；继续输入名称或简介关键词可以筛选，上下方向键选择，Enter / Tab 插入，Esc 关闭建议。应用引用为蓝色，Skill 引用为紫色，可用 `--darl-agent-app` / `--darl-agent-skill` 覆盖。引用编码为 `[显示名称](app:ID)` / `[显示名称](skill:ID)`，发送时从正文派生应用和 Skill ID；删除引用即取消本次使用。
 
+## AgentPlaza｜主 Agent 广场
+
+`AgentPlaza` 只展示服务端标记为 `main_agent` 且允许用户选择的 Agent；`sub_agent` 不会出现在广场，也不会被 `AgentSidebar` 的用户选择器展示。卡片只包含头像、名称和用途描述，点击后由宿主打开对应对话。
+
+演示入口：`http://localhost:5188/#agent-plaza`；真实 Agent Chat 示例也提供「Agent 广场」入口。
+
+```tsx
+import { AgentPlaza } from '@darl/ui';
+
+<AgentPlaza agents={agents} onSelect={(agent) => {
+  setSelectedAgentId(agent.id);
+  setChatOpen(true);
+}} />
+```
+
+`AgentConfig` 支持 `type`（`main_agent` / `sub_agent`）、`selectable`、`callable`、`source` 和 `contextStrategy`。真实宿主必须在服务端再次校验这些字段；示例 Agent Chat 会强制系统默认 Agent 保持内置主 Agent，Sub Agent 只能由授权 Agent 委派，并将调用来源、任务、上下文范围和结果写入本地 SQLite。
+
 ## Agent 配置与 Sub Agent 委派
 
 `examples/agent-chat` 的设置中心提供独立的 Agents 页面。每个 Agent 在服务端保存名称和系统提示词；模型与推理强度在聊天输入框旁按当前会话选择。Skills 与 MCP 应用对所有 Agent 默认可用，无需逐个授权；API Key 仍只保存在服务端。设置默认 Agent 后，聊天可以直接选择专业 Agent，也可以由主 Agent 通过 AI SDK 7 `ToolLoopAgent` 按需委派给其他已启用的 Agent。

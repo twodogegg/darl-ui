@@ -6,7 +6,7 @@ import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import type { Mode } from './usePlaygroundTheme';
 
-export type Page = 'intro' | 'theme' | 'uploader' | 'video' | 'media' | 'styles' | 'agent' | 'settings' | 'confirm-dialog';
+export type Page = 'intro' | 'theme' | 'uploader' | 'video' | 'media' | 'styles' | 'agent' | 'agent-plaza' | 'settings' | 'confirm-dialog';
 const pages = [
   { id: 'intro', label: '概览', title: 'Introduction', icon: LayoutPanelTop },
   { id: 'theme', label: '主题系统', title: 'Theme', icon: Palette },
@@ -15,6 +15,7 @@ const pages = [
   { id: 'media', label: 'MediaWorkspace', title: 'MediaWorkspace', icon: FileImage },
   { id: 'styles', label: 'StyleSelector', title: 'StyleSelector', icon: Palette },
   { id: 'agent', label: 'AgentSidebar', title: 'AgentSidebar', icon: Bot },
+  { id: 'agent-plaza', label: 'Agent 广场', title: 'Agent Plaza', icon: Bot },
   { id: 'settings', label: 'SettingsPage', title: 'SettingsPage', icon: Settings },
   { id: 'confirm-dialog', label: 'InteractiveConfirmDialog', title: 'InteractiveConfirmDialog', icon: ListChecks },
 ] as const;
