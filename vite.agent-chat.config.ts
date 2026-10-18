@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { createApi } from './examples/agent-chat/server/api';
+import { DEFAULT_AGENT_CHAT_PORT } from './examples/agent-chat/server/mcp';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 export default defineConfig(({ mode }) => ({
@@ -11,7 +12,7 @@ export default defineConfig(({ mode }) => ({
     name: 'agent-chat-api',
     configureServer(server) {
       const env = { ...process.env, ...loadEnv(mode, root, '') } as Record<string, string>;
-      server.middlewares.use(createApi(resolve(root, '.local/agent-chat'), env, resolve(root, 'examples/agent-chat/prompts/system.md')));
+      server.middlewares.use(createApi(resolve(root, '.local/agent-chat-drama'), env, resolve(root, 'examples/agent-chat/prompts/system.md'), DEFAULT_AGENT_CHAT_PORT));
     },
   }],
   resolve: { alias: [
@@ -19,6 +20,6 @@ export default defineConfig(({ mode }) => ({
     { find: '@darl/ui', replacement: resolve(root, 'src/index.ts') },
   ] },
   cacheDir: resolve(root, 'node_modules/.vite/agent-chat'),
-  server: { host: '0.0.0.0', port: 5197, strictPort: true, fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/.local/**'] } },
+  server: { host: '0.0.0.0', port: DEFAULT_AGENT_CHAT_PORT, strictPort: true, fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/.local/**'] } },
   build: { outDir: resolve(root, 'dist/agent-chat'), emptyOutDir: true },
 }));

@@ -21,13 +21,13 @@ npm install
 npm run dev
 ```
 
-`npm run dev` 同时启动组件演示站（5188）和真实模型示例（5197），端口被占用时直接报错。两个服务都监听 `0.0.0.0`，同一局域网内的其他设备可通过 `http://<本机局域网 IP>:5188` / `:5197` 访问。
+`npm run dev` 同时启动组件演示站（5288）和真实模型示例（5297），端口被占用时直接报错。两个服务都监听 `0.0.0.0`，同一局域网内的其他设备可通过 `http://<本机局域网 IP>:5288` / `:5297` 访问。
 
 ### 项目工作台（开发分支）
 
-在 Agent Chat 示例（默认 http://localhost:5197）顶部点击「项目」，可进行项目列表、创建、详情、编辑和归档。创建时仅需填写项目标题、视觉风格和画面比例；简介和封面可以留空。封面只允许手动上传。风格选择直接复用 #styles 演示页的 StyleSelector 组件，基础预设和自定义风格均保存在本地 SQLite。
+在 Agent Chat 示例（默认 http://localhost:5297）顶部点击「项目」，可进行项目列表、创建、详情、编辑和归档。创建时仅需填写项目标题、视觉风格和画面比例；简介和封面可以留空。封面只允许手动上传。风格选择直接复用 #styles 演示页的 StyleSelector 组件，基础预设和自定义风格均保存在本地 SQLite。
 
-**项目模块无需配置 PROJECT_API_BASE_URL、PROJECT_API_TOKEN，也不依赖旧网站的 FastAPI/MySQL。** Agent Chat 现有的 Node 服务处理项目接口；项目记录、风格以及上传的封面图片，统一存入 .local/agent-chat/data.sqlite。执行 npm run dev 即可启动，不需要第二个后端。
+**项目模块无需配置 PROJECT_API_BASE_URL、PROJECT_API_TOKEN，也不依赖旧网站的 FastAPI/MySQL。** Agent Chat 现有的 Node 服务处理项目接口；项目记录、风格以及上传的封面图片，统一存入 .local/agent-chat-drama/data.sqlite。执行 npm run dev 即可启动，不需要第二个后端。
 
 项目创建后默认没有剧集。打开项目详情可逐集添加剧集，粘贴或导入 `.txt` / `.md` 已有剧本并直接保存；剧本以用户原文为准，无 AI 审核。用户可在「设置 → Agents」配置专业文本 Agent（模型、指令、Skills），随后在剧集中选择该 Agent，点击「AI 智能拆镜 + 提取资产」，一次返回可编辑的九列分镜与项目级去重人物/场景/道具需求，保存到本地 SQLite。分镜 `<资产名>` 由页面渲染为可点击的 `@资产名`；实际媒体请求的 `@图片N` 编号不在这一步生成。本期不进行剧本改写、资产图片生成、视频生成或剪辑。项目 API 当前只允许本机访问，适用于单用户本地开发，不适合未经认证直接暴露公网；AI 分析需要在模型设置中配置有效的文本模型 API Key。
 
@@ -53,13 +53,13 @@ npm run dev
 - 示例服务端使用 AI SDK Core 和 OpenAI-compatible Provider 运行模型与工具循环；MCP 通过已有 SDK 动态转换为 AI SDK 工具，执行确认仍由宿主处理。每次请求从本地 SQLite 恢复并重建模型上下文，不启用 coding CLI、本机文件工具；这些依赖仅用于宿主示例，不进入组件库浏览器产物。
 - Markdown 使用开源的 `react-markdown`、`remark-gfm` 和 `rehype-sanitize` 渲染；回复中的 `md` / `markdown` 代码块会显示为编译后的内容，复制按钮仍复制原始 Markdown。
 - 系统提示词首次从 `examples/agent-chat/prompts/system.md` 写入本地 SQLite，之后由数据库管理；缺失、空白或过长时报错，代码没有内置默认值。专业 Agent 的提示词在 Agents 编辑器中单独配置。选中的 Skill 指令在发送时追加。
-- 对话、Skills、提供方、模型配置和 Agent 配置保存在 Git 忽略的 `.local/agent-chat/data.sqlite`；浏览器只负责调用本机 API，不保存聊天历史。
+- 对话、Skills、提供方、模型配置和 Agent 配置保存在 Git 忽略的 `.local/agent-chat-drama/data.sqlite`；浏览器只负责调用本机 API，不保存聊天历史。
 - MediaWorkspace 宿主可通过 `/api/media-tasks` 保存单用户任务、批次和结果；协议凭据与生成结果仍由宿主 API 管理。
 - 获取模型目录后需确认模型类型、启用状态并保存；新发现的模型默认禁用，接口返回的 ID 无法证明其媒体或推理能力。
 - 支持通过 Streamable HTTP 接入 MCP 应用和真实多步工具调用；AgentSidebar 支持图片附件预览、发送到支持视觉输入的文本模型，以及 MCP 图片结果回传；模型目录仍可设置图片 / 视频 / 音频类型，聊天仅列出启用的文本模型。
 - 聊天请求不设置固定的 100000 字符文本上限；上下文预算按模型 `contextWindow` 能力计算，未声明时按 1M token 的默认预算处理。累计上下文超过预算 50% 后主动压缩较早历史，当前消息和最近上下文优先保留；工具结果仍按 Agent 上下文策略控制。
 
-MCP 连接由宿主示例的服务端管理。将配置保存为 Git 忽略的 `.local/agent-chat/applications.json`（数组，可配置多个服务）：
+MCP 连接由宿主示例的服务端管理。将配置保存为 Git 忽略的 `.local/agent-chat-drama/applications.json`（数组，可配置多个服务）：
 
 ```json
 [
@@ -73,7 +73,7 @@ MCP 连接由宿主示例的服务端管理。将配置保存为 Git 忽略的 `
 ]
 ```
 
-在「设置 → 应用 / MCP」中也可以新增、编辑或移除 Streamable HTTP 连接，填写应用 ID、名称、URL 与可选的 Bearer Token；更新保存在服务端的 `applications.json`，不会向浏览器回显 Token。点击「刷新连接与工具目录」重新发现工具；展开工具条目可以查看完整输入 JSON Schema、可选输出 Schema 和 annotations。OAuth 仍未实现，使用 OAuth 的服务不能通过此表单完成授权。当前本地开发宿主没有用户登录隔离，勿把含凭证的 5197 端口暴露到不可信网络。
+在「设置 → 应用 / MCP」中也可以新增、编辑或移除 Streamable HTTP 连接，填写应用 ID、名称、URL 与可选的 Bearer Token；更新保存在服务端的 `applications.json`，不会向浏览器回显 Token。点击「刷新连接与工具目录」重新发现工具；展开工具条目可以查看完整输入 JSON Schema、可选输出 Schema 和 annotations。OAuth 仍未实现，使用 OAuth 的服务不能通过此表单完成授权。当前本地开发宿主没有用户登录隔离，勿把含凭证的 5297 端口暴露到不可信网络。
 
 `apiKey` 可省略，用于无需鉴权的服务；URL 不接受内嵌凭证或查询参数。`readOnlyTools` 是宿主核实后的只读工具名单，无需这类覆盖时省略。工具 schema、名称和参数从 MCP 动态发现，设置 → 应用 / MCP 可查看连接状态和重新连接。聊天中用 `@` 引用一次应用，其工具在该对话后续消息中持续可用；服务端根据用户消息中的应用引用，每轮重新提供工具定义。刷新恢复后仍有效，新对话不继承，重新生成仅使用该轮之前的历史；已从服务端配置移除的历史应用会被忽略。同名工具通过服务端命名空间区分。询问应用用途或用法时，默认依据工具目录简短回答；只有明确需要真实数据或执行操作时才调用工具，避免额外浏览示例素材和无关文档。
 
@@ -257,12 +257,12 @@ import '@darl/ui/styles.css';
 
 模型、任务、批次和异步状态由宿主传入；组件不调用真实生成 API，不上传文件，不自行保存任务。切换模型保留素材，超限阻止生成；不支持的参数与素材不进入请求。
 
-演示入口：`http://localhost:5188/#media-workspace`。包含「创作工作室」与「品牌宣传」两种宿主配置、深浅主题及本地异步模拟。示例媒体为本地示意素材。完整模型类型、API、接入示例和边界见 [MediaWorkspace 文档](docs/media-workspace.md)。
+演示入口：`http://localhost:5288/#media-workspace`。包含「创作工作室」与「品牌宣传」两种宿主配置、深浅主题及本地异步模拟。示例媒体为本地示意素材。完整模型类型、API、接入示例和边界见 [MediaWorkspace 文档](docs/media-workspace.md)。
 
 
 ## AgentSidebar｜网站辅助 Agent 侧栏
 
-演示入口：`http://localhost:5188/#agent-sidebar`。右侧会话面板包含新对话、历史搜索与切换、会话重命名与删除（需二次确认）、消息发送、应用 / Skill 选择、模型及其推理强度选择；消息较长时可直接跳到顶部或底部，也可以展开为居中的大对话窗口。回复操作只有复制和重新生成；整条复制保留原始 Markdown，代码块单独复制代码。Markdown 使用 GFM 渲染，并支持将 `md` / `markdown` 围栏内容渲染为可读内容。
+演示入口：`http://localhost:5288/#agent-sidebar`。右侧会话面板包含新对话、历史搜索与切换、会话重命名与删除（需二次确认）、消息发送、应用 / Skill 选择、模型及其推理强度选择；消息较长时可直接跳到顶部或底部，也可以展开为居中的大对话窗口。回复操作只有复制和重新生成；整条复制保留原始 Markdown，代码块单独复制代码。Markdown 使用 GFM 渲染，并支持将 `md` / `markdown` 围栏内容渲染为可读内容。
 
 ```tsx
 import { AgentSidebar } from '@darl/ui';
@@ -309,7 +309,7 @@ import '@darl/ui/styles.css';
 
 设置中心的模型页面顶部同时提供默认媒体模型设置，目前只配置图片和视频：默认图片为 `gpt-image-2`（2K、16:9），默认视频为 `minimax-h3-flash`（480P、16:9）。配置保存在示例服务的本地 SQLite 中；文本模型在聊天输入框旁选择。
 
-每次委派只把任务说明传给子 Agent，子 Agent 使用自己的模型、提示词和当前会话启用的 Skill / MCP 应用，完成后只返回最终摘要。MCP 写操作继续复用宿主的 `ToolConfirmations`，因此允许、拒绝、停止和超时都在服务端生效；NDJSON 工具事件包含 `runId`、`parentRunId` 和 `agentId`，现有侧栏会显示委派、执行和审批状态。Agent 配置保存在 `.local/agent-chat/data.sqlite`，不会写入浏览器存储。
+每次委派只把任务说明传给子 Agent，子 Agent 使用自己的模型、提示词和当前会话启用的 Skill / MCP 应用，完成后只返回最终摘要。MCP 写操作继续复用宿主的 `ToolConfirmations`，因此允许、拒绝、停止和超时都在服务端生效；NDJSON 工具事件包含 `runId`、`parentRunId` 和 `agentId`，现有侧栏会显示委派、执行和审批状态。Agent 配置保存在 `.local/agent-chat-drama/data.sqlite`，不会写入浏览器存储。
 
 ## StyleSelector｜风格选择弹窗
 

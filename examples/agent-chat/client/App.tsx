@@ -43,10 +43,11 @@ const initialDefaultMediaSelection: DefaultModelDraft = {
   image: { modelId: 'gpt-image-2', resolution: '2K', aspectRatio: '16:9' },
   video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' },
 };
+const agentServiceAddress = () => window.location.port ? `本地 ${window.location.port} 端口` : '当前地址';
 async function api<T>(path: string, body?: unknown, method = body ? 'POST' : 'GET'): Promise<T> {
   let response: Response;
   try { response = await fetch(`/api/${path}`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, ...(body ? { body: JSON.stringify(body) } : {}) }); }
-  catch { throw new Error('无法连接 Agent 服务，请确认本地 5197 服务已启动'); }
+  catch { throw new Error(`无法连接 Agent 服务，请确认${agentServiceAddress()}服务已启动`); }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : data.error?.message || `请求失败：HTTP ${response.status}`);
   return data;
@@ -214,7 +215,7 @@ export function App() {
         });
       } catch (reason) {
         if (controller.signal.aborted) throw reason;
-        throw new Error('无法连接 Agent 服务，请确认本地 5197 服务已启动');
+        throw new Error(`无法连接 Agent 服务，请确认${agentServiceAddress()}服务已启动`);
       }
       requestId = response.headers.get('X-Request-Id') || '';
       if (!response.ok) {
@@ -337,7 +338,7 @@ export function App() {
 
   return <DarlUIProvider theme={{ mode: 'dark', primaryColor: '#8ba4c5' }} className="chat-example">
     <div className={`example-page ${open ? 'with-agent' : ''}`}>
-      <header className="example-header"><a href="http://localhost:5188">Darl UI <span>/ Agent Chat</span></a><div><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setProjectsVisible(false); setMediaJobsVisible(true); setOpen(true); }}>生成任务</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setMediaJobsVisible(false); setProjectsVisible(true); setOpen(true); }}><BookOpen size={16} />项目</button><button className={buttonClass} onClick={showGuide}><BookOpen size={16} />开发说明</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />设置</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setOpen((value) => !value); }}><MessageSquare size={16} />聊天</button></div></header>
+      <header className="example-header"><a href="http://localhost:5288">Darl UI <span>/ Agent Chat</span></a><div><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setProjectsVisible(false); setMediaJobsVisible(true); setOpen(true); }}>生成任务</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setMediaJobsVisible(false); setProjectsVisible(true); setOpen(true); }}><BookOpen size={16} />项目</button><button className={buttonClass} onClick={showGuide}><BookOpen size={16} />开发说明</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />设置</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setOpen((value) => !value); }}><MessageSquare size={16} />聊天</button></div></header>
       {error && <p className="example-error" role="alert">{error}</p>}
       {projectsVisible && <ProjectsPage onBack={() => setProjectsVisible(false)} agents={agents} onEditAgent={editEpisodeAgent} hidden={settings} />}
        {settings ? <main className="example-settings"><button className={buttonClass} onClick={() => { setSettings(false); setSettingsAgentId(null); setOpen(true); }}><ArrowLeft size={15} />{projectsVisible ? '返回项目' : '返回聊天'}</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'skills', label: 'Skills', icon: <Sparkles /> }, { id: 'agents', label: 'Agents', icon: <Bot /> }, { id: 'applications', label: '应用 / MCP', icon: <Wrench /> }, { id: 'approvals', label: '二次确认', icon: <Settings2 /> }]}>{settingsSection === 'agents' ? agentsSettings : settingsSection === 'skills' ? skillsSettings : settingsSection === 'applications' ? <McpSettings applications={applications} onChanged={() => setApplicationRevision((value) => value + 1)} /> : settingsSection === 'approvals' ? approvalSettings : modelSettings}</SettingsPage></main> : mediaJobsVisible ? <MediaJobsPage onBack={() => setMediaJobsVisible(false)} /> : projectsVisible ? null : guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : <main className="example-home"><span className="example-eyebrow">AGENT CHAT EXAMPLE</span><h1>让网站助手<br />真正开始工作。</h1><p>使用现有聊天 UI，连接真实模型。对话、历史和 Skills 保存在本机 SQLite。</p><div className="example-actions"><button className="darl-button darl-button--default darl-button-size--default" onClick={() => setOpen(true)}><MessageSquare size={16} />打开助手</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />模型设置</button></div><div className="example-info"><div><span>模型</span><strong>{models.find((model) => model.id === availableModelId)?.name || '尚未配置'}</strong></div><div><span>会话</span><strong>{sessions.length}</strong></div><div><span>Skills</span><strong>{skills.length}</strong></div></div><small>支持文本和图片消息与 MCP 工具调用。用 @ 引用一次即可在本对话持续使用；写入或未知工具执行前需要确认。Skill 指令会发送给模型，图片由支持视觉输入的模型处理。</small></main>}

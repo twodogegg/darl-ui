@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createApi } from '../examples/agent-chat/server/api';
+import { DEFAULT_AGENT_CHAT_PORT } from '../examples/agent-chat/server/mcp';
 
 async function withApi(directory: string, file: string, test: (request: (body?: unknown) => Promise<Response>) => Promise<void>) {
   const middleware = createApi(directory, {}, file);
@@ -15,7 +16,7 @@ async function withApi(directory: string, file: string, test: (request: (body?: 
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/agent-settings`;
   try {
     await test((body) => new Promise<Response>((resolve, reject) => {
-      const request = httpRequest(url, { method: body ? 'POST' : 'GET', headers: { Host: '127.0.0.1:5197', ...(body ? { 'Content-Type': 'application/json' } : {}) } }, (response) => {
+      const request = httpRequest(url, { method: body ? 'POST' : 'GET', headers: { Host: `127.0.0.1:${DEFAULT_AGENT_CHAT_PORT}`, ...(body ? { 'Content-Type': 'application/json' } : {}) } }, (response) => {
         const chunks: Buffer[] = [];
         response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
         response.on('error', reject);

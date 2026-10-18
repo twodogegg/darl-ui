@@ -2,13 +2,13 @@
 
 ## 当前已实现
 
-- Agent Chat 宿主使用现有 `.local/agent-chat/data.sqlite` 保存生成任务与每模型并发限制。
+- Agent Chat 宿主使用现有 `.local/agent-chat-drama/data.sqlite` 保存生成任务与每模型并发限制。
 - 只支持 `gpt-image-2` 和 `minimax-h3-flash`，每个逻辑模型仅允许一个启用的供应商绑定；不使用权重、优先级或自动切换。
 - 全局主 Agent 可通过内置工具创建和查询生成任务。**创建任务必须经用户确认**；任务不依赖聊天连接持续运行。
-- 服务端轮询已提交的 H3 远端任务并保存输出文件到 `.local/agent-chat/generated-media/`。
+- 服务端轮询已提交的 H3 远端任务并保存输出文件到 `.local/agent-chat-drama/generated-media/`。
 - 页面右上角「生成任务」展示 SQLite 的最新状态；设置 → 模型中可分别修改两个模型的在途任务最大并发。
 - 关闭浏览器后 Node 仍运行时任务继续；服务重启后若已存远端 H3 ID 则恢复查询。未知是否成功提交的任务标为 `uncertain`，不会盲目重复付费提交。
-- 运行 `npm run dev` 并打开 `http://localhost:5197`；已有供应商设置中填写真实的服务端 API Key。
+- 运行 `npm run dev` 并打开 `http://localhost:5297`；已有供应商设置中填写真实的服务端 API Key。
 
 ## 限制、未验收
 

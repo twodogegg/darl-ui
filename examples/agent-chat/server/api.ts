@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AgentExecutionEvent, AgentSkill, AgentToolCall } from '../../../src/index';
 import { defaultModelConfiguration, effectiveCapabilities, enabledBindings, validateModelConfiguration, type ModelConfiguration } from '../../../src/components/settings/model-config';
 import { auth } from '@modelcontextprotocol/sdk/client/auth.js';
-import { applicationCatalog, connectApplication, conversationApplications, createMcpOAuthProvider, loadApplications, saveApplications, MCP_OAUTH_CALLBACK_PATH, McpConnectionManager, toolRisk, ToolConfirmations } from './mcp';
+import { applicationCatalog, connectApplication, conversationApplications, createMcpOAuthProvider, loadApplications, saveApplications, mcpOAuthCallbackUrl, DEFAULT_AGENT_CHAT_PORT, MCP_OAUTH_CALLBACK_PATH, McpConnectionManager, toolRisk, ToolConfirmations } from './mcp';
 import { loadAgents, publicAgent, validateAgent, validateAgents, type StoredAgent } from './agents';
 import { generate, generateWithToolLoop, listModels, publicProvider, runToolLoopAgent, safeError, validateProvider, type AgentDelegation, type ChatImage, type ChatMessage, type StoredProvider, type ToolExecution } from './models';
 import { AgentFailure, createAgentError, failure } from './errors';
@@ -70,10 +70,10 @@ function validateDefaultMediaSelection(value: unknown): DefaultMediaSelection {
   };
 }
 
-async function connectApplicationWithRetry(app: Parameters<typeof connectApplication>[0], signal: AbortSignal) {
+async function connectApplicationWithRetry(app: Parameters<typeof connectApplication>[0], signal: AbortSignal, callbackUrl: string) {
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    try { return await connectApplication(app, signal); }
+    try { return await connectApplication(app, signal, callbackUrl); }
     catch (error) {
       lastError = error;
       if (attempt === 2 || !isRetryableMcpError(error)) break;
@@ -189,14 +189,16 @@ export function findAttachedImageForUpload(tool: McpToolDescriptor, args: Record
   return { image: images.find((image) => typeof args[mapped.fileName] !== 'string' || image.name === args[mapped.fileName]) ?? images[0], fields: mapped };
 }
 
-export function createApi(directory: string, env: Record<string, string>, promptFile: string) {
+export function createApi(directory: string, env: Record<string, string>, promptFile: string, allowedPort = DEFAULT_AGENT_CHAT_PORT) {
   const storage = new LocalStorage(directory);
   const subAgentLocks = new SubAgentThreadLocks();
   const projectStore = new ProjectStore(storage.path);
   const episodeStore = new EpisodeStore(storage.path);
   const mediaJobs = createMediaJobsApi(storage.path, () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), () => storage.getConfig<StoredProvider[]>('providers') || []);
   const confirmations = new ToolConfirmations();
-  const connectionManager = new McpConnectionManager(connectApplicationWithRetry);
+  if (!Number.isInteger(allowedPort) || allowedPort < 1 || allowedPort > 65535) throw new Error('Agent Chat 端口无效');
+  const callbackUrl = mcpOAuthCallbackUrl(allowedPort);
+  const connectionManager = new McpConnectionManager((app, signal) => connectApplicationWithRetry(app, signal, callbackUrl));
   const pendingMcpOAuth = new Map<string, { appId: string; app: Awaited<ReturnType<typeof loadApplications>>[number]; provider: ReturnType<typeof createMcpOAuthProvider> }>();
   const validatePrompt = (value: unknown): string => {
     if (typeof value !== 'string' || !value.trim()) throw new Error('系统提示词不能为空');
@@ -269,12 +271,12 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       response.end(JSON.stringify(data));
     };
-    // 本示例服务端持有真实模型密钥，已按需求开放局域网访问：仅按端口 5197 做同源校验，
+    // 本示例服务端持有真实模型密钥，已按需求开放局域网访问：仅按配置端口做同源校验，
     // 同一局域网的任何设备都能消耗凭据，请勿在不可信网络中运行。
     const portOf = (value: string) => value.match(/:(\d+)$/)?.[1];
     const host = request.headers.host || '';
     const origin = request.headers.origin;
-    if (portOf(host) !== '5197' || (origin && portOf(origin) !== '5197')) return send(403, { error: '仅允许本服务端口同源访问' });
+    if (portOf(host) !== String(allowedPort) || (origin && portOf(origin) !== String(allowedPort))) return send(403, { error: '仅允许本服务端口同源访问' });
     if (await handleEpisodes(request, response)) return;
     if (await handleWorkspaceProjectRequest(request, response, projectStore)) return;
     if (await mediaJobs.handle(request, response)) return;
@@ -367,7 +369,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           const latest = await loadApplications(directory);
           await saveApplications(directory, latest.map((item) => item.id === app.id ? { ...item, oauth } : item));
         };
-        const provider = createMcpOAuthProvider(app, (url) => { authorizationUrl = url.toString(); }, persist);
+        const provider = createMcpOAuthProvider(app, (url) => { authorizationUrl = url.toString(); }, persist, callbackUrl);
         const result = await auth(provider, { serverUrl: app.url });
         if (result === 'AUTHORIZED') {
           await connectionManager.invalidateAll();

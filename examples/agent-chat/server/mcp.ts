@@ -24,7 +24,11 @@ export interface McpApplicationConfig {
 }
 
 export const MCP_OAUTH_CALLBACK_PATH = '/api/mcp-oauth/callback';
-export const MCP_OAUTH_CALLBACK_URL = `http://127.0.0.1:5197${MCP_OAUTH_CALLBACK_PATH}`;
+export const DEFAULT_AGENT_CHAT_PORT = 5297;
+export function mcpOAuthCallbackUrl(port = DEFAULT_AGENT_CHAT_PORT) {
+  return `http://127.0.0.1:${port}${MCP_OAUTH_CALLBACK_PATH}`;
+}
+export const MCP_OAUTH_CALLBACK_URL = mcpOAuthCallbackUrl();
 
 type PersistOAuth = (oauth: NonNullable<McpApplicationConfig['oauth']>) => Promise<void>;
 
@@ -33,6 +37,7 @@ export function createMcpOAuthProvider(
   app: McpApplicationConfig,
   onRedirect: (url: URL) => void | Promise<void>,
   persist?: PersistOAuth,
+  callbackUrl = MCP_OAUTH_CALLBACK_URL,
 ): OAuthClientProvider {
   let oauth = { ...(app.oauth || {}) };
   const save = async (patch: Partial<typeof oauth>) => {
@@ -41,10 +46,10 @@ export function createMcpOAuthProvider(
     await persist?.(oauth);
   };
   return {
-    get redirectUrl() { return MCP_OAUTH_CALLBACK_URL; },
+    get redirectUrl() { return callbackUrl; },
     clientMetadata: {
       client_name: 'Darl UI Agent Chat',
-      redirect_uris: [MCP_OAUTH_CALLBACK_URL],
+      redirect_uris: [callbackUrl],
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
       token_endpoint_auth_method: 'none',
@@ -209,9 +214,9 @@ export class McpConnectionManager {
   }
 }
 
-export async function connectApplication(app: McpApplicationConfig, signal: AbortSignal) {
+export async function connectApplication(app: McpApplicationConfig, signal: AbortSignal, callbackUrl = MCP_OAUTH_CALLBACK_URL) {
   const oauthProvider = !app.apiKey && app.oauth?.tokens
-    ? createMcpOAuthProvider(app, () => { throw new Error('MCP OAuth 已过期，请在设置中重新授权'); })
+    ? createMcpOAuthProvider(app, () => { throw new Error('MCP OAuth 已过期，请在设置中重新授权'); }, undefined, callbackUrl)
     : undefined;
   const transport = new StreamableHTTPClientTransport(new URL(app.url), {
     authProvider: oauthProvider,

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApi } from '../examples/agent-chat/server/api';
+import { DEFAULT_AGENT_CHAT_PORT } from '../examples/agent-chat/server/mcp';
 
 let server: Server;
 let root: string;
@@ -38,7 +39,7 @@ async function call(path: string, method = 'GET', body?: unknown): Promise<{ sta
       method,
       headers: {
         // The local service expects its configured Host port even when CI uses a random listen port.
-        Host: '127.0.0.1:5197',
+        Host: `127.0.0.1:${DEFAULT_AGENT_CHAT_PORT}`,
         ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {}),
       },
     }, (response) => {

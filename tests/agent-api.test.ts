@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { callMcpToolWithRetry, createApi, isRetryableMcpError, mcpResultError } from '../examples/agent-chat/server/api';
+import { DEFAULT_AGENT_CHAT_PORT } from '../examples/agent-chat/server/mcp';
 
 async function withApi(directory: string, promptFile: string, test: (request: (path: string, body?: unknown, method?: string) => Promise<Response>) => Promise<void>) {
   const middleware = createApi(directory, {}, promptFile);
@@ -15,7 +16,7 @@ async function withApi(directory: string, promptFile: string, test: (request: (p
   const port = (server.address() as AddressInfo).port;
   try {
     await test((path, body, method = body ? 'POST' : 'GET') => new Promise<Response>((resolve, reject) => {
-      const req = httpRequest(`http://127.0.0.1:${port}/api/${path}`, { method, headers: { Host: '127.0.0.1:5197', ...(body ? { 'Content-Type': 'application/json' } : {}) } }, (res) => {
+      const req = httpRequest(`http://127.0.0.1:${port}/api/${path}`, { method, headers: { Host: `127.0.0.1:${DEFAULT_AGENT_CHAT_PORT}`, ...(body ? { 'Content-Type': 'application/json' } : {}) } }, (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
         res.on('error', reject);
