@@ -59,7 +59,6 @@ export function App() {
   const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [modelConfiguration, setModelConfiguration] = useState<ModelConfiguration>(() => defaultModelConfiguration());
   const [applications, setApplications] = useState<AgentApplication[]>([]);
-  const [applicationToolsLoaded, setApplicationToolsLoaded] = useState(false);
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [autoConfirm, setAutoConfirm] = useState<AutoConfirmSettings>({ image: false, video: false, mcp: false });
   const [approvalSaving, setApprovalSaving] = useState(false);
@@ -130,24 +129,11 @@ export function App() {
     fetch(`/api/applications${applicationRevision ? '?refresh=1' : ''}`, { signal: controller.signal }).then(async (response) => {
       const value = await response.json();
       if (!response.ok) throw new Error(value.error || '应用加载失败');
-      if (!controller.signal.aborted) { setApplications(value); setApplicationToolsLoaded(false); }
+      if (!controller.signal.aborted) { setApplications(value); }
     }).catch((reason) => { if (!controller.signal.aborted) setApplicationError(reason.message); })
       .finally(() => { if (!controller.signal.aborted) setApplicationsLoading(false); });
     return () => controller.abort();
   }, [applicationRevision]);
-  useEffect(() => {
-    if (settingsSection !== 'agents' || !applications.length || applicationToolsLoaded) return;
-    const controller = new AbortController();
-    Promise.all(applications.map(async (application) => {
-      const response = await fetch(`/api/applications/${encodeURIComponent(application.id)}/tools`, { signal: controller.signal, headers: { 'X-Darl-Session-Id': 'settings' } });
-      const value = await response.json();
-      if (!response.ok) throw new Error(value.error || '工具目录加载失败');
-      return value as AgentApplication;
-    })).then((catalogs) => {
-      if (!controller.signal.aborted) { setApplications((current) => current.map((application) => catalogs.find((catalog) => catalog.id === application.id) || application)); setApplicationToolsLoaded(true); }
-    }).catch((reason) => { if (!controller.signal.aborted) setApplicationError(reason.message); });
-    return () => controller.abort();
-  }, [applications, applicationToolsLoaded, settingsSection]);
   useEffect(() => {
     if (!hydrated) return;
     const timer = window.setTimeout(() => { void api('state', { sessions: persistedSessions(sessions), activeId, skills }).catch((reason) => setError(reason.message)); }, 250);
@@ -332,7 +318,7 @@ export function App() {
     <div className="example-default-model-grid"><div><span>图片</span><strong>{defaultMediaSelection.image?.modelId || '未设置'} · {defaultMediaSelection.image?.resolution || '—'} · {defaultMediaSelection.image?.aspectRatio || '—'}</strong></div><div><span>视频</span><strong>{defaultMediaSelection.video?.modelId || '未设置'} · {defaultMediaSelection.video?.resolution || '—'} · {defaultMediaSelection.video?.aspectRatio || '—'}</strong></div></div>
   </section>;
   const approvalSettings = <section className="example-default-models" aria-label="二次确认设置"><header><div><span className="example-eyebrow">TOOL APPROVAL</span><h2>二次确认设置</h2><p>开启后，对应的普通操作免去二次确认。高风险 MCP 操作始终需要确认。</p></div></header><div className="example-approval-options">{([{ key: 'image', label: '图片生成' }, { key: 'video', label: '视频生成' }, { key: 'mcp', label: 'MCP 工具调用' }] as const).map(({ key, label }) => <label key={key} className="example-approval-option"><span>{label}</span><Switch checked={autoConfirm[key]} disabled={approvalSaving} onChange={(event) => void updateAutoConfirm(key, event.target.checked)} /></label>)}</div></section>;
-  const agentsSettings = <AgentsSettingsCard agents={agents} models={models.map((model) => ({ ...model, id: model.upstreamModelId || model.id, providerId: model.providerId || '', type: 'text' as const }))} applications={applications} onSave={async (agent) => setAgents(await api<AgentConfig[]>('agents', { agent }))} onDelete={async (id) => setAgents(await api<AgentConfig[]>(`agents/${id}`, undefined, 'DELETE'))} />;
+  const agentsSettings = <AgentsSettingsCard agents={agents} models={models.map((model) => ({ ...model, id: model.upstreamModelId || model.id, providerId: model.providerId || '', type: 'text' as const }))} onSave={async (agent) => setAgents(await api<AgentConfig[]>('agents', { agent }))} onDelete={async (id) => setAgents(await api<AgentConfig[]>(`agents/${id}`, undefined, 'DELETE'))} />;
   const modelSettings = <div className="example-model-settings">{defaultModelSettings}<DefaultModelSelector models={defaultMediaModels} kinds={['image', 'video']} value={defaultMediaSelection} onChange={setDefaultMediaSelection} open={defaultMediaModelsOpen} onOpenChange={setDefaultMediaModelsOpen} onComplete={saveDefaultMediaModels} /><MediaConcurrencySettings /><ModelManagementCard configuration={modelConfiguration} providers={providers}
     onSave={async (configuration) => setModelConfiguration(await api<ModelConfiguration>('model-config', { configuration }))}
     onProviderSave={async (provider, apiKey) => setProviders(await api<ModelProvider[]>('providers', { provider, apiKey }))}

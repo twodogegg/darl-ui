@@ -36,7 +36,7 @@ npm run dev
 主 Agent 委派给同一个专业 Sub Agent 的历史由服务端 SQLite 的 `subagent_threads` 表保存。在同一个主聊天会话中再次委派同一个 Sub Agent，会自动带上**该子会话自己的历史任务和最终回复**；页面刷新或本机服务重启后也可以接续。新建主聊天、切换主 Agent 或切换 Sub Agent 不共享子会话历史。
 
 - 子会话身份由本地单用户作用域、主聊天 `sessionId`、主 Agent ID 和 Sub Agent ID 组合确定，与每次执行的新 `runId` / `parentRunId` 不同。
-- 只保存子任务及最终回复，**不会**跨子 Agent 复制上下文，也不持久化原始 MCP 工具结果、隐藏推理或密钥。子 Agent 的提示词、模型、Skills 和 MCP 工具权限每次从当前配置重新确认。
+- 只保存子任务及最终回复，**不会**跨子 Agent 复制上下文，也不持久化原始 MCP 工具结果、隐藏推理或密钥。子 Agent 的提示词、模型、Skills 和 MCP 工具每次从当前配置重新确认。
 - 子历史按子模型的上下文预算与 Agent 上下文策略压缩；失败、取消或超时不写入虚假成功回复。同一子会话的并行调用在本地进程内排队，SQLite 版本校验防止其他写入者静默覆盖。
 - 当前示例仅面向**本地单用户**。子会话使用固定 `local` 作用域；部署为多用户服务之前必须接入真实的宿主用户鉴权与隔离，不能把请求头视为身份凭据。
 - 此功能支持主 Agent **间接续聊**子 Agent；子会话的独立列表、可选多线程切换和 UI 历史查看仍是后续扩展。
@@ -78,7 +78,7 @@ MCP 连接由宿主示例的服务端管理。将配置保存为 Git 忽略的 `
 `apiKey` 可省略，用于无需鉴权的服务；URL 不接受内嵌凭证或查询参数。`readOnlyTools` 是宿主核实后的只读工具名单，无需这类覆盖时省略。工具 schema、名称和参数从 MCP 动态发现，设置 → 应用 / MCP 可查看连接状态和重新连接。聊天中用 `@` 引用一次应用，其工具在该对话后续消息中持续可用；服务端根据用户消息中的应用引用，每轮重新提供工具定义。刷新恢复后仍有效，新对话不继承，重新生成仅使用该轮之前的历史；已从服务端配置移除的历史应用会被忽略。同名工具通过服务端命名空间区分。询问应用用途或用法时，默认依据工具目录简短回答；只有明确需要真实数据或执行操作时才调用工具，避免额外浏览示例素材和无关文档。
 
 - 模型的 Chat Completions 和 Responses 两种协议均支持工具调用，最多 8 轮、合计最多 128 个工具。工具失败会回传模型，界面以紧凑记录展示应用、工具名和状态，不展开原始参数和结果；执行确认时展示待确认参数。
-- 「设置 → 二次确认」可分别开启图片、视频与普通 MCP 工具的免确认开关；默认为关闭，保存在本机 SQLite。主 Agent 与子 Agent 复用这些开关；未授权工具仍禁止调用，MCP `destructiveHint` 标记的破坏性工具始终要求确认。图片、视频与 MCP 共用 `InteractiveConfirmDialog` 弹窗，拒绝/停止/超时不会触发待批准的调用。
+- 「设置 → 二次确认」可分别开启图片、视频与普通 MCP 工具的免确认开关；默认为关闭，保存在本机 SQLite。主 Agent 与子 Agent 复用这些开关；MCP `destructiveHint` 标记的破坏性工具始终要求确认。图片、视频与 MCP 共用 `InteractiveConfirmDialog` 弹窗，拒绝/停止/超时不会触发待批准的调用。
 - 默认情况下，除标记为只读或经宿主核实列入 `readOnlyTools` 的工具外，其他 MCP 调用均等待用户允许或拒绝。确认在服务端执行，停止、断连、超时后失效，不因刷新自动重试写操作。
 - MCP 凭证不返回浏览器。原始工具结果只回传给模型，聊天界面和会话历史保存调用摘要；仅待确认操作向界面发送参数。
 - 当前只支持 Streamable HTTP 和可选 Bearer 凭证；OAuth、stdio、旧版 HTTP+SSE、MCP Apps 内嵌界面及文件授权尚未接入。示例仍仅供本机开发，生产环境的用户身份、会话存储和工具权限由宿主提供。
@@ -305,11 +305,11 @@ import '@darl/ui/styles.css';
 
 ## Agent 配置与 Sub Agent 委派
 
-`examples/agent-chat` 的设置中心提供独立的 Agents 页面。每个 Agent 在服务端保存名称、系统提示词和 MCP 应用 / 工具；模型与推理强度在聊天输入框旁按当前会话选择。Skills 默认对所有 Agent 可用，支持自动调用或在聊天中手动 @ 引用；API Key 仍只保存在服务端。设置默认 Agent 后，聊天可以直接选择专业 Agent，也可以由主 Agent 通过 AI SDK 7 `ToolLoopAgent` 按需委派给其他已启用的 Agent。
+`examples/agent-chat` 的设置中心提供独立的 Agents 页面。每个 Agent 在服务端保存名称和系统提示词；模型与推理强度在聊天输入框旁按当前会话选择。Skills 与 MCP 应用对所有 Agent 默认可用，无需逐个授权；API Key 仍只保存在服务端。设置默认 Agent 后，聊天可以直接选择专业 Agent，也可以由主 Agent 通过 AI SDK 7 `ToolLoopAgent` 按需委派给其他已启用的 Agent。
 
 设置中心的模型页面顶部同时提供默认媒体模型设置，目前只配置图片和视频：默认图片为 `gpt-image-2`（2K、16:9），默认视频为 `minimax-h3-flash`（480P、16:9）。配置保存在示例服务的本地 SQLite 中；文本模型在聊天输入框旁选择。
 
-每次委派只把任务说明传给子 Agent，子 Agent 使用自己的模型、提示词和工具权限，完成后只返回最终摘要。MCP 写操作继续复用宿主的 `ToolConfirmations`，因此允许、拒绝、停止和超时都在服务端生效；NDJSON 工具事件包含 `runId`、`parentRunId` 和 `agentId`，现有侧栏会显示委派、执行和审批状态。Agent 配置保存在 `.local/agent-chat/data.sqlite`，不会写入浏览器存储。
+每次委派只把任务说明传给子 Agent，子 Agent 使用自己的模型、提示词和当前会话启用的 Skill / MCP 应用，完成后只返回最终摘要。MCP 写操作继续复用宿主的 `ToolConfirmations`，因此允许、拒绝、停止和超时都在服务端生效；NDJSON 工具事件包含 `runId`、`parentRunId` 和 `agentId`，现有侧栏会显示委派、执行和审批状态。Agent 配置保存在 `.local/agent-chat/data.sqlite`，不会写入浏览器存储。
 
 ## StyleSelector｜风格选择弹窗
 
