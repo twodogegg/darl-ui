@@ -68,6 +68,29 @@ describe('episode screenplay + shot and asset planning',()=>{
     expect(new EpisodeStore(path).plan(other.id)?.assets).toHaveLength(3);
     expect(new EpisodeStore(path).plan(ep.id)?.shots[0].id).toBe(saved.shots[0].id);
   });
+  it('preserves descriptions across saves and supports main character states',()=>{
+    const ep=store.create(projectId,'第 01 集')!;
+    store.saveScript(ep.id,'原稿',0);
+    const parsed=parseAgentBreakdown(output());
+    parsed.assets[0].description='剧本明确的身份与外观描述';
+    store.savePlan(ep.id,1,parsed);
+    const asset=store.assets(projectId)!.find(a=>a.name==='路明非')!;
+    expect(asset.description).toBe('剧本明确的身份与外观描述');
+    expect(store.saveAssetDescription(projectId,asset.id,'用户编辑的视觉描述')?.description).toBe('用户编辑的视觉描述');
+    const state=store.saveAssetState(projectId,asset.id,{name:'主形象',description:'剧情中最常见的服装'});
+    expect(state?.isMain).toBe(true);
+    expect(store.assetStates(projectId,asset.id)).toHaveLength(1);
+    expect(new EpisodeStore(path).assets(projectId)?.find(a=>a.id===asset.id)?.description).toBe('用户编辑的视觉描述');
+    expect(new EpisodeStore(path).assetStates(projectId,asset.id)).toHaveLength(1);
+  });
+  it('does not delete retained shot records when saving edited plans',()=>{
+    const ep=store.create(projectId,'第 01 集')!;
+    store.saveScript(ep.id,'原稿',0);
+    const initial=store.savePlan(ep.id,1,parseAgentBreakdown(output()))!;
+    const revised={shots:[...initial.shots].reverse(),assets:initial.assets.map(a=>({...a,shotNumbers:[1,2]}))};
+    store.savePlan(ep.id,1,revised);
+    expect(store.plan(ep.id)?.shots.map(s=>s.id)).toEqual(revised.shots.map(s=>s.id));
+  });
   it('does not lose previously saved shots when new results are invalid or script revision is stale',()=>{
     const ep=store.create(projectId,'第 01 集')!;
     store.saveScript(ep.id,'原稿',0);
