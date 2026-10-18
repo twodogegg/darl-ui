@@ -78,6 +78,8 @@ export interface AgentConfig {
 
 export interface AgentsSettingsCardProps {
   agents: AgentConfig[];
+  /** Open an existing Agent editor directly when the card mounts. */
+  initialEditingAgentId?: string;
   models?: AgentModelConfig[];
   skills?: Array<{ id: string; name: string; enabled?: boolean }>;
   onSave?: (agent: AgentConfig) => void | Promise<void>;

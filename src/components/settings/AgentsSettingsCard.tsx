@@ -13,10 +13,11 @@ const emptyAgent = (models: AgentsSettingsCardProps['models'] = []): AgentConfig
 function cloneAgent(agent: AgentConfig): AgentConfig { return { ...agent, skillIds: [...(agent.skillIds || [])] }; }
 function Avatar({ value, name }: { value?: string; name: string }) { if (value?.startsWith('/') || value?.startsWith('http') || value?.startsWith('data:image/')) return <img className="darl-agent-avatar" src={value} alt="" />; return <span className="darl-agent-avatar" aria-hidden="true">{value || name.slice(0, 1).toUpperCase()}</span>; }
 
-export function AgentsSettingsCard({ agents, models = [], onSave, onDelete }: AgentsSettingsCardProps) {
+export function AgentsSettingsCard({ agents, models = [], initialEditingAgentId, onSave, onDelete }: AgentsSettingsCardProps) {
   const idPrefix = useId();
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<AgentConfig | null>(null);
+  const initialAgent = agents.find((agent) => agent.id === initialEditingAgentId);
+  const [editingId, setEditingId] = useState<string | null>(initialAgent?.id ?? null);
+  const [draft, setDraft] = useState<AgentConfig | null>(() => initialAgent ? cloneAgent(initialAgent) : null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const textModels = useMemo(() => models.filter((model) => model.type === 'text' && model.enabled !== false), [models]);
