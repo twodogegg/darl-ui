@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { createServer, type Server } from 'node:http';
+import { createServer, request as httpRequest, type Server } from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -27,14 +27,31 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-async function call(path: string, method = 'GET', body?: unknown) {
-  const response = await fetch(base + path, {
-    method,
-    // The existing host explicitly checks its 5197 origin/Host, even on a random test port.
-    headers: { Host: '127.0.0.1:5197', ...(body ? { 'Content-Type': 'application/json' } : {}) },
-    ...(body ? { body: JSON.stringify(body) } : {}),
+async function call(path: string, method = 'GET', body?: unknown): Promise<{ status: number; body: any }> {
+  const target = new URL(base + path);
+  const payload = body === undefined ? undefined : JSON.stringify(body);
+  return new Promise((done, fail) => {
+    const request = httpRequest({
+      hostname: target.hostname,
+      port: Number(target.port),
+      path: target.pathname,
+      method,
+      headers: {
+        // The local service expects its configured Host port even when CI uses a random listen port.
+        Host: '127.0.0.1:5197',
+        ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {}),
+      },
+    }, (response) => {
+      const parts: Buffer[] = [];
+      response.on('data', (part: Buffer) => parts.push(part));
+      response.on('end', () => {
+        try { done({ status: response.statusCode || 0, body: JSON.parse(Buffer.concat(parts).toString('utf8')) }); }
+        catch (error) { fail(error); }
+      });
+    });
+    request.on('error', fail);
+    request.end(payload);
   });
-  return { status: response.status, body: await response.json() };
 }
 
 describe('default Agent selection in episode breakdown', () => {
