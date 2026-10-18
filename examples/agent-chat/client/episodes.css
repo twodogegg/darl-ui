@@ -58,9 +58,16 @@
 .workspace-shot-detail { min-width:0; border:1px solid var(--darl-border,#444); border-radius:10px; padding:14px; display:grid; gap:12px; }
 .workspace-shot-detail h4,.workspace-asset-editor h4 { margin:0; }
 .workspace-shot-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
-.workspace-shot-fields label { display:grid; gap:6px; font-size:12px; color:var(--darl-muted-foreground,#aaa); min-width:0; }
-.workspace-shot-fields label span { display:block; }
+.workspace-shot-fields .workspace-shot-field { display:grid; gap:6px; font-size:12px; color:var(--darl-muted-foreground,#aaa); min-width:0; position:relative; }
+.workspace-shot-fields .workspace-shot-field:focus-within { z-index:7; }
+.workspace-shot-label { display:flex; align-items:baseline; gap:6px; }
+.workspace-mention-hint { color:var(--darl-muted-foreground,#888); font-size:11px; }
 .workspace-shot-fields textarea { min-width:0; width:100%; resize:vertical; }
+.workspace-mention-options { position:absolute; z-index:6; left:0; right:0; top:calc(100% - 4px); display:flex; flex-direction:column; padding:4px; gap:2px; max-height:220px; overflow:auto;
+  background:var(--darl-popover, #232323); border:1px solid var(--darl-border,#555); border-radius:8px; box-shadow:0 12px 26px rgba(0,0,0,.35); }
+.workspace-mention-options button { display:flex; justify-content:space-between; gap:10px; align-items:center; text-align:left; border:0; border-radius:5px; padding:7px 9px; font-size:12px; background:transparent; }
+.workspace-mention-options button:hover,.workspace-mention-options button:focus-visible { background:var(--darl-muted,#343a33); }
+.workspace-mention-options small { color:var(--darl-muted-foreground,#aaa); font-size:11px; }
 .workspace-field-visual,.workspace-field-dialogue,.workspace-field-scene { grid-column:1 / -1; }
 .workspace-asset-chips { display:flex; flex-wrap:wrap; gap:6px; }
 .workspace-asset-chips button { color:#76b9f4; background:rgba(90,140,200,.14); border-color:rgba(90,140,200,.3); font-size:12px; padding:5px 9px; }

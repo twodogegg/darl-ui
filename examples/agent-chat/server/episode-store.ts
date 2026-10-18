@@ -5,7 +5,7 @@ export type ShotDraft = {
   id: string; framing: string; camera: string; cut: string; scene: string;
   visual: string; dialogue: string; sound: string; duration: number;
 };
-export type AssetDraft = { name: string; type: 'character' | 'scene' | 'prop'; shotNumbers: number[]; description?: string };
+export type AssetDraft = { id?: string; name: string; type: 'character' | 'scene' | 'prop'; shotNumbers: number[]; description?: string };
 export type BreakdownDraft = { shots: ShotDraft[]; assets: AssetDraft[] };
 export type EpisodeRecord = {
   id: number; projectId: number; title: string; script: string; scriptRevision: number;
@@ -56,8 +56,10 @@ export function validateBreakdown(input: unknown): BreakdownDraft {
     const key = String(asset.type) + ':' + name;
     const existing = names.get(key);
     const numbers = [...new Set(asset.shotNumbers as number[])].sort((a,b) => a-b);
+    // A stable asset id keeps shot links alive across renames; older results simply omit it.
+    const id = typeof asset.id === 'string' && /^[0-9a-f-]{36}$/i.test(asset.id) ? asset.id : undefined;
     if (existing) existing.shotNumbers = [...new Set([...existing.shotNumbers,...numbers])].sort((a,b)=>a-b);
-    else names.set(key,{name, type:asset.type as AssetDraft['type'],shotNumbers:numbers, description:text(asset.description,5000)||''});
+    else names.set(key,{...(id?{id}:{}), name, type:asset.type as AssetDraft['type'],shotNumbers:numbers, description:text(asset.description,5000)||''});
   }
   // An asset mentioned in a shot must be present in the structured requirements.
   const all = [...names.values()];
@@ -175,7 +177,7 @@ export class EpisodeStore {
     const assets=new Map<string,AssetDraft>();
     raw.forEach((row)=>{
       const key=String(row.asset_id);
-      if (!assets.has(key)) assets.set(key,{name:String(row.name),type:row.type as AssetDraft['type'],shotNumbers:[],description:String(row.description||'')});
+      if (!assets.has(key)) assets.set(key,{id:key,name:String(row.name),type:row.type as AssetDraft['type'],shotNumbers:[],description:String(row.description||'')});
       const position=shots.findIndex((shot)=>shot.id===row.shot_id)+1;
       if (position>0) assets.get(key)!.shotNumbers.push(position);
     });
@@ -237,10 +239,19 @@ export class EpisodeStore {
       const insertAsset=this.db.prepare('INSERT OR IGNORE INTO workspace_assets (id,project_id,type,name,description) VALUES (?,?,?,?,?)');
       const findAsset=this.db.prepare('SELECT id FROM workspace_assets WHERE project_id=? AND type=? AND name=?');
       const saveDescription=this.db.prepare('UPDATE workspace_assets SET description=? WHERE id=? AND project_id=?');
+      const renameAsset=this.db.prepare('UPDATE workspace_assets SET name=?,type=? WHERE id=? AND project_id=?');
+      const knownAsset=this.db.prepare('SELECT id,name FROM workspace_assets WHERE id=? AND project_id=?');
       const link=this.db.prepare('INSERT OR IGNORE INTO workspace_shot_assets (shot_id,asset_id) VALUES (?,?)');
       draft.assets.forEach((a)=>{
-        insertAsset.run(randomUUID(),episode.projectId,a.type,a.name,a.description||'');
-        const row=findAsset.get(episode.projectId,a.type,a.name) as {id:string};
+        // A known asset id survives renames; only the display fields change.
+        const known=a.id?knownAsset.get(a.id,episode.projectId) as {id:string;name:string}|undefined:undefined;
+        if(known){
+          try{renameAsset.run(a.name,a.type,known.id,episode.projectId);}
+          catch{throw new Error('资产「'+a.name+'」与项目内已有资产重名');}
+        }else{
+          insertAsset.run(randomUUID(),episode.projectId,a.type,a.name,a.description||'');
+        }
+        const row=(known??findAsset.get(episode.projectId,a.type,a.name)) as {id:string};
         // Older Agent results carry no description; keep the user-edited one instead of clearing it.
         if(typeof a.description==='string'&&a.description.trim())saveDescription.run(a.description,row.id,episode.projectId);
         a.shotNumbers.forEach(number=>link.run(draft.shots[number-1].id,row.id));

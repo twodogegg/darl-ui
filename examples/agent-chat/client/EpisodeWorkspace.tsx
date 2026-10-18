@@ -35,6 +35,21 @@ const toStored = (source:string,assets:AssetDraft[])=>{
   }
   return result;
 };
+const mentionAt=(value:string,caret:number|null)=>{
+  if(caret===null||caret<1)return null;
+  const match=value.slice(0,caret).match(/@([^\s@<>]{0,40})$/u);
+  return match?{start:caret-match[0].length,end:caret,query:match[1]}:null;
+};
+const replaceMention=(value:string,from:string,to:string)=>from&&from!==to?value.split('<'+from+'>').join('<'+to+'>'):value;
+const assetMentions=(value:string)=>[...new Set([...value.matchAll(marker)].map(m=>m[1].trim()).filter(Boolean))];
+// 涉及镜头以镜头文本里的 @引用为准；从未被引用的资产保留原有绑定。
+const rebindShots=(draft:BreakdownDraft):BreakdownDraft=>{
+  const mentions=draft.shots.map(shot=>new Set(assetMentions(shot.scene+'\n'+shot.visual)));
+  const mentioned=new Set(mentions.flatMap(names=>[...names]));
+  return {...draft,assets:draft.assets.map(asset=>mentioned.has(asset.name)
+    ?{...asset,shotNumbers:mentions.flatMap((names,index)=>names.has(asset.name)?[index+1]:[])}
+    :asset)};
+};
 export function EpisodeWorkspace({projectId,agents,onEditAgent}:{projectId:number;agents:AgentConfig[];onEditAgent:(agentId:string)=>void}){
   const [episodes,setEpisodes]=useState<Episode[]>([]);
   const [selectedId,setSelectedId]=useState<number|null>(null);
@@ -53,6 +68,7 @@ export function EpisodeWorkspace({projectId,agents,onEditAgent}:{projectId:numbe
   const [assetStates,setAssetStates]=useState<AssetState[]>([]);
   const [stateName,setStateName]=useState('');
   const [stateDescription,setStateDescription]=useState('');
+  const [mention,setMention]=useState<{shot:number;key:'scene'|'visual';start:number;end:number;query:string}|null>(null);
   const [busy,setBusy]=useState('');
   const [error,setError]=useState('');
   const [notice,setNotice]=useState('');
@@ -128,7 +144,11 @@ export function EpisodeWorkspace({projectId,agents,onEditAgent}:{projectId:numbe
     }catch(e){setError((e as Error).message);}finally{setBusy('');}
   };
   const updateShot=(i:number,key:keyof ShotDraft,value:string|number)=>{
-    setDraft(prev=>prev&&({...prev,shots:prev.shots.map((s,j)=>j===i?{...s,[key]:value}:s)}));
+    setDraft(prev=>{
+      if(!prev)return prev;
+      const shots=prev.shots.map((s,j)=>j===i?{...s,[key]:value}:s);
+      return key==='scene'||key==='visual'?rebindShots({...prev,shots}):{...prev,shots};
+    });
   };
   const reorder=(i:number,shift:number)=>{
     setDraft(prev=>{
@@ -151,16 +171,48 @@ export function EpisodeWorkspace({projectId,agents,onEditAgent}:{projectId:numbe
     setDraft(prev=>prev&&({...prev,shots:[...prev.shots,blankShot()]}));
   };
   const updateAsset=(i:number,field:keyof AssetDraft,value:string)=>{
-    setDraft(prev=>prev&&({...prev,assets:prev.assets.map((a,j)=>j!==i?a:field==='shotNumbers'
-      ?{...a,shotNumbers:value.split(/[,，\s]+/).map(Number).filter(n=>Number.isInteger(n)&&n>0&&n<=prev.shots.length)}
-      :{...a,[field]:value})}));
+    setDraft(prev=>{
+      if(!prev)return prev;
+      const target=prev.assets[i];
+      if(!target)return prev;
+      if(field==='shotNumbers')return {...prev,assets:prev.assets.map((a,j)=>j===i
+        ?{...a,shotNumbers:value.split(/[,，\s]+/).map(Number).filter(n=>Number.isInteger(n)&&n>0&&n<=prev.shots.length)}
+        :a)};
+      if(field!=='name')return {...prev,assets:prev.assets.map((a,j)=>j===i?{...a,[field]:value}:a)};
+      // Renaming must not break @引用 or existing shot links: rewrite stored mentions in place.
+      const from=target.name.trim(),to=value.trim();
+      const shots=from&&to&&from!==to?prev.shots.map(s=>({...s,scene:replaceMention(s.scene,from,to),visual:replaceMention(s.visual,from,to)})):prev.shots;
+      return rebindShots({...prev,shots,assets:prev.assets.map((a,j)=>j===i?{...a,name:value}:a)});
+    });
   };
   const openedAsset=library.find(a=>a.id===assetDetail);
   const openAsset=async(id:string)=>{setAssetDetail(id);setAssetStates([]);try{setAssetStates(await get<AssetState[]>(`projects/${projectId}/assets/${id}/states`));}catch(e){setError((e as Error).message);}};
+  const focusAsset=async(asset:AssetDraft)=>{
+    setWorkTab('assets');
+    if(asset.id)await openAsset(asset.id);
+    else setNotice('资产「'+asset.name+'」还没有保存到项目，保存分镜后即可打开详情');
+  };
+  const applyMention=(asset:AssetDraft)=>{
+    if(!mention||!draft)return;
+    const index=mention.shot,shot=draft.shots[index];
+    if(!shot)return;
+    const value=toVisible(shot[mention.key]);
+    const next=value.slice(0,mention.start)+'@'+asset.name+' '+value.slice(mention.end);
+    updateShot(index,mention.key,toStored(next,draft.assets));
+    setMention(null);
+  };
+  const mentionOptions=(mention?draft?.assets
+    .filter(a=>a.name&&a.name.includes(mention.query))
+    .slice(0,8):[])??[];
   const saveAssetDescription=async(asset:LibraryAsset,description:string)=>{try{await get(`projects/${projectId}/assets/${asset.id}`,'PATCH',{description});setLibrary(items=>items.map(a=>a.id===asset.id?{...a,description}:a));
     setDraft(prev=>prev&&({...prev,assets:prev.assets.map(a=>a.name===asset.name&&a.type===asset.type?{...a,description}:a)}));
     setNotice('资产描述已保存');}catch(e){setError((e as Error).message);}};
   const addAssetState=async()=>{if(!openedAsset||!stateName.trim())return;try{await get(`projects/${projectId}/assets/${openedAsset.id}/states`,'POST',{name:stateName,description:stateDescription});setAssetStates(await get<AssetState[]>(`projects/${projectId}/assets/${openedAsset.id}/states`));setStateName('');setStateDescription('');}catch(e){setError((e as Error).message);}};
+  const derivedShotNumbers=(asset:AssetDraft)=>{
+    if(!draft)return asset.shotNumbers;
+    const positions=draft.shots.flatMap((shot,index)=>assetMentions(shot.scene+'\n'+shot.visual).includes(asset.name)?[index+1]:[]);
+    return positions.length?positions:asset.shotNumbers;
+  };
   const total=draft?.shots.reduce((sum,s)=>sum+(Number.isFinite(s.duration)?s.duration:0),0)??0;
   return <section className="workspace-episodes" aria-label="剧集与智能拆镜">
     <header><h2>剧集 · 剧本与智能拆镜</h2><p>原稿不由 AI 改写。分镜与美术资产分开整理，完成后再统一交给生图 Agent。</p></header>
@@ -221,30 +273,45 @@ export function EpisodeWorkspace({projectId,agents,onEditAgent}:{projectId:numbe
                 <button title="删除镜头" onClick={()=>{removeShot(index);setSelectedShot(Math.max(0,index-1));}} disabled={draft.shots.length===1}>删除</button>
               </div></div>
               <div className="workspace-shot-fields">
-                {fields.map(({key,label})=><label key={key} className={'workspace-shot-field workspace-field-'+key}>
-                  <span>{label}</span>
-                  <textarea aria-label={`镜头 ${index+1} ${label}`} rows={key==='visual'?5:2} value={(key==='visual'||key==='scene')?toVisible(shot[key]):shot[key]}
-                    onChange={e=>updateShot(index,key,(key==='visual'||key==='scene')?toStored(e.target.value,draft.assets):e.target.value)}/>
-                </label>)}
-                <label className="workspace-shot-field"><span>时长（秒）</span>
+                {fields.map(({key,label})=>{
+                  const mentionKey: 'scene'|'visual'|null = key==='scene'||key==='visual'?key:null;
+                  return <div key={key} className={'workspace-shot-field workspace-field-'+key}>
+                    <span className="workspace-shot-label">{label}{mentionKey&&<small className="workspace-mention-hint"> 输入 @ 引用资产</small>}</span>
+                    <textarea aria-label={`镜头 ${index+1} ${label}`} rows={key==='visual'?5:2} value={mentionKey?toVisible(shot[key]):shot[key]}
+                      onChange={e=>{
+                        updateShot(index,key,mentionKey?toStored(e.target.value,draft.assets):e.target.value);
+                        const spot=mentionKey?mentionAt(e.target.value,e.target.selectionStart):null;
+                        setMention(spot&&mentionKey?{shot:index,key:mentionKey,start:spot.start,end:spot.end,query:spot.query}:null);
+                      }}
+                      onKeyDown={e=>{if(e.key==='Escape')setMention(null);}}
+                      onBlur={()=>setTimeout(()=>setMention(null),120)}/>
+                    {mentionKey&&mention&&mention.shot===index&&mention.key===mentionKey&&mentionOptions.length>0&&
+                      <div className="workspace-mention-options" role="listbox" aria-label="选择要引用的资产">
+                        {mentionOptions.map(a=><button type="button" role="option" aria-selected={false} key={a.type+':'+a.name}
+                          onMouseDown={e=>{e.preventDefault();applyMention(a);}}>{a.name}<small>{types[a.type]}</small></button>)}
+                      </div>}
+                  </div>;
+                })}
+                <label className="workspace-shot-field workspace-field-duration"><span>时长（秒）</span>
                   <input aria-label={`镜头 ${index+1} 时长`} type="number" min="0.1" max="600" step="0.1" value={shot.duration}
                     onChange={e=>updateShot(index,'duration',Number(e.target.value))}/></label>
               </div>
               <div className="workspace-asset-chips" aria-label="镜头关联资产">
-                {draft.assets.filter(a=>a.shotNumbers.includes(index+1)).map(a=><button type="button" key={a.type+':'+a.name} onClick={()=>{setWorkTab('assets');const asset=library.find(x=>x.name===a.name&&x.type===a.type);if(asset)void openAsset(asset.id);}}>
+                {draft.assets.filter(a=>derivedShotNumbers(a).includes(index+1)).map(a=><button type="button" key={a.id||a.type+':'+a.name} onClick={()=>void focusAsset(a)}>
                   @{a.name}</button>)}
+                {!draft.assets.some(a=>derivedShotNumbers(a).includes(index+1))&&<span className="workspace-episode-hint">本镜尚未关联资产；在场景或画面输入 @ 即可引用。</span>}
               </div>
-              <p className="workspace-episode-hint">场景/画面只显示一次。输入 @资产名称可引用草案中的资产，标签上方不再重复渲染预览。</p>
+              <p className="workspace-episode-hint">场景/画面只显示一次。输入 @ 会列出草案中的资产，点击标签可直接打开资产详情；资产重命名不会断开引用。</p>
             </div>;
           })()}
         </div>:<div className="workspace-asset-workspace">
           <div className="workspace-asset-cards">
             {draft.assets.map((a,i)=>{
-              const item=library.find(x=>x.name===a.name&&x.type===a.type);
-              return <button key={a.type+':'+a.name+i} type="button" className={assetDetail===item?.id?'active':''}
+              const item=library.find(x=>a.id?x.id===a.id:(x.name===a.name&&x.type===a.type));
+              return <button key={a.id||a.type+':'+a.name+i} type="button" className={assetDetail===item?.id?'active':''}
                 onClick={()=>{if(item)void openAsset(item.id);else setAssetDetail(null);}}>
                 <span className="workspace-asset-placeholder">◇</span>
-                <strong>{a.name}</strong><small>{types[a.type]} · {a.shotNumbers.length} 镜</small>
+                <strong>{a.name}</strong><small>{types[a.type]} · {derivedShotNumbers(a).length} 镜</small>
                 <p>{a.description||item?.description||'待补充视觉描述'}</p>
                 <span>{item?'已收录项目资产':'待保存到项目'}</span>
               </button>;
@@ -256,7 +323,7 @@ export function EpisodeWorkspace({projectId,agents,onEditAgent}:{projectId:numbe
               <div><input aria-label={`资产 ${i+1} 名称`} value={asset.name} onChange={e=>updateAsset(i,'name',e.target.value)}/>
               <select aria-label={`资产 ${i+1} 类型`} value={asset.type} onChange={e=>updateAsset(i,'type',e.target.value)}>{Object.entries(types).map(([type,name])=><option key={type} value={type}>{name}</option>)}</select></div>
               <textarea aria-label={`资产 ${i+1} 描述`} rows={2} placeholder="只写剧本支持的视觉设定，不写生图提示词" value={asset.description||''} onChange={e=>updateAsset(i,'description',e.target.value)}/>
-              <small>涉及镜头：{asset.shotNumbers.join('、')}</small>
+              <small>涉及镜头：{derivedShotNumbers(asset).join('、')||'暂无'}</small>
               <button type="button" onClick={()=>setDraft(prev=>prev&&({...prev,assets:prev.assets.filter((_,j)=>j!==i)}))}>移除</button>
             </div>)}
             <button type="button" onClick={()=>setDraft(prev=>prev&&({...prev,assets:[...prev.assets,{name:'',type:'prop',shotNumbers:[],description:''}]}))}>＋ 添加资产需求</button>

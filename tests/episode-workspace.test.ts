@@ -114,6 +114,19 @@ describe('episode screenplay + shot and asset planning',()=>{
     store.savePlan(ep.id,1,revised);
     expect(store.plan(ep.id)?.shots.map(s=>s.id)).toEqual(revised.shots.map(s=>s.id));
   });
+  it('keeps the same asset id and shot links when an asset is renamed',()=>{
+    const ep=store.create(projectId,'第 01 集')!;
+    store.saveScript(ep.id,'原稿',0);
+    const initial=store.savePlan(ep.id,1,parseAgentBreakdown(output()))!;
+    const character=initial.assets.find(a=>a.name==='路明非')!;
+    const renamed=initial.assets.map(a=>a===character?{...a,name:'路鸣泽'}:a);
+    store.savePlan(ep.id,1,{shots:initial.shots.map(s=>({...s,
+      visual:s.visual.split('<路明非>').join('<路鸣泽>')})),assets:renamed});
+    const plan=store.plan(ep.id)!;
+    expect(plan.assets.find(a=>a.name==='路鸣泽')?.id).toBe(character.id);
+    expect(plan.assets.find(a=>a.id===character.id)?.shotNumbers).toEqual([1,2]);
+    expect(store.assets(projectId)?.filter(a=>a.type==='character')).toHaveLength(1);
+  });
   it('does not lose previously saved shots when new results are invalid or script revision is stale',()=>{
     const ep=store.create(projectId,'第 01 集')!;
     store.saveScript(ep.id,'原稿',0);
