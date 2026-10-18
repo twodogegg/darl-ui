@@ -83,6 +83,29 @@ describe('episode screenplay + shot and asset planning',()=>{
     expect(new EpisodeStore(path).assets(projectId)?.find(a=>a.id===asset.id)?.description).toBe('用户编辑的视觉描述');
     expect(new EpisodeStore(path).assetStates(projectId,asset.id)).toHaveLength(1);
   });
+  it('keeps edited descriptions when re-saving a plan without descriptions',()=>{
+    const ep=store.create(projectId,'第 01 集')!;
+    store.saveScript(ep.id,'原稿',0);
+    store.savePlan(ep.id,1,parseAgentBreakdown(output()));
+    const asset=store.assets(projectId)!.find(a=>a.name==='路明非')!;
+    store.saveAssetDescription(projectId,asset.id,'用户编辑的视觉描述');
+    const revised=store.plan(ep.id)!;
+    store.savePlan(ep.id,1,{shots:revised.shots,assets:revised.assets.map(({description:_,...rest})=>rest)});
+    expect(store.assets(projectId)?.find(a=>a.id===asset.id)?.description).toBe('用户编辑的视觉描述');
+  });
+  it('blocks extra prop states but allows character and scene states',()=>{
+    const ep=store.create(projectId,'第 01 集')!;
+    store.saveScript(ep.id,'原稿',0);
+    store.savePlan(ep.id,1,parseAgentBreakdown(output()));
+    const library=store.assets(projectId)!;
+    const prop=library.find(a=>a.type==='prop')!;
+    const character=library.find(a=>a.type==='character')!;
+    store.saveAssetState(projectId,prop.id,{name:'主形象',description:'剧本描述'});
+    expect(()=>store.saveAssetState(projectId,prop.id,{name:'破损',description:'无剧本依据'})).toThrow('道具默认仅有一个主要形象');
+    store.saveAssetState(projectId,character.id,{name:'主形象',description:'剧情最常见造型'});
+    expect(store.saveAssetState(projectId,character.id,{name:'休闲装',description:'第二集家中便服'})?.isMain).toBe(false);
+    expect(store.assetStates(projectId,character.id)?.map(s=>s.is_main)).toEqual([1,0]);
+  });
   it('does not delete retained shot records when saving edited plans',()=>{
     const ep=store.create(projectId,'第 01 集')!;
     store.saveScript(ep.id,'原稿',0);

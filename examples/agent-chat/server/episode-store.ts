@@ -241,8 +241,8 @@ export class EpisodeStore {
       draft.assets.forEach((a)=>{
         insertAsset.run(randomUUID(),episode.projectId,a.type,a.name,a.description||'');
         const row=findAsset.get(episode.projectId,a.type,a.name) as {id:string};
-        // The draft description is intentionally authoritative when explicitly provided.
-        if(typeof a.description==='string')saveDescription.run(a.description,row.id,episode.projectId);
+        // Older Agent results carry no description; keep the user-edited one instead of clearing it.
+        if(typeof a.description==='string'&&a.description.trim())saveDescription.run(a.description,row.id,episode.projectId);
         a.shotNumbers.forEach(number=>link.run(draft.shots[number-1].id,row.id));
       });
       this.db.prepare('UPDATE workspace_episodes SET plan_revision=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(episode.scriptRevision,episodeId);

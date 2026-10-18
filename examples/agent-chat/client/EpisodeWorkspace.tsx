@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import type { AgentConfig } from '@darl/ui';
 import type { AssetDraft, BreakdownDraft, ShotDraft } from '../server/episode-store';
 import './episodes.css';
@@ -35,23 +35,6 @@ const toStored = (source:string,assets:AssetDraft[])=>{
   }
   return result;
 };
-function AssetText({value,onAsset,assets}:{value:string;onAsset:(name:string)=>void;assets:AssetDraft[]}){
-  const parts=[...value.matchAll(marker)];
-  if(!parts.length)return <span>{value||'—'}</span>;
-  const nodes:ReactNode[]=[];
-  let pos=0;
-  parts.forEach((part,i)=>{
-    const start=part.index??0;
-    if(start>pos)nodes.push(value.slice(pos,start));
-    const name=part[1].trim(),bound=assets.some(a=>a.name===name);
-    nodes.push(<button className={'workspace-asset-mention'+(!bound?' is-unbound':'')} title={bound?'定位资产：'+name:'未找到资产：'+name}
-      onClick={()=>onAsset(name)} type="button" key={i}>@{name}</button>);
-    pos=start+part[0].length;
-  });
-  if(pos<value.length)nodes.push(value.slice(pos));
-  return <span className="workspace-mentions">{nodes}</span>;
-}
-
 export function EpisodeWorkspace({projectId,agents,onEditAgent}:{projectId:number;agents:AgentConfig[];onEditAgent:(agentId:string)=>void}){
   const [episodes,setEpisodes]=useState<Episode[]>([]);
   const [selectedId,setSelectedId]=useState<number|null>(null);
@@ -172,14 +155,11 @@ export function EpisodeWorkspace({projectId,agents,onEditAgent}:{projectId:numbe
       ?{...a,shotNumbers:value.split(/[,，\s]+/).map(Number).filter(n=>Number.isInteger(n)&&n>0&&n<=prev.shots.length)}
       :{...a,[field]:value})}));
   };
-  const assetFocus=(name:string)=>{
-    const index=draft?.assets.findIndex(a=>a.name===name)??-1;
-    if(index<0){setError('资产「'+name+'」尚未列入需求清单');return;}
-    document.getElementById('episode-asset-'+index)?.scrollIntoView({behavior:'smooth',block:'center'});
-  };
   const openedAsset=library.find(a=>a.id===assetDetail);
   const openAsset=async(id:string)=>{setAssetDetail(id);setAssetStates([]);try{setAssetStates(await get<AssetState[]>(`projects/${projectId}/assets/${id}/states`));}catch(e){setError((e as Error).message);}};
-  const saveAssetDescription=async(asset:LibraryAsset,description:string)=>{try{await get(`projects/${projectId}/assets/${asset.id}`,'PATCH',{description});setLibrary(items=>items.map(a=>a.id===asset.id?{...a,description}:a));setNotice('资产描述已保存');}catch(e){setError((e as Error).message);}};
+  const saveAssetDescription=async(asset:LibraryAsset,description:string)=>{try{await get(`projects/${projectId}/assets/${asset.id}`,'PATCH',{description});setLibrary(items=>items.map(a=>a.id===asset.id?{...a,description}:a));
+    setDraft(prev=>prev&&({...prev,assets:prev.assets.map(a=>a.name===asset.name&&a.type===asset.type?{...a,description}:a)}));
+    setNotice('资产描述已保存');}catch(e){setError((e as Error).message);}};
   const addAssetState=async()=>{if(!openedAsset||!stateName.trim())return;try{await get(`projects/${projectId}/assets/${openedAsset.id}/states`,'POST',{name:stateName,description:stateDescription});setAssetStates(await get<AssetState[]>(`projects/${projectId}/assets/${openedAsset.id}/states`));setStateName('');setStateDescription('');}catch(e){setError((e as Error).message);}};
   const total=draft?.shots.reduce((sum,s)=>sum+(Number.isFinite(s.duration)?s.duration:0),0)??0;
   return <section className="workspace-episodes" aria-label="剧集与智能拆镜">
