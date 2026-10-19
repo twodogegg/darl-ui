@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { ArrowRight, X } from 'lucide-react';
-import { Button } from '../ui/Button';
+import { Button, type ButtonProps } from '../ui/Button';
 import { readableForeground, useDarlTheme } from '../../theme/DarlUIProvider';
 import './interactive-confirm-dialog.css';
 
@@ -28,6 +28,8 @@ export interface InteractiveConfirmDialogProps {
   details?: ReactNode;
   confirmText?: string;
   cancelText?: string;
+  /** Button variant for the optional cancel action. */
+  cancelVariant?: ButtonProps['variant'];
   showCancel?: boolean;
   onConfirm: (answers: ConfirmAnswers) => void | Promise<void>;
   onCancel?: () => void;
@@ -48,7 +50,7 @@ function startingAnswers(questions: ConfirmQuestion[]): ConfirmAnswers {
 
 export function InteractiveConfirmDialog({
   open, onOpenChange, title, description, questions, details, confirmText = '确认', cancelText = '取消',
-  showCancel = false, onConfirm, onCancel, accentColor, className = '',
+  cancelVariant = 'outline', showCancel = false, onConfirm, onCancel, accentColor, className = '',
 }: InteractiveConfirmDialogProps) {
   const headingId = useId();
   const theme = useDarlTheme();
@@ -167,7 +169,7 @@ export function InteractiveConfirmDialog({
           <div className="darl-confirm-footer">
             {error && <p role="alert" className="darl-confirm-error">{error}</p>}
             <div className="darl-confirm-actions">
-              {showCancel && <Button variant="outline" type="button" onClick={() => requestOpen(false)} disabled={submitting}>{cancelText}</Button>}
+              {showCancel && <Button variant={cancelVariant} type="button" onClick={() => requestOpen(false)} disabled={submitting}>{cancelText}</Button>}
               <Button type="submit" disabled={submitting}>{submitting ? '提交中…' : confirmText}{!submitting && <ArrowRight size={16} aria-hidden="true" />}</Button>
             </div>
           </div>

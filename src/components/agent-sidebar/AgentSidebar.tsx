@@ -31,6 +31,42 @@ function formatToolValue(value: unknown): string {
   try { return JSON.stringify(value, null, 2); } catch { return String(value); }
 }
 
+function formatMediaSize(value: unknown): string {
+  const size = String(value).trim();
+  const upper = size.toUpperCase();
+  if (['1K', '2K', '4K'].includes(upper)) return upper;
+  if (size === 'auto') return '自动';
+  const match = /^(\d+)x(\d+)$/i.exec(size);
+  if (!match) return size;
+  const longestEdge = Math.max(Number(match[1]), Number(match[2]));
+  if (longestEdge >= 3000) return '4K';
+  if (longestEdge >= 1400) return '2K';
+  return '1K';
+}
+
+function formatMediaResolution(value: unknown): string {
+  const resolution = String(value).trim();
+  return /^\d+$/.test(resolution) ? `${resolution}P` : resolution;
+}
+
+type MediaOptionRow = { key: string; label: string; value: string };
+
+/** Media options are shown as readable fields; never dump the raw JSON payload at the user. */
+function mediaOptionRows(options: unknown, type: 'image' | 'video' = 'image'): MediaOptionRow[] {
+  if (!options || typeof options !== 'object' || Array.isArray(options)) return [];
+  const values = options as Record<string, unknown>;
+  const rows: MediaOptionRow[] = [];
+  const resolution = values.size !== undefined
+    ? formatMediaSize(values.size)
+    : values.resolution !== undefined ? formatMediaResolution(values.resolution) : undefined;
+  if (resolution) rows.push({ key: 'resolution', label: '分辨率', value: resolution });
+  if (values.aspectRatio !== undefined) rows.push({ key: 'aspectRatio', label: '画幅', value: String(values.aspectRatio) });
+  if (values.duration !== undefined) rows.push({ key: 'duration', label: '时长', value: `${String(values.duration)} 秒` });
+  if (values.count !== undefined) rows.push({ key: 'count', label: '数量', value: `${String(values.count)} ${type === 'image' ? '张' : '个'}` });
+  if (Array.isArray(values.references) && values.references.length) rows.push({ key: 'references', label: '参考素材', value: `${values.references.length} 个` });
+  return rows;
+}
+
 function readImage(file: File): Promise<AgentImageAttachment> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -333,6 +369,8 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const pendingInput = pendingConfirmation?.input && typeof pendingConfirmation.input === 'object' ? pendingConfirmation.input as Record<string, unknown> : {};
   const isMediaConfirmation = pendingConfirmation?.appId === 'builtin:media';
   const mediaKind = pendingInput.modelId === 'gpt-image-2' ? '图片' : '视频';
+  const mediaModelLabel = pendingInput.modelId === 'gpt-image-2' ? 'GPT Image 2' : pendingInput.modelId === 'minimax-h3-flash' ? 'MiniMax H3 Flash' : String(pendingInput.modelId || '—');
+  const mediaRows = mediaOptionRows(pendingInput.options, mediaKind === '图片' ? 'image' : 'video');
   const confirmAction = async (approved: boolean) => {
     if (!pendingConfirmation || !onToolConfirm || confirmBusy) return;
     setConfirmBusy(true); setConfirmError('');
@@ -466,20 +504,35 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
       open={Boolean(pendingConfirmation && onToolConfirm && pendingConfirmation.id !== handledConfirmation)}
       onOpenChange={(open) => { if (!open) void confirmAction(false); }}
       title={isMediaConfirmation ? `确认生成${mediaKind}` : '确认执行 MCP 工具'}
-      description={isMediaConfirmation ? '即将提交生成任务，可能产生费用。' : '即将调用外部工具，请核对操作与参数。'}
+      description={isMediaConfirmation ? '请核对以下生成设置，提交后将开始生成并可能产生费用。' : '即将调用外部工具，请核对操作与参数。'}
       questions={[]}
       showCancel
       cancelText="拒绝"
+      cancelVariant="destructive"
       confirmText={isMediaConfirmation ? '确认生成' : '允许执行'}
+      className={isMediaConfirmation ? 'darl-agent-media-confirm darl-agent-approval-confirm' : 'darl-agent-approval-confirm'}
       onConfirm={() => confirmAction(true)}
-      details={pendingConfirmation && <div className="darl-agent-confirm-details">
-        <div><strong>{isMediaConfirmation ? '模型' : '应用'}</strong><span>{isMediaConfirmation ? String(pendingInput.modelId || '—') : pendingConfirmation.appName}</span></div>
-        {!isMediaConfirmation && <><div><strong>工具</strong><span>{pendingConfirmation.toolTitle || pendingConfirmation.toolName}</span></div><div><strong>风险</strong><span>{pendingConfirmation.risk === 'dangerous' ? '危险操作' : pendingConfirmation.risk === 'write' ? '写操作' : pendingConfirmation.risk === 'read' ? '只读' : '—'}</span></div></>}
-        {isMediaConfirmation && Boolean(pendingInput.options) && <div><strong>生成参数</strong><span>{formatToolValue(pendingInput.options)}</span></div>}
-        <div className="darl-agent-confirm-input"><strong>{isMediaConfirmation ? '生成内容' : '调用参数'}</strong><pre>{formatToolValue(isMediaConfirmation ? pendingInput.prompt : pendingConfirmation.input)}</pre></div>
-        {confirmError && <p role="alert">{confirmError}</p>}
-        {confirmBusy && <p role="status">正在提交审批…</p>}
-      </div>}
+      details={pendingConfirmation && (isMediaConfirmation
+        ? <div className="darl-media-confirm">
+          <dl className="darl-media-confirm-summary">
+            <div><dt>模型</dt><dd>{mediaModelLabel}</dd></div>
+            {mediaRows.map((row) => <div key={row.key}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}
+          </dl>
+          <div className="darl-media-confirm-prompt">
+            <span>生成内容</span>
+            <p>{String(pendingInput.prompt ?? '')}</p>
+          </div>
+          {confirmError && <p role="alert" className="darl-confirm-error">{confirmError}</p>}
+          {confirmBusy && <p role="status" className="darl-confirm-status">正在提交审批…</p>}
+        </div>
+        : <div className="darl-agent-confirm-details">
+          <div><strong>应用</strong><span>{pendingConfirmation.appName}</span></div>
+          <div><strong>工具</strong><span>{pendingConfirmation.toolTitle || pendingConfirmation.toolName}</span></div>
+          <div><strong>风险</strong><span>{pendingConfirmation.risk === 'dangerous' ? '危险操作' : pendingConfirmation.risk === 'write' ? '写操作' : pendingConfirmation.risk === 'read' ? '只读' : '—'}</span></div>
+          <div className="darl-agent-confirm-input"><strong>调用参数</strong><pre>{formatToolValue(pendingConfirmation.input)}</pre></div>
+          {confirmError && <p role="alert">{confirmError}</p>}
+          {confirmBusy && <p role="status">正在提交审批…</p>}
+        </div>)}
     />
     <ImageLightbox image={imagePreview} onClose={() => setImagePreview(null)} />
     <DialogPrimitive.Root open={Boolean(deleteTarget)} onOpenChange={(next) => { if (!next && !confirmBusy) setDeleteTarget(null); }}>
