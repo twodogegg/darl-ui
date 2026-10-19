@@ -82,6 +82,17 @@ body { margin: 0; background: #101113; }
 .example-default-model-grid > div { display: grid; gap: 6px; min-width: 0; padding: 12px; border: 1px solid var(--darl-border); border-radius: 9px; background: var(--darl-background); }
 .example-default-model-grid span { color: var(--darl-muted); font-size: 11px; }
 .example-default-model-grid strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.example-media-concurrency { padding: 20px; border: 1px solid var(--darl-border); border-radius: 14px; background: var(--darl-surface); }
+.example-media-concurrency h2 { margin: 6px 0 5px; font-size: 19px; }
+.example-media-concurrency p { margin: 0; color: var(--darl-muted); font-size: 12px; line-height: 1.6; }
+.example-media-concurrency-list { max-width: 620px; margin-top: 14px; }
+.example-media-concurrency-row { display: grid; grid-template-columns: minmax(0, 1fr) 96px 64px; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--darl-border); }
+.example-media-concurrency-row:first-child { border-top: 0; }
+.example-media-concurrency-row label { min-width: 0; color: var(--darl-text); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.example-media-concurrency-row .darl-input { height: 34px; text-align: center; }
+.example-media-concurrency-row .darl-button { width: 100%; height: 34px; }
+.example-media-concurrency .example-media-concurrency-message { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--darl-border); }
+@media (max-width: 560px) { .example-media-concurrency { padding: 16px; }.example-media-concurrency-row { grid-template-columns: minmax(0, 1fr) 84px 60px; gap: 8px; } }
 .example-applications { max-width: 960px; min-width: 0; }
 .example-applications p { color: var(--darl-muted); line-height: 1.7; overflow-wrap: anywhere; }
 .example-applications article { margin-top: 20px; padding: 18px; border: 1px solid var(--darl-border); border-radius: 10px; }
