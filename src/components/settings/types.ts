@@ -51,6 +51,9 @@ export interface AgentModelConfig {
 export type AgentChildContextMode = 'task-only' | 'selected-context';
 export type AgentHistoryMode = 'recent' | 'summary' | 'full';
 export type AgentToolResultMode = 'brief' | 'standard' | 'detailed';
+export type AgentType = 'main_agent' | 'sub_agent';
+export type AgentSource = 'system_default' | 'user_created' | 'imported';
+export type AgentContextStrategy = 'isolated' | 'inherit_filtered' | 'inherit_full';
 
 export interface AgentContextPolicy {
   childContext: AgentChildContextMode;
@@ -62,6 +65,15 @@ export interface AgentContextPolicy {
 export interface AgentConfig {
   id: string;
   name: string;
+  type?: AgentType;
+  source?: AgentSource;
+  selectable?: boolean;
+  callable?: boolean;
+  contextStrategy?: AgentContextStrategy;
+  /** Wire-format alias accepted when integrating with snake_case Agent APIs. */
+  context_strategy?: AgentContextStrategy;
+  /** Optional MCP application allow-list; omitted means the host default. */
+  applicationIds?: string[];
   builtIn?: boolean;
   /** Emoji, short label, or a host-managed image URL. */
   avatar?: string;

@@ -17,6 +17,19 @@ export interface StoredSubAgentThread extends SubAgentThreadKey {
   updatedAt: string;
   messages: ChatMessage[];
 }
+export interface AgentInvocationRecord {
+  id: string;
+  scope: string;
+  rootSessionId: string;
+  parentAgentId: string;
+  childAgentId: string;
+  task: string;
+  contextStrategy: string;
+  contextScope: string;
+  result: string;
+  status: 'success' | 'error';
+  createdAt: string;
+}
 
 /** Single-user local persistence for the example host. SQLite is the only source of truth. */
 export class LocalStorage {
@@ -54,8 +67,37 @@ export class LocalStorage {
       );
       CREATE INDEX IF NOT EXISTS idx_subagent_threads_parent
         ON subagent_threads (scope, root_session_id, updated_at);
+      CREATE TABLE IF NOT EXISTS agent_invocations (
+        id TEXT PRIMARY KEY,
+        scope TEXT NOT NULL,
+        root_session_id TEXT NOT NULL,
+        parent_agent_id TEXT NOT NULL,
+        child_agent_id TEXT NOT NULL,
+        task TEXT NOT NULL,
+        context_strategy TEXT NOT NULL,
+        context_scope TEXT NOT NULL,
+        result TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_invocations_session
+        ON agent_invocations (scope, root_session_id, created_at);
     `);
     chmodSync(this.path, 0o600);
+  }
+
+  saveAgentInvocation(record: Omit<AgentInvocationRecord, 'id' | 'createdAt'>): AgentInvocationRecord {
+    const saved: AgentInvocationRecord = { ...record, id: randomUUID(), createdAt: new Date().toISOString() };
+    if (Object.values(saved).some((value) => typeof value !== 'string') || saved.task.length > 100_000 || saved.result.length > 1_000_000) throw new Error('Agent 调用记录无效');
+    this.database.prepare(`INSERT INTO agent_invocations (id, scope, root_session_id, parent_agent_id, child_agent_id, task, context_strategy, context_scope, result, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(saved.id, saved.scope, saved.rootSessionId, saved.parentAgentId, saved.childAgentId, saved.task, saved.contextStrategy, saved.contextScope, saved.result, saved.status, saved.createdAt);
+    return saved;
+  }
+
+  getAgentInvocations(scope?: string, rootSessionId?: string): AgentInvocationRecord[] {
+    const rows = scope && rootSessionId
+      ? this.database.prepare('SELECT id, scope, root_session_id, parent_agent_id, child_agent_id, task, context_strategy, context_scope, result, status, created_at FROM agent_invocations WHERE scope = ? AND root_session_id = ? ORDER BY created_at ASC').all(scope, rootSessionId)
+      : this.database.prepare('SELECT id, scope, root_session_id, parent_agent_id, child_agent_id, task, context_strategy, context_scope, result, status, created_at FROM agent_invocations ORDER BY created_at DESC LIMIT 500').all();
+    return rows.map((row) => { const item = row as Record<string, string>; return { id: item.id, scope: item.scope, rootSessionId: item.root_session_id, parentAgentId: item.parent_agent_id, childAgentId: item.child_agent_id, task: item.task, contextStrategy: item.context_strategy, contextScope: item.context_scope, result: item.result, status: item.status as AgentInvocationRecord['status'], createdAt: item.created_at }; });
   }
 
   getConfig<T>(key: string): T | undefined {

@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { callMcpToolWithRetry, createApi, isRetryableMcpError, mcpResultError } from '../examples/agent-chat/server/api';
+import { callMcpToolWithRetry, createApi, findAttachedImageForUpload, isRetryableMcpError, mcpResultError } from '../examples/agent-chat/server/api';
 import { DEFAULT_AGENT_CHAT_PORT } from '../examples/agent-chat/server/mcp';
 
 async function withApi(directory: string, promptFile: string, test: (request: (path: string, body?: unknown, method?: string) => Promise<Response>) => Promise<void>) {
@@ -40,6 +40,11 @@ describe('Agent configuration API', () => {
     expect(mcpResultError({ content: [{ type: 'text', text: 'request ahk_private failed' }] }, 'ahk_private')).toBe('request [已隐藏] failed');
     expect(mcpResultError({ content: [{ type: 'text', text: '第一段' }, { type: 'text', text: '第二段' }], structuredContent: { code: 'ASSET_NOT_FOUND' } })).toContain('第二段');
     expect(mcpResultError({ content: [{ type: 'text', text: '第一段' }, { type: 'text', text: '第二段' }], structuredContent: { code: 'ASSET_NOT_FOUND' } })).toContain('ASSET_NOT_FOUND');
+  });
+
+  it('reports a missing image attachment instead of dereferencing undefined', () => {
+    const tool = { _meta: { 'darl-ui/image-input': { kind: 'data-url', fields: { assetId: 'assetId', dataUrl: 'dataUrl', fileName: 'fileName' } } } };
+    expect(() => findAttachedImageForUpload(tool, { assetId: 'asset-1' }, [])).toThrow('缺少可上传的图片附件');
   });
 
   it('retries transient read-only MCP failures without retrying writes', async () => {

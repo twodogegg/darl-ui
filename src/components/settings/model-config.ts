@@ -19,11 +19,11 @@ export interface ImageCapabilities {
   supportsReferenceEdit?: boolean;
   maxReferenceImages: number;
   maxOutputs?: number;
-  sizes?: string[];
+  /** Product tiers such as 1K / 2K / 4K; the adapter maps them to the provider size. */
+  resolutions?: string[];
   aspectRatios?: string[];
-  qualities?: string[];
-  formats?: string[];
-  transparentBackground?: boolean;
+  /** Legacy pixel-size options kept so previously saved configurations still load. */
+  sizes?: string[];
 }
 
 export interface VideoCapabilities {
@@ -103,14 +103,15 @@ export interface ModelConfigurationError {
 export const BUILTIN_PROTOCOLS: ProtocolAdapterDefinition[] = [
   { key: 'openai-completions', label: 'OpenAI Chat Completions', types: ['text'], implemented: true },
   { key: 'openai-responses', label: 'OpenAI Responses', types: ['text'], implemented: true },
-  { key: 'openai-images', label: 'OpenAI Images', types: ['image'], implemented: true, description: '宿主已接通基础文生图；参考图编辑仍待网关验收' },
+  { key: 'openai-images', label: 'OpenAI Images', types: ['image'], implemented: true, description: '宿主已接通文生图与参考图编辑' },
+  { key: 'gemini-generate-content', label: 'Gemini Generate Content', types: ['image'], implemented: true, description: '宿主已接通 imageConfig 生成与参考图编辑' },
   { key: 'darl-h3-flash-unified', label: 'Darl H3 Flash（新版统一视频）', types: ['video'], implemented: true, description: '宿主已接通基础文生视频；参考素材与首尾帧仍待网关验收' },
 ];
 
 export const BUILTIN_TEMPLATES: CapabilityTemplate[] = [
   {
     id: 'deepseek-thinking', name: 'DeepSeek Thinking', type: 'text',
-    capabilities: { reasoningEfforts: ['low', 'high', 'max'], defaultReasoningEffort: 'high', vision: false, tools: true, contextWindow: 1_000_000 },
+    capabilities: { reasoningEfforts: ['low', 'high', 'max'], defaultReasoningEffort: 'high', vision: true, tools: true, contextWindow: 1_000_000 },
   },
   {
     id: 'gpt-reasoning', name: 'GPT Reasoning', type: 'text',
@@ -123,10 +124,18 @@ export const BUILTIN_TEMPLATES: CapabilityTemplate[] = [
   {
     id: 'gpt-image-2', name: 'GPT Image 2', type: 'image',
     capabilities: {
-      supportsTextToImage: true, supportsReferenceEdit: true, maxReferenceImages: 16, maxOutputs: 4,
-      sizes: ['auto', '1024x1024', '1536x1024', '1024x1536'], aspectRatios: ['1:1', '3:2', '2:3'], qualities: ['auto', 'low', 'medium', 'high'], formats: ['png', 'jpeg', 'webp'], transparentBackground: true,
+      supportsTextToImage: true, supportsReferenceEdit: true, maxReferenceImages: 16,
+      resolutions: ['1K', '2K', '4K'], aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'],
     },
-    defaults: { size: 'auto', quality: 'auto', count: 1 },
+    defaults: { resolution: '2K', aspectRatio: '16:9' },
+  },
+  {
+    id: 'gemini-pro-image', name: 'Gemini 3 Pro Image', type: 'image',
+    capabilities: {
+      supportsTextToImage: true, supportsReferenceEdit: true, maxReferenceImages: 14,
+      resolutions: ['1K', '2K', '4K'], aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'],
+    },
+    defaults: { resolution: '2K', aspectRatio: '16:9' },
   },
   {
     id: 'h3-flash', name: 'MiniMax H3 Flash（新版统一视频）', type: 'video',
@@ -145,10 +154,57 @@ export const BUILTIN_MODELS: LogicalModel[] = [
   { id: 'gemini-4-argon', displayName: 'Gemini 4 Argon', type: 'text', capabilityTemplateId: 'gemini-thinking', bindings: [{ id: 'gemini-darl', providerId: 'darl', upstreamModelId: 'gemini-4-argon', protocolKey: 'openai-completions', enabled: true }] },
   { id: 'gpt-6-astra', displayName: 'GPT-6 Astra', type: 'text', capabilityTemplateId: 'gpt-reasoning', bindings: [{ id: 'gpt-astra-darl', providerId: 'darl', upstreamModelId: 'gpt-6-astra', protocolKey: 'openai-responses', enabled: true }] },
   { id: 'gpt-image-2', displayName: 'GPT Image 2', type: 'image', capabilityTemplateId: 'gpt-image-2', bindings: [{ id: 'gpt-image-darl', providerId: 'darl', upstreamModelId: 'gpt-image-2', protocolKey: 'openai-images', enabled: true }] },
+  { id: 'gpt-image-2.5', displayName: 'GPT Image 2.5', type: 'image', capabilityTemplateId: 'gpt-image-2', bindings: [{ id: 'gpt-image-2.5-darl', providerId: 'darl', upstreamModelId: 'gpt-image-2.5-sunburst', protocolKey: 'openai-images', enabled: true }] },
+  { id: 'gemini-3-pro-image-preview', displayName: 'Gemini 3 Pro Image Preview', type: 'image', capabilityTemplateId: 'gemini-pro-image', bindings: [{ id: 'gemini-image-darl', providerId: 'darl', upstreamModelId: 'gemini-3-pro-image-preview', protocolKey: 'gemini-generate-content', enabled: true }] },
   { id: 'minimax-h3-flash', displayName: 'MiniMax H3 Flash', type: 'video', capabilityTemplateId: 'h3-flash', bindings: [{ id: 'h3-darl', providerId: 'darl', upstreamModelId: 'minimax-h3-flash', protocolKey: 'darl-h3-flash-unified', enabled: true }] },
 ];
 
 export const defaultModelConfiguration = (): ModelConfiguration => ({ version: 1, templates: BUILTIN_TEMPLATES.map((template) => ({ ...template, capabilities: { ...template.capabilities } as CapabilityValues })), models: BUILTIN_MODELS.map((model) => ({ ...model, bindings: model.bindings.map((binding) => ({ ...binding })) })), protocols: BUILTIN_PROTOCOLS.map((protocol) => ({ ...protocol })) });
+
+const IMAGE_ASPECT_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'];
+
+/**
+ * Bring a persisted configuration up to the current built-in catalogue without
+ * touching user-created models or bindings. The GPT Image template is migrated
+ * from the old pixel-size options to product tiers, because those old fields
+ * are no longer part of the image task surface.
+ */
+export function upgradeModelConfiguration(configuration: ModelConfiguration): ModelConfiguration {
+  if (!configuration || configuration.version !== 1 || !Array.isArray(configuration.templates) || !Array.isArray(configuration.models)) return configuration;
+  const next = JSON.parse(JSON.stringify(configuration)) as ModelConfiguration;
+  const gptImage = next.templates.find((template) => template.id === 'gpt-image-2');
+  if (gptImage) {
+    const capabilities = gptImage.capabilities as ImageCapabilities;
+    if (capabilities.sizes && !capabilities.resolutions) {
+      capabilities.resolutions = ['1K', '2K', '4K'];
+      capabilities.aspectRatios = [...IMAGE_ASPECT_RATIOS];
+      const legacy = capabilities as unknown as Record<string, unknown>;
+      delete legacy.sizes;
+      delete legacy.qualities;
+      delete legacy.formats;
+      delete legacy.transparentBackground;
+      delete legacy.maxOutputs;
+      gptImage.defaults = { resolution: '2K', aspectRatio: '16:9' };
+    }
+  }
+  const addedTemplates: CapabilityTemplate[] = BUILTIN_TEMPLATES.filter((template) => template.id === 'gemini-pro-image');
+  for (const template of addedTemplates) {
+    if (!next.templates.some((item) => item.id === template.id)) {
+      next.templates.push({ ...template, capabilities: { ...template.capabilities } as CapabilityValues });
+    }
+  }
+  if (!Array.isArray(next.protocols)) next.protocols = [];
+  for (const protocol of BUILTIN_PROTOCOLS) {
+    if (!next.protocols.some((item) => item.key === protocol.key)) next.protocols.push({ ...protocol });
+  }
+  const addedModels: LogicalModel[] = BUILTIN_MODELS.filter((model) => ['gpt-image-2.5', 'gemini-3-pro-image-preview'].includes(model.id));
+  for (const model of addedModels) {
+    if (!next.models.some((item) => item.id === model.id)) {
+      next.models.push({ ...model, bindings: model.bindings.map((binding) => ({ ...binding })) });
+    }
+  }
+  return next;
+}
 
 function copyValue<T>(value: T): T {
   if (Array.isArray(value)) return [...value] as T;
@@ -225,9 +281,8 @@ export function mediaCapabilities(value: CapabilityValues): AgentModelCapabiliti
     return {
       referenceImages: value.maxReferenceImages,
       aspectRatios: value.aspectRatios,
-      resolutions: value.sizes,
-      qualities: value.qualities,
-      maxOutputs: value.maxOutputs,
+      resolutions: value.resolutions ?? value.sizes,
+      ...(value.maxOutputs !== undefined ? { maxOutputs: value.maxOutputs } : {}),
       referenceEdit: value.supportsReferenceEdit,
       textToImage: value.supportsTextToImage,
       generationModes: [
@@ -246,14 +301,18 @@ export function toMediaModels(configuration: ModelConfiguration, includeUnimplem
     if (!binding) return [];
     const capabilities = effectiveCapabilities(configuration, model, binding);
     if (!capabilities) return [];
-    if (model.type === 'image' && 'maxReferenceImages' in capabilities && 'sizes' in capabilities) return [{
-      id: model.id, logicalModelId: model.id, bindingId: binding.id, providerId: binding.providerId, upstreamModelId: binding.upstreamModelId, protocolKey: binding.protocolKey, name: model.displayName, type: 'image',
-      capabilities: { images: capabilities.maxReferenceImages, generationModes: [
-        ...('supportsTextToImage' in capabilities && capabilities.supportsTextToImage ? ['text-to-image' as const] : []),
-        ...('supportsReferenceEdit' in capabilities && capabilities.supportsReferenceEdit ? ['reference-edit' as const] : []),
-      ], ...(capabilities.sizes ? { resolutions: capabilities.sizes } : {}), ...(capabilities.aspectRatios ? { aspectRatios: capabilities.aspectRatios } : {}), ...(capabilities.maxOutputs !== undefined ? { maxOutputs: capabilities.maxOutputs } : {}) },
-      ...(modelTemplateDefaults(configuration, model) ? { defaults: modelTemplateDefaults(configuration, model) } : {}),
-    }];
+    const image = capabilities as ImageCapabilities;
+    if (model.type === 'image' && 'maxReferenceImages' in capabilities && !('modes' in capabilities) && (image.resolutions || image.sizes)) {
+      const resolutions = image.resolutions ?? image.sizes;
+      return [{
+        id: model.id, logicalModelId: model.id, bindingId: binding.id, providerId: binding.providerId, upstreamModelId: binding.upstreamModelId, protocolKey: binding.protocolKey, name: model.displayName, type: 'image',
+        capabilities: { images: image.maxReferenceImages, generationModes: [
+          ...(image.supportsTextToImage ? ['text-to-image' as const] : []),
+          ...(image.supportsReferenceEdit ? ['reference-edit' as const] : []),
+        ], ...(resolutions ? { resolutions } : {}), ...(image.aspectRatios ? { aspectRatios: image.aspectRatios } : {}), ...(image.maxOutputs !== undefined ? { maxOutputs: image.maxOutputs } : {}) },
+        ...(modelTemplateDefaults(configuration, model) ? { defaults: modelTemplateDefaults(configuration, model) } : {}),
+      }];
+    }
     if (model.type === 'video' && 'maxReferenceVideos' in capabilities && 'modes' in capabilities && Array.isArray(capabilities.modes)) return [{
       id: model.id, logicalModelId: model.id, bindingId: binding.id, providerId: binding.providerId, upstreamModelId: binding.upstreamModelId, protocolKey: binding.protocolKey, name: model.displayName, type: 'video',
       capabilities: { images: capabilities.maxReferenceImages, videos: capabilities.maxReferenceVideos, audios: capabilities.maxReferenceAudios, generationModes: capabilities.modes, firstLastFrame: capabilities.firstLastFrame === 'supported', aspectRatios: capabilities.aspectRatios, resolutions: capabilities.resolutions, durations: capabilities.durations, ...(capabilities.generateAudio !== undefined ? { generateAudio: capabilities.generateAudio } : {}), ...(capabilities.maxOutputs !== undefined ? { maxOutputs: capabilities.maxOutputs } : {}) },
@@ -317,8 +376,9 @@ export function validateModelConfiguration(configuration: ModelConfiguration): M
         const image = effective as ImageCapabilities;
         if (!Number.isInteger(image.maxReferenceImages) || image.maxReferenceImages < 0) errors.push({ path: `${bindingPath}.maxReferenceImages`, message: '参考图上限必须是非负整数' });
         if (image.maxOutputs !== undefined && (!Number.isInteger(image.maxOutputs) || image.maxOutputs < 1)) errors.push({ path: `${bindingPath}.maxOutputs`, message: '输出数量必须是正整数' });
-        const size = configuredDefaults.size || configuredDefaults.resolution;
-        if (typeof size === 'string' && image.sizes && !image.sizes.includes(size)) errors.push({ path: `${bindingPath}.defaults.size`, message: '默认尺寸必须属于最终有效能力' });
+        const resolution = configuredDefaults.resolution;
+        const resolutions = image.resolutions ?? image.sizes;
+        if (typeof resolution === 'string' && resolutions && !resolutions.includes(resolution)) errors.push({ path: `${bindingPath}.defaults.resolution`, message: '默认分辨率必须属于最终有效能力' });
         if (typeof configuredDefaults.aspectRatio === 'string' && image.aspectRatios && !image.aspectRatios.includes(configuredDefaults.aspectRatio)) errors.push({ path: `${bindingPath}.defaults.aspectRatio`, message: '默认画幅必须属于最终有效能力' });
       }
       if (model.type === 'video') {

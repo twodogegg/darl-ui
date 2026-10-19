@@ -49,6 +49,44 @@ describe('AgentSidebar', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '确认执行 MCP 工具' })).not.toBeInTheDocument());
   });
 
+  it('媒体生成确认展示可读参数，像素尺寸映射为 1K/2K，并提供红色拒绝按钮', () => {
+    const pending: AgentSession[] = [{ id: 'media', title: '生成图片', messages: [{ id: 'assistant', role: 'assistant', content: '', toolCalls: [{ id: 'media-call', appId: 'builtin:media', appName: '媒体生成', toolName: 'generate_media', status: 'confirmation', input: { modelId: 'gpt-image-2', prompt: '雨夜的霓虹街道', options: { size: '1536x1024', aspectRatio: '16:9', count: 2 } } }] }] }];
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={pending} activeSessionId="media" onToolConfirm={vi.fn()} />);
+    const dialog = screen.getByRole('dialog', { name: '确认生成图片' });
+    expect(dialog).toHaveTextContent('GPT Image 2');
+    expect(dialog).toHaveTextContent('2K');
+    expect(dialog).toHaveTextContent('16:9');
+    expect(dialog).toHaveTextContent('2 张');
+    expect(dialog).toHaveTextContent('雨夜的霓虹街道');
+    expect(dialog).not.toHaveTextContent('1536x1024');
+    expect(dialog).not.toHaveTextContent('"size"');
+    expect(dialog.querySelector('dt')?.tagName).toBe('DT');
+    const reject = screen.getByRole('button', { name: '拒绝' });
+    expect(reject.className).toContain('darl-button--destructive');
+  });
+
+  it('1K 和 4K 尺寸标签保持原样', () => {
+    const call = (size: string, id: string) => ({ id, appId: 'builtin:media', appName: '媒体生成', toolName: 'generate_media', status: 'confirmation' as const, input: { modelId: 'gpt-image-2', prompt: 'test', options: { size } } });
+    const pending: AgentSession[] = [{ id: 'sizes', title: '尺寸', messages: [{ id: 'assistant', role: 'assistant', content: '', toolCalls: [call('1024x1024', 'one')] }] }];
+    const { unmount } = render(<AgentSidebar open onOpenChange={vi.fn()} sessions={pending} activeSessionId="sizes" onToolConfirm={vi.fn()} />);
+    expect(screen.getByRole('dialog')).toHaveTextContent('1K');
+    unmount();
+    const large: AgentSession[] = [{ id: 'large', title: '尺寸', messages: [{ id: 'assistant', role: 'assistant', content: '', toolCalls: [call('4096x4096', 'two')] }] }];
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={large} activeSessionId="large" onToolConfirm={vi.fn()} />);
+    expect(screen.getByRole('dialog')).toHaveTextContent('4K');
+  });
+
+  it('工具确认的调用参数仍以 JSON 展示，拒绝按钮同样为红色', async () => {
+    const onToolConfirm = vi.fn().mockResolvedValue(undefined);
+    const pending: AgentSession[] = [{ id: 'tool', title: '工具确认', messages: [{ id: 'assistant', role: 'assistant', content: '', toolCalls: [{ id: 'write-call', appId: 'catalog', appName: '素材库', toolName: 'save', risk: 'write', status: 'confirmation', input: { name: '新素材' } }] }] }];
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={pending} activeSessionId="tool" onToolConfirm={onToolConfirm} />);
+    expect(screen.getByText(/"name": "新素材"/)).toBeVisible();
+    const reject = screen.getByRole('button', { name: '拒绝' });
+    expect(reject.className).toContain('darl-button--destructive');
+    fireEvent.click(reject);
+    await waitFor(() => expect(onToolConfirm).toHaveBeenCalledWith('write-call', false));
+  });
+
   it('输入 @ 时显示能力建议并可插入引用', () => {
     render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" applications={apps} skills={skills} onSend={vi.fn()} />);
     const editor = screen.getByRole('textbox', { name: '输入消息' });

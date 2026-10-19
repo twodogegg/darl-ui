@@ -26,4 +26,9 @@ describe('server-managed Agent configuration', () => {
     expect(() => validateAgents([{ ...agent('a'), isDefault: true }, { ...agent('b'), isDefault: true }])).toThrow('默认 Agent');
     expect(() => validateAgents([agent('a'), agent('a')])).toThrow('重复');
   });
+
+  it('forces Sub Agent permissions and protects the built-in assistant', () => {
+    expect(validateAgent({ ...agent('child'), type: 'sub_agent', selectable: true, callable: false })).toMatchObject({ type: 'sub_agent', selectable: false, callable: true, contextStrategy: 'inherit_filtered' });
+    expect(() => validateAgent({ ...agent('default'), builtIn: true, type: 'sub_agent' })).toThrow('系统默认 Agent');
+  });
 });

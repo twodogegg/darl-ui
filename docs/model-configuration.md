@@ -23,6 +23,8 @@
 | 文本 | `gemini-4-argon` | Gemini Thinking | `thinking_level` 由协议适配 |
 | 文本 | `gpt-6-astra` | GPT reasoning | 中转站别名应通过绑定映射 |
 | 图片 | `gpt-image-2` | GPT Image 2 | 生成/编辑自动区分，协议统一解析 Base64 或 URL |
+| 图片 | `gpt-image-2.5` | GPT Image 2.5（共用模板） | 当前渠道上游 ID 为 `gpt-image-2.5-sunburst` |
+| 图片 | `gemini-3-pro-image-preview` | Gemini 3 Pro Image | `generateContent` + `imageConfig` |
 | 视频 | `minimax-h3-flash` | Darl API H3 Flash | **仅限第 7 节的新版统一 H3 API；不使用旧 RunningHub `task_*` 上传协议** |
 
 首批文本思考等级（以官方资料作为模板初值，实际渠道允许覆写）：
@@ -70,11 +72,43 @@ DeepSeek 官方将请求 `medium` 映射到实际 `high`，因此不在 UI 中�
 
 ### 图片
 
-- 文生图、参考图编辑是否支持；**不要求用户手动切换生成/编辑**，由当前输入中是否有参考图推断，但必须验证渠道确实支持。
-- `maxReferenceImages`；最大输出数量；可选画质、文件格式、背景透明设置。
-- 输出规格按 API 支持的 **`size` / 宽高组合**保存，不能把 `1K`、`2K` 标签当成实际 `size` 参数；某些协议可能接受画幅 + 分辨率，应由其适配器转换。
-- GPT Image 2 官方编辑接口最多 16 张参考图；常用 `size` 包括 `auto`、`1024x1024`、`1536x1024`、`1024x1536`，还可以采用符合 API 约束的自定义宽高；这是官方能力参考，第三方渠道仍可覆盖。
-- 图片返回 Base64 或 URL 的差异**由协议适配器统一规范为宿主结果对象**，不是能力模板字段。
+**2026-10-19 产品范围：** 图片任务只开放画幅、清晰度档位和参考图数量；不提供质量、输出格式、背景或生成数量控件。这组选项不代表模型完整能力。
+
+| 逻辑模型 | 分辨率档位 | 最大参考图 | 支持画幅 |
+| --- | --- | --- | --- |
+| `gpt-image-2` | `1K` / `2K` / `4K` | 16 张 | `1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`9:16`、`16:9` |
+| `gpt-image-2.5` | `1K` / `2K` / `4K` | 16 张 | 同上 |
+| `gemini-3-pro-image-preview` | `1K` / `2K` / `4K` | 14 张 | 同上 |
+
+- `gpt-image-2.5` 与 `gpt-image-2` 的能力完全相同，直接复用同一能力模板；两者只有上游模型 ID 不同（`gpt-image-2.5` 对应当前渠道的 `gpt-image-2.5-sunburst`）。
+- **生成与编辑共用同一个图像工作台页面、同一模型选择和同一套画幅/清晰度控件**。用户只填写提示词并可选添加参考图：没有参考图时生成，有参考图时编辑。界面不显示「生成/编辑」标签页、切换器或独立页面；宿主协议适配器按当前输入选择不同 API 端点。
+- **普通用户只看得到画幅和清晰度档位，完全不显示 `size`、具体宽高数字或像素输入框。** 配置/协议内部按下方映射表把所选组合转成 `size=WIDTHxHEIGHT`。实际尺寸应满足宽高为 16 的倍数、最长边 ≤3840、宽高比 ≤3:1；推荐表中的总像素范围 655360–8294400。
+- **参考图数量按模型/渠道能力校验**。GPT Image 2 / 2.5 当前渠道最多 16 张，每张 <50MB，支持 PNG/JPEG/WebP/非动画 GIF；Gemini 3 Pro Image 最多 14 张。
+- **GPT Image 2 / 2.5**：`/v1/images/generations` 是 JSON 文生图；`/v1/images/edits` 是 multipart 图像编辑。`size`、`response_format` 等字段只由适配器处理，不进入产品选项。
+- **Gemini 图像**：`POST /v1beta/models/{model}:generateContent`；提示词与图像使用 `contents[].parts[]`，图像可为纯 Base64 的 `inlineData` 或上游可访问的 `fileData.fileUri`；`responseModalities` 为 `[IMAGE]` 或 `[TEXT,IMAGE]`。当前网关既可能返回 `inlineData`，也可能把图片作为 Markdown data URL 放在 text part 中，适配器必须同时识别。多轮编辑保留 `thoughtSignature`，并处理 `finishReason/promptFeedback`。
+- **Gemini 参考图只限制总数 14 张**，不启用“物体 / 人物 / 风格”分类限额。
+- Gemini 通用画幅：`1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`4:5`、`5:4`、`9:16`、`16:9`、`21:9`；本期产品只开放上表的 7 种。
+- 不配置 Seed、CFG、采样器等当前闭源接口未开放的调参项。
+
+**GPT Image 2 协议内部尺寸映射表（仅开发/配置层可见；普通用户界面不显示 `size`）**
+
+| 比例 | 1K | 2K | 4K |
+| --- | --- | --- | --- |
+| 1:1 | `1024x1024` | `2048x2048` | `2880x2880` |
+| 3:4 | `768x1024` | `1536x2048` | `2448x3264` |
+| 4:3 | `1024x768` | `2048x1536` | `3264x2448` |
+| 2:3 | `672x1008` | `2048x3072` | `2336x3504` |
+| 3:2 | `1008x672` | `3072x2048` | `3504x2336` |
+| 16:9 | `1280x720` | `2048x1152` | `3840x2160` |
+| 9:16 | `720x1280` | `1152x2048` | `2160x3840` |
+
+**Gemini 3 Pro Image 参数**
+
+| 模型 ID | imageSize | 参考图 |
+| --- | --- | --- |
+| `gemini-3-pro-image-preview` | `1K` / `2K` / `4K` | 总数 ≤14 |
+
+接口路径从供应商 Base URL 推导：`/v1` 或根路径都转为 `/v1beta/models/{model}:generateContent`。本适配器已用真实网关验证文生图、Base64 参考图编辑，以及 Markdown data URL / `inlineData` 两种返回形态。
 
 ### 视频
 
@@ -175,7 +209,7 @@ DeepSeek 官方将请求 `medium` 映射到实际 `high`，因此不在 UI 中�
 - P0：配置实体与继承/覆盖、模型映射、协议键与持久化兼容。
 - P0：模型/渠道/模板编辑 UI 与合法性校验。
 - P0：AgentSidebar、MediaWorkspace、DefaultModelSelector 消费统一有效能力，移除硬编码。
-- P1：宿主示例适配协议，优先实现 `darl-h3-flash-unified`，验证完整媒体任务；图片协议解析 Base64/URL；异步结果复用 TaskCenter（#16）。
+- P1：图片协议已接通 `openai-images`（generations / edits）与 `gemini-generate-content`（imageConfig / inlineData / data URL），并用真实网关验证生成与参考图编辑；视频继续实现 `darl-h3-flash-unified`，异步结果复用 TaskCenter（#16）。
 - 后续：Seedance、官方/本地 H3、更多供应商协议和多种视频模式，**需要独立真实契约与测试**，不从旧版 H3 RunningHub 文档猜测。
 
 ## 9. 参考来源

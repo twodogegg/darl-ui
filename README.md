@@ -80,6 +80,7 @@ MCP 连接由宿主示例的服务端管理。将配置保存为 Git 忽略的 `
 `apiKey` 可省略，用于无需鉴权的服务；URL 不接受内嵌凭证或查询参数。`readOnlyTools` 是宿主核实后的只读工具名单，无需这类覆盖时省略。工具 schema、名称和参数从 MCP 动态发现，设置 → 应用 / MCP 可查看连接状态和重新连接。聊天中用 `@` 引用一次应用，其工具在该对话后续消息中持续可用；服务端根据用户消息中的应用引用，每轮重新提供工具定义。刷新恢复后仍有效，新对话不继承，重新生成仅使用该轮之前的历史；已从服务端配置移除的历史应用会被忽略。同名工具通过服务端命名空间区分。询问应用用途或用法时，默认依据工具目录简短回答；只有明确需要真实数据或执行操作时才调用工具，避免额外浏览示例素材和无关文档。
 
 - 模型的 Chat Completions 和 Responses 两种协议均支持工具调用，最多 8 轮、合计最多 128 个工具。工具失败会回传模型，界面以紧凑记录展示应用、工具名和状态，不展开原始参数和结果；执行确认时展示待确认参数。
+- 工具失败在服务端同时写入 stderr 和 `.local/agent-chat/logs/failure.log`（每行一条 JSON，含 requestId、runId、toolCallId、错误码、耗时，凭证会被脱敏），便于在浏览器之外回溯失败原因。
 - 「设置 → 二次确认」可分别开启图片、视频与普通 MCP 工具的免确认开关；默认为关闭，保存在本机 SQLite。主 Agent 与子 Agent 复用这些开关；MCP `destructiveHint` 标记的破坏性工具始终要求确认。图片、视频与 MCP 共用 `InteractiveConfirmDialog` 弹窗，拒绝/停止/超时不会触发待批准的调用。
 - 默认情况下，除标记为只读或经宿主核实列入 `readOnlyTools` 的工具外，其他 MCP 调用均等待用户允许或拒绝。确认在服务端执行，停止、断连、超时后失效，不因刷新自动重试写操作。
 - MCP 凭证不返回浏览器。原始工具结果只回传给模型，聊天界面和会话历史保存调用摘要；仅待确认操作向界面发送参数。
@@ -305,11 +306,28 @@ import '@darl/ui/styles.css';
 
 应用和 Skill 从选择面板插入输入光标处，作为正文内引用，不显示输入框上方标签，也不自动传入当前页面。输入 `@` 引用应用或 Skill；继续输入名称或简介关键词可以筛选，上下方向键选择，Enter / Tab 插入，Esc 关闭建议。应用引用为蓝色，Skill 引用为紫色，可用 `--darl-agent-app` / `--darl-agent-skill` 覆盖。引用编码为 `[显示名称](app:ID)` / `[显示名称](skill:ID)`，发送时从正文派生应用和 Skill ID；删除引用即取消本次使用。
 
+## AgentPlaza｜主 Agent 广场
+
+`AgentPlaza` 只展示服务端标记为 `main_agent` 且允许用户选择的 Agent；`sub_agent` 不会出现在广场，也不会被 `AgentSidebar` 的用户选择器展示。卡片只包含头像、名称和用途描述，点击后由宿主打开对应对话。
+
+演示入口：`http://localhost:5288/#agent-plaza`；真实 Agent Chat 示例也提供「Agent 广场」入口。
+
+```tsx
+import { AgentPlaza } from '@darl/ui';
+
+<AgentPlaza agents={agents} onSelect={(agent) => {
+  setSelectedAgentId(agent.id);
+  setChatOpen(true);
+}} />
+```
+
+`AgentConfig` 支持 `type`（`main_agent` / `sub_agent`）、`selectable`、`callable`、`source` 和 `contextStrategy`。真实宿主必须在服务端再次校验这些字段；示例 Agent Chat 会强制系统默认 Agent 保持内置主 Agent，Sub Agent 只能由授权 Agent 委派，并将调用来源、任务、上下文范围和结果写入本地 SQLite。
+
 ## Agent 配置与 Sub Agent 委派
 
 `examples/agent-chat` 的设置中心提供独立的 Agents 页面。每个 Agent 在服务端保存名称和系统提示词；模型与推理强度在聊天输入框旁按当前会话选择。Skills 与 MCP 应用对所有 Agent 默认可用，无需逐个授权；API Key 仍只保存在服务端。设置默认 Agent 后，聊天可以直接选择专业 Agent，也可以由主 Agent 通过 AI SDK 7 `ToolLoopAgent` 按需委派给其他已启用的 Agent。
 
-设置中心的模型页面顶部同时提供默认媒体模型设置，目前只配置图片和视频：默认图片为 `gpt-image-2`（2K、16:9），默认视频为 `minimax-h3-flash`（480P、16:9）。配置保存在示例服务的本地 SQLite 中；文本模型在聊天输入框旁选择。
+设置中心的模型页面顶部同时提供默认媒体模型设置，目前只配置图片和视频：默认图片为 `gpt-image-2`（2K、16:9），也可以选择 `gpt-image-2.5` 或 `gemini-3-pro-image-preview`；默认视频为 `minimax-h3-flash`（480P、16:9）。图片产品选项只有画幅、1K/2K/4K 档位和参考图数量。配置保存在示例服务的本地 SQLite 中；文本模型在聊天输入框旁选择。
 
 每次委派只把任务说明传给子 Agent，子 Agent 使用自己的模型、提示词和当前会话启用的 Skill / MCP 应用，完成后只返回最终摘要。MCP 写操作继续复用宿主的 `ToolConfirmations`，因此允许、拒绝、停止和超时都在服务端生效；NDJSON 工具事件包含 `runId`、`parentRunId` 和 `agentId`，现有侧栏会显示委派、执行和审批状态。Agent 配置保存在 `.local/agent-chat-drama/data.sqlite`，不会写入浏览器存储。
 
@@ -439,7 +457,7 @@ import { InteractiveConfirmDialog } from '@darl/ui';
 - `open/onOpenChange`：受控弹窗开关；`title/description`：标题与描述；`questions`：按顺序展示的问题数组（`id` 必须唯一）。
 - `type`：`single` 单选、`multiple` 多选、`text` 单行文本、`textarea` 多行文本；选择题使用 `options: { value, label, description?, disabled? }[]`。
 - `required` 默认为否，`defaultValue` 提供初始答案；`placeholder` 设置输入提示。
-- 默认只显示确认按钮；需要额外的取消按钮时传入 `showCancel`，并可用 `confirmText/cancelText` 配置文案。`onCancel` 响应所有关闭方式，包括 Esc、遮罩、关闭按钮和取消按钮；`accentColor/className` 可覆盖样式。
+- 默认只显示确认按钮；需要额外的取消按钮时传入 `showCancel`，并可用 `confirmText/cancelText` 配置文案。`cancelVariant` 可为取消按钮选择 Button 变体（例如 `destructive` 显示危险红色），`onCancel` 响应所有关闭方式，包括 Esc、遮罩、关闭按钮和取消按钮；`accentColor/className` 可覆盖样式。
 - `onConfirm(answers)` 返回 `Record<questionId, string | string[]>`；多选始终是数组，输入题始终是字符串。支持 Promise：处理中禁用按钮，失败保留答案并显示错误；成功后由宿主关闭弹窗并恢复 Agent。
 
 Playground：`/#confirm-dialog`（含原著改编确认示例及模拟提交失败）。

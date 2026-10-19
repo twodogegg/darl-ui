@@ -8,6 +8,8 @@ const initialProviders: ModelProvider[] = [{
   id: 'darl', name: 'Darl Gateway', baseUrl: 'https://api.darl.cn/v1', protocol: 'openai-completions', hasApiKey: true, status: 'connected', models: [
     { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4 Flash', providerId: 'darl', type: 'text', reasoningEfforts: ['低', '中'], enabled: true },
     { id: 'gpt-image-2', name: 'GPT Image 2', providerId: 'darl', type: 'image', enabled: true },
+    { id: 'gpt-image-2.5-sunburst', name: 'GPT Image 2.5', providerId: 'darl', type: 'image', enabled: true },
+    { id: 'gemini-3-pro-image-preview', name: 'Gemini 3 Pro Image Preview', providerId: 'darl', type: 'image', enabled: true },
     { id: 'minimax-h3-flash', name: 'MiniMax H3 Flash', providerId: 'darl', type: 'video', enabled: true },
   ],
 }];

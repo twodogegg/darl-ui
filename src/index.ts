@@ -8,6 +8,8 @@ export type { CompareVideo, VideoCompareLayout, VideoCompareProps } from './comp
 export { MediaWorkspace } from './components/media-workspace/MediaWorkspace';
 export type { BaseCapabilities, BaseDefaults, ImageModel, VideoModel, MediaModel, MediaInput, MediaReferences, MediaGenerationMode, MediaRoute, MediaRouteStrategy, GenerateRequest, MediaResult, MediaBatch, MediaTask, MediaWorkspaceProps } from './components/media-workspace/types';
 export { AgentSidebar } from './components/agent-sidebar/AgentSidebar';
+export { AgentPlaza } from './components/agent-plaza/AgentPlaza';
+export type { AgentPlazaProps } from './components/agent-plaza/AgentPlaza';
 export { SkillManager } from './components/agent-sidebar/SkillManager';
 export { importSkillPackage, parseSkillMarkdown, skillMarkdown, newSkillDraft } from './components/agent-sidebar/skill-package';
 export type { AgentSidebarProps, AgentApplication, AgentAttachment, AgentErrorInfo, AgentErrorStage, AgentExecutionEvent, AgentExecutionSource, AgentExecutionStatus, AgentImageAttachment, AgentMessage, AgentModel, AgentSession, AgentSkill, AgentSkillDraft, AgentSkillResource, AgentTool, AgentToolCall, AgentSendRequest, AgentMessageRole, AgentToolStatus } from './components/agent-sidebar/types';
@@ -17,7 +19,7 @@ export { ModelSettingsCard } from './components/settings/ModelSettingsCard';
 export { ModelManagementCard } from './components/settings/ModelManagementCard';
 export { AgentSettingsCard } from './components/settings/AgentSettingsCard';
 export type { AgentSettingsCardProps } from './components/settings/types';
-export type { AgentChildContextMode, AgentConfig, AgentContextPolicy, AgentHistoryMode, AgentsSettingsCardProps, AgentModelCapabilities, AgentModelConfig, AgentModelType, AgentToolResultMode, ModelProvider, ModelProviderProtocol, ModelProviderStatus, ModelSettingsCardProps, ModelManagementCardProps, SettingsPageProps, SettingsSection } from './components/settings/types';
+export type { AgentChildContextMode, AgentConfig, AgentContextPolicy, AgentHistoryMode, AgentSource, AgentType, AgentContextStrategy, AgentsSettingsCardProps, AgentModelCapabilities, AgentModelConfig, AgentModelType, AgentToolResultMode, ModelProvider, ModelProviderProtocol, ModelProviderStatus, ModelSettingsCardProps, ModelManagementCardProps, SettingsPageProps, SettingsSection } from './components/settings/types';
 export { BUILTIN_MODELS, BUILTIN_PROTOCOLS, BUILTIN_TEMPLATES, defaultModelConfiguration, effectiveCapabilities, enabledBindings, mediaCapabilities, resolveCapabilities, toAgentModels, toMediaModels, validateModelConfiguration } from './components/settings/model-config';
 export type { AudioCapabilities, CapabilityOverride, CapabilityTemplate, CapabilityTemplateType, CapabilityValues, FirstLastFrameSupport, ImageCapabilities, LogicalModel, ModelBinding, ModelConfiguration, ModelConfigurationError, ProtocolAdapterDefinition, TextCapabilities, VideoCapabilities, VideoGenerationMode } from './components/settings/model-config';
 export { StyleSelector } from './components/style-selector/StyleSelector';

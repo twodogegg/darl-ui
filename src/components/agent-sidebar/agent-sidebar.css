@@ -160,12 +160,15 @@
 .darl-agent-manager-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; padding: 12px 12px 8px; }
 .darl-agent-manager-actions .darl-button { flex: 1; }
 .darl-agent-manager-search { display: flex; align-items: center; gap: 6px; height: 32px; margin: 0 12px 8px; padding: 0 8px; border: 1px solid var(--darl-agent-border); border-radius: 7px; background: var(--darl-agent-bg); color: var(--darl-agent-muted); }
-.darl-agent-skill-import-preview { display: grid; gap: 3px; margin: 0 12px 8px; padding: 9px; border: 1px solid color-mix(in srgb, var(--darl-agent-skill) 30%, var(--darl-agent-border)); border-radius: 8px; background: color-mix(in srgb, var(--darl-agent-skill) 7%, var(--darl-agent-bg)); font-size: 10px; }
-.darl-agent-skill-import-preview strong { color: var(--darl-agent-skill); font-size: 9px; letter-spacing: .08em; }
-.darl-agent-skill-import-preview b { font-size: 11px; }
-.darl-agent-skill-import-preview span, .darl-agent-skill-import-preview small { color: var(--darl-agent-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.darl-agent-skill-import-preview > div { display: flex; gap: 5px; padding-top: 4px; }
-.darl-agent-skill-import-preview .darl-button { min-height: 26px; padding: 0 7px; font-size: 10px; }
+.darl-agent-skill-conflict-overlay { position: fixed; z-index: 90; inset: 0; background: rgb(2 6 23 / 55%); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+.darl-agent-skill-conflict { --darl-agent-bg: var(--darl-background, #fff); --darl-agent-text: var(--darl-text, #0f172a); --darl-agent-muted: var(--darl-muted, #64748b); --darl-agent-border: var(--darl-border, #e2e8f0); --darl-agent-danger: var(--darl-danger, #dc2626); position: fixed; z-index: 91; top: 50%; left: 50%; display: grid; gap: 6px; width: min(400px, calc(100vw - 32px)); padding: 20px; border: 1px solid var(--darl-agent-border, #e2e8f0); border-radius: 14px; background: var(--darl-agent-bg, #fff); color: var(--darl-agent-text, #0f172a); box-shadow: 0 24px 70px rgb(2 6 23 / 35%); transform: translate(-50%, -50%); }
+.darl-agent-skill-conflict-icon { display: grid; place-items: center; width: 36px; height: 36px; margin-bottom: 4px; border-radius: 50%; background: color-mix(in srgb, var(--darl-danger, #dc2626) 14%, transparent); color: var(--darl-danger, #dc2626); }
+.darl-agent-skill-conflict-icon svg { width: 18px; height: 18px; }
+.darl-agent-skill-conflict-title { margin: 0; font-size: 17px; font-weight: 650; }
+.darl-agent-skill-conflict-text { margin: 0; color: var(--darl-agent-muted, #64748b); font-size: 12px; line-height: 1.65; }
+.darl-agent-skill-conflict-error { margin: 0; color: var(--darl-danger, #dc2626); font-size: 11px; }
+.darl-agent-skill-conflict-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.darl-agent-skill-conflict-actions .darl-button { min-width: 84px; }
 .darl-agent-manager-search svg { width: 14px; height: 14px; }
 .darl-agent-manager-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--darl-agent-text); font-size: 11px; }
 .darl-agent-manager-filters { display: flex; gap: 3px; padding: 0 12px 8px; overflow-x: auto; }
@@ -278,3 +281,19 @@
 .darl-agent-confirm-details span { font-size: 13px; overflow-wrap: anywhere; text-align: right; white-space: pre-wrap; }
 .darl-agent-confirm-input { display: grid; gap: 6px; min-width: 0; }
 .darl-agent-confirm-input pre { margin: 0; padding: 12px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--darl-confirm-border, #ddd); border-radius: 8px; font-size: 12px; }
+
+/* Media generation approval: readable fields instead of a raw JSON tool payload. */
+.darl-agent-media-confirm { width: min(520px, calc(100vw - 32px)); }
+.darl-media-confirm { display: grid; gap: 18px; min-width: 0; }
+.darl-media-confirm-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 8px; margin: 0; }
+.darl-media-confirm-summary > div { display: grid; gap: 5px; min-width: 0; padding: 10px 12px; border: 1px solid var(--darl-confirm-border, #ddd); border-radius: 9px; background: color-mix(in srgb, var(--darl-confirm-bg, #fff) 68%, var(--darl-confirm-border, #ddd)); }
+.darl-media-confirm-summary dt { color: var(--darl-confirm-muted, #666); font-size: 11px; line-height: 1.4; }
+.darl-media-confirm-summary dd { margin: 0; overflow-wrap: anywhere; color: var(--darl-confirm-text, #111); font-size: 13px; font-weight: 550; line-height: 1.45; }
+.darl-media-confirm-prompt { display: grid; gap: 7px; min-width: 0; }
+.darl-media-confirm-prompt > span { color: var(--darl-confirm-muted, #666); font-size: 12px; font-weight: 500; }
+.darl-media-confirm-prompt > p { max-height: 168px; overflow: auto; margin: 0; padding: 12px; border: 1px solid var(--darl-confirm-border, #ddd); border-radius: 9px; background: var(--darl-confirm-bg, #fff); color: var(--darl-confirm-text, #111); font-size: 13px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.darl-media-confirm .darl-confirm-error { margin: 0; }
+.darl-media-confirm .darl-confirm-status { margin: 0; color: var(--darl-confirm-muted, #666); font-size: 12px; }
+@media (max-width: 640px) {
+  .darl-media-confirm-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

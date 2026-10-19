@@ -39,6 +39,12 @@
 .darl-confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
 .darl-confirm-actions .darl-button { min-height: 42px; }
 .darl-confirm-actions .darl-button--default { background: var(--darl-confirm-accent); color: var(--darl-confirm-accent-foreground); }
+.darl-confirm-actions .darl-button--destructive { background: var(--darl-danger, #dc2626); border-color: var(--darl-danger, #dc2626); color: #fff; }
+.darl-confirm-actions .darl-button--destructive:hover:not(:disabled) { filter: brightness(.92); }
+/* Approval actions: green confirms, red rejects. Hosts can override both via the CSS variables. */
+.darl-agent-approval-confirm { --darl-confirm-approve: #16a34a; --darl-confirm-approve-foreground: #fff; }
+.darl-agent-approval-confirm .darl-confirm-actions .darl-button--default { background: var(--darl-confirm-approve); color: var(--darl-confirm-approve-foreground); }
+.darl-agent-approval-confirm .darl-confirm-actions .darl-button--default:hover:not(:disabled) { filter: brightness(.94); }
 .darl-confirm-sr { position: absolute; height: 1px; width: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
 @keyframes darl-confirm-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (max-width: 640px) {

@@ -151,6 +151,7 @@ interface CachedConnection {
   controller: AbortController;
   promise: Promise<McpConnection>;
   connection?: McpConnection;
+  lastUsedAt: number;
 }
 
 /** Process-local MCP connection and tool-directory cache scoped by user/session. */
@@ -161,14 +162,18 @@ export class McpConnectionManager {
 
   async get(scopeKey: string, app: McpApplicationConfig, signal: AbortSignal) {
     signal.throwIfAborted();
+    await Promise.all([...this.entries].flatMap(([key, entry]) => Date.now() - entry.lastUsedAt > 30 * 60_000 ? [this.invalidateKey(key, entry)] : []));
     const key = `${scopeKey}\u0000${app.id}`;
     const fingerprint = applicationConfigFingerprint(app);
     const existing = this.entries.get(key);
-    if (existing && existing.fingerprint === fingerprint) return existing.promise;
+    if (existing && existing.fingerprint === fingerprint) {
+      existing.lastUsedAt = Date.now();
+      return existing.promise;
+    }
     if (existing) await this.invalidateKey(key, existing);
 
     const controller = new AbortController();
-    const entry = { appId: app.id, fingerprint, controller } as CachedConnection;
+    const entry = { appId: app.id, fingerprint, controller, lastUsedAt: Date.now() } as CachedConnection;
     const promise = this.connect(app, controller.signal).then((connection) => {
       const current = this.entries.get(key);
       if (!current || current.promise !== promise) {
@@ -214,6 +219,25 @@ export class McpConnectionManager {
   }
 }
 
+/** Keep MCP images available to the UI without placing base64 blocks into the model context. */
+export function projectMcpToolResult(result: { content?: unknown; structuredContent?: unknown; isError?: boolean }, apiKey = '') {
+  const blocks: Array<{ type?: string; mimeType?: string; data?: string; [key: string]: unknown }> =
+    Array.isArray(result.content) ? result.content : [];
+  const images = blocks.flatMap((block) =>
+    block?.type === 'image' && typeof block.data === 'string' && typeof block.mimeType === 'string'
+      ? [{ type: 'image' as const, mimeType: block.mimeType, data: block.data }]
+      : [],
+  );
+  const content = blocks.map((block) => {
+    if (block?.type === 'image' || block?.type === 'audio') return { type: block.type, mimeType: block.mimeType, text: '二进制媒体内容未传给文本模型' };
+    return block;
+  });
+  const json = JSON.stringify({ content, ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}), isError: result.isError === true });
+  if (json.length > 200_000) throw new Error('工具结果超过 200KB，请缩小查询范围');
+  const modelResult = JSON.parse(apiKey ? json.split(apiKey).join('[已隐藏]') : json) as { content: unknown[]; structuredContent?: unknown; isError: boolean };
+  return { ...modelResult, images };
+}
+
 export async function connectApplication(app: McpApplicationConfig, signal: AbortSignal, callbackUrl = MCP_OAUTH_CALLBACK_URL) {
   const oauthProvider = !app.apiKey && app.oauth?.tokens
     ? createMcpOAuthProvider(app, () => { throw new Error('MCP OAuth 已过期，请在设置中重新授权'); }, undefined, callbackUrl)
@@ -247,14 +271,7 @@ export async function connectApplication(app: McpApplicationConfig, signal: Abor
     if (new Set(tools.map((tool) => tool.name)).size !== tools.length) throw new Error('MCP 返回重复的工具名称');
     return { app, tools, close, call: async (name: string, args: Record<string, unknown>, callSignal = signal) => {
       const result = await client.callTool({ name, arguments: args }, undefined, { signal: AbortSignal.any([signal, callSignal]), timeout: 60_000 });
-      // Strip server-only widget metadata and embedded base64 media from text-model context.
-      const content = Array.isArray(result.content) ? result.content.map((block) => {
-        if (block.type === 'image' || block.type === 'audio') return { type: block.type, mimeType: block.mimeType, text: '二进制媒体内容未传给文本模型' };
-        return block;
-      }) : [];
-      const json = JSON.stringify({ content, ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}), isError: result.isError === true });
-      if (json.length > 200_000) throw new Error('工具结果超过 200KB，请缩小查询范围');
-      return JSON.parse(app.apiKey ? json.split(app.apiKey).join('[已隐藏]') : json) as { content: unknown[]; structuredContent?: unknown; isError: boolean };
+      return projectMcpToolResult(result as { content?: unknown; structuredContent?: unknown; isError?: boolean }, app.apiKey);
     } };
   } catch (error) {
     await close().catch(() => {});

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { AgentSidebar, AgentsSettingsCard, DefaultModelSelector, DarlUIProvider, ModelManagementCard, SettingsPage, SkillManager, defaultModelConfiguration, toAgentModels, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentErrorInfo, type AgentExecutionEvent, type AgentToolCall, type AgentSendRequest, type AgentSession, type AgentSkill, type DefaultModelDraft, type DefaultModelOption, type DefaultModelSelection, type ModelConfiguration, type ModelProvider } from '@darl/ui';
-import { ArrowLeft, BookOpen, Bot, MessageSquare, Settings2, Sparkles, Wrench } from 'lucide-react';
+import { AgentPlaza, AgentSidebar, AgentsSettingsCard, DefaultModelSelector, DarlUIProvider, ModelManagementCard, SettingsPage, SkillManager, defaultModelConfiguration, toAgentModels, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentErrorInfo, type AgentExecutionEvent, type AgentToolCall, type AgentSendRequest, type AgentSession, type AgentSkill, type DefaultModelDraft, type DefaultModelOption, type DefaultModelSelection, type ModelConfiguration, type ModelProvider } from '@darl/ui';
+import { ArrowLeft, Blocks, BookOpen, Bot, MessageSquare, Settings2, Sparkles, Wrench } from 'lucide-react';
 import { Switch } from '../../../src/components/ui/FormControls';
 import type { AutoConfirmSettings } from '../server/approval-settings';
 import { lines } from '../stream';
@@ -9,6 +9,7 @@ import { ProjectsPage } from './ProjectsPage';
 import { MediaConcurrencySettings } from './MediaConcurrencySettings';
 import { MediaJobsPage } from './MediaJobsPage';
 import { McpSettings } from './McpSettings';
+import { ToolsSettings } from './ToolsSettings';
 import { toolHistoryForModel } from './message-history';
 
 const persistedSessions = (sessions: AgentSession[]) => sessions.map((session) => ({ ...session, messages: session.messages.map((message) => ({ ...message, attachments: message.attachments?.map((attachment) => typeof attachment === 'string' ? attachment : { ...attachment, url: attachment.url?.startsWith('data:') ? undefined : attachment.url }), toolCalls: message.toolCalls?.map(({ output: _output, ...call }) => call) })) }));
@@ -36,7 +37,9 @@ function recoverTimeline(timeline: AgentExecutionEvent[] | undefined) {
 }
 const newSession = (): AgentSession => ({ id: crypto.randomUUID(), title: '新对话', messages: [] });
 const defaultMediaModels: DefaultModelOption[] = [
-  { id: 'gpt-image-2', name: 'GPT Image 2', type: 'image', description: '图片生成模型', capabilities: { resolutions: ['1K', '2K', '4K'], aspectRatios: ['1:1', '3:4', '4:3', '16:9', '9:16'] }, defaults: { resolution: '2K', aspectRatio: '16:9' } },
+  { id: 'gpt-image-2', name: 'GPT Image 2', type: 'image', description: '图片生成模型', capabilities: { resolutions: ['1K', '2K', '4K'], aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'] }, defaults: { resolution: '2K', aspectRatio: '16:9' } },
+  { id: 'gpt-image-2.5', name: 'GPT Image 2.5', type: 'image', description: '图片生成模型', capabilities: { resolutions: ['1K', '2K', '4K'], aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'] }, defaults: { resolution: '2K', aspectRatio: '16:9' } },
+  { id: 'gemini-3-pro-image-preview', name: 'Gemini 3 Pro Image Preview', type: 'image', description: '图片生成模型', capabilities: { resolutions: ['1K', '2K', '4K'], aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'] }, defaults: { resolution: '2K', aspectRatio: '16:9' } },
   { id: 'minimax-h3-flash', name: 'MiniMax H3 Flash', type: 'video', description: '快速视频生成模型', capabilities: { resolutions: ['480P'], aspectRatios: ['16:9'] }, defaults: { resolution: '480P', aspectRatio: '16:9' } },
 ];
 const initialDefaultMediaSelection: DefaultModelDraft = {
@@ -79,6 +82,7 @@ export function App() {
   const [guide, setGuide] = useState(false);
   const [projectsVisible, setProjectsVisible] = useState(false);
   const [mediaJobsVisible, setMediaJobsVisible] = useState(false);
+  const [plazaVisible, setPlazaVisible] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
   const [hydrated, setHydrated] = useState(false);
@@ -294,16 +298,18 @@ export function App() {
   };
   const buttonClass = 'darl-button darl-button--outline darl-button-size--default';
   const skillsSettings = <section className="example-skills-settings" aria-labelledby="example-skills-settings-title"><header><div><span className="example-eyebrow">SKILL LIBRARY</span><h2 id="example-skills-settings-title">Skills</h2><p>所有 Skill 默认可用。模型可按 Skill 的 OpenAI policy 自动调用，也可以在聊天中手动 @ 引用。</p></div><button className={buttonClass} onClick={() => setSkillManagerOpen(true)}><Sparkles size={15} />管理 Skills</button></header><div className="example-skills-settings-summary"><strong>{skills.length} 个 Skill</strong><span>聊天侧栏只负责引用和上传，编辑、导入、收藏与删除统一在这里完成。</span></div>{skillManagerOpen && <SkillManager open skills={skills} onClose={() => setSkillManagerOpen(false)} onImport={saveSkill} onSave={saveSkill} onDelete={async (id) => { const next = skills.filter((skill) => skill.id !== id); await api('state', { sessions: persistedSessions(sessions), activeId, skills: next }); setSkills(next); }} onFavoriteChange={async (id, favorite) => { const skill = skills.find((item) => item.id === id); if (skill) await saveSkill({ ...skill, favorite }); }} />}</section>;
-  const showSettings = () => { setSettingsAgentId(null); setOpen(false); setGuide(false); setSettings(true); };
+  const showSettings = () => { setSettingsAgentId(null); setOpen(false); setGuide(false); setPlazaVisible(false); setSettings(true); };
   const editEpisodeAgent = (selectedAgentId: string) => {
     setSettingsAgentId(selectedAgentId);
     setSettingsSection('agents');
     setSettings(true);
     setGuide(false);
+    setPlazaVisible(false);
     setMediaJobsVisible(false);
     setOpen(false);
   };
   const showGuide = () => { setOpen(false); setSettings(false); setGuide(true); };
+  const showPlaza = () => { setOpen(false); setGuide(false); setSettings(false); setProjectsVisible(false); setMediaJobsVisible(false); setPlazaVisible(true); };
   const renameSession = (sessionId: string, title: string) => {
     setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, title, updatedAt: new Date().toLocaleString() } : session));
   };
@@ -338,10 +344,10 @@ export function App() {
 
   return <DarlUIProvider theme={{ mode: 'dark', primaryColor: '#8ba4c5' }} className="chat-example">
     <div className={`example-page ${open ? 'with-agent' : ''}`}>
-      <header className="example-header"><a href="http://localhost:5288">Darl UI <span>/ Agent Chat</span></a><div><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setProjectsVisible(false); setMediaJobsVisible(true); setOpen(true); }}>生成任务</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setMediaJobsVisible(false); setProjectsVisible(true); setOpen(true); }}><BookOpen size={16} />项目</button><button className={buttonClass} onClick={showGuide}><BookOpen size={16} />开发说明</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />设置</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setOpen((value) => !value); }}><MessageSquare size={16} />聊天</button></div></header>
+      <header className="example-header"><a href="http://localhost:5288">Darl UI <span>/ Agent Chat</span></a><div><button className={buttonClass} onClick={showPlaza}><Bot size={16} />Agent 广场</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setPlazaVisible(false); setProjectsVisible(false); setMediaJobsVisible(true); setOpen(true); }}>生成任务</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setPlazaVisible(false); setMediaJobsVisible(false); setProjectsVisible(true); setOpen(true); }}><BookOpen size={16} />项目</button><button className={buttonClass} onClick={showGuide}><BookOpen size={16} />开发说明</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />设置</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setPlazaVisible(false); setOpen((value) => !value); }}><MessageSquare size={16} />聊天</button></div></header>
       {error && <p className="example-error" role="alert">{error}</p>}
-      {projectsVisible && <ProjectsPage onBack={() => setProjectsVisible(false)} agents={agents} onEditAgent={editEpisodeAgent} hidden={settings} />}
-       {settings ? <main className="example-settings"><button className={buttonClass} onClick={() => { setSettings(false); setSettingsAgentId(null); setOpen(true); }}><ArrowLeft size={15} />{projectsVisible ? '返回项目' : '返回聊天'}</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'skills', label: 'Skills', icon: <Sparkles /> }, { id: 'agents', label: 'Agents', icon: <Bot /> }, { id: 'applications', label: '应用 / MCP', icon: <Wrench /> }, { id: 'approvals', label: '二次确认', icon: <Settings2 /> }]}>{settingsSection === 'agents' ? agentsSettings : settingsSection === 'skills' ? skillsSettings : settingsSection === 'applications' ? <McpSettings applications={applications} onChanged={() => setApplicationRevision((value) => value + 1)} /> : settingsSection === 'approvals' ? approvalSettings : modelSettings}</SettingsPage></main> : mediaJobsVisible ? <MediaJobsPage onBack={() => setMediaJobsVisible(false)} /> : projectsVisible ? null : guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : <main className="example-home"><span className="example-eyebrow">AGENT CHAT EXAMPLE</span><h1>让网站助手<br />真正开始工作。</h1><p>使用现有聊天 UI，连接真实模型。对话、历史和 Skills 保存在本机 SQLite。</p><div className="example-actions"><button className="darl-button darl-button--default darl-button-size--default" onClick={() => setOpen(true)}><MessageSquare size={16} />打开助手</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />模型设置</button></div><div className="example-info"><div><span>模型</span><strong>{models.find((model) => model.id === availableModelId)?.name || '尚未配置'}</strong></div><div><span>会话</span><strong>{sessions.length}</strong></div><div><span>Skills</span><strong>{skills.length}</strong></div></div><small>支持文本和图片消息与 MCP 工具调用。用 @ 引用一次即可在本对话持续使用；写入或未知工具执行前需要确认。Skill 指令会发送给模型，图片由支持视觉输入的模型处理。</small></main>}
+      {plazaVisible ? <main className="example-settings example-agent-plaza"><AgentPlaza agents={agents} selectedAgentId={agentId} onSelect={(agent) => { setAgentId(agent.id); setPlazaVisible(false); setOpen(true); }} /></main> : projectsVisible && <ProjectsPage onBack={() => setProjectsVisible(false)} agents={agents} onEditAgent={editEpisodeAgent} hidden={settings} />}
+       {settings ? <main className="example-settings"><button className={buttonClass} onClick={() => { setSettings(false); setSettingsAgentId(null); setOpen(true); }}><ArrowLeft size={15} />{projectsVisible ? '返回项目' : '返回聊天'}</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'tools', label: 'Tools', icon: <Wrench /> }, { id: 'skills', label: 'Skills', icon: <Sparkles /> }, { id: 'agents', label: 'Agents', icon: <Bot /> }, { id: 'applications', label: '应用 / MCP', icon: <Blocks /> }, { id: 'approvals', label: '二次确认', icon: <Settings2 /> }]}>{settingsSection === 'agents' ? agentsSettings : settingsSection === 'skills' ? skillsSettings : settingsSection === 'tools' ? <ToolsSettings /> : settingsSection === 'applications' ? <McpSettings applications={applications} onChanged={() => setApplicationRevision((value) => value + 1)} /> : settingsSection === 'approvals' ? approvalSettings : modelSettings}</SettingsPage></main> : mediaJobsVisible ? <MediaJobsPage onBack={() => setMediaJobsVisible(false)} /> : projectsVisible ? null : guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : <main className="example-home"><span className="example-eyebrow">AGENT CHAT EXAMPLE</span><h1>让网站助手<br />真正开始工作。</h1><p>使用现有聊天 UI，连接真实模型。对话、历史和 Skills 保存在本机 SQLite。</p><div className="example-actions"><button className="darl-button darl-button--default darl-button-size--default" onClick={() => setOpen(true)}><MessageSquare size={16} />打开助手</button><button className={buttonClass} onClick={showPlaza}><Bot size={16} />Agent 广场</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />模型设置</button></div><div className="example-info"><div><span>模型</span><strong>{models.find((model) => model.id === availableModelId)?.name || '尚未配置'}</strong></div><div><span>会话</span><strong>{sessions.length}</strong></div><div><span>Skills</span><strong>{skills.length}</strong></div></div><small>支持文本和图片消息与 MCP 工具调用。用 @ 引用一次即可在本对话持续使用；写入或未知工具执行前需要确认。Skill 指令会发送给模型，图片由支持视觉输入的模型处理。</small></main>}
     </div>
     <AgentSidebar open={open} onOpenChange={setOpen} sessions={sessions} activeSessionId={activeId} onSessionChange={setActiveId} onSessionRename={renameSession} onSessionDelete={deleteSession}
       onNewSession={() => { const session = newSession(); setSessions((current) => [session, ...current]); setActiveId(session.id); }}
