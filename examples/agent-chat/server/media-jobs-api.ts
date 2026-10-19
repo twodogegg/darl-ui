@@ -7,8 +7,8 @@ import { effectiveCapabilities, type ModelConfiguration } from '../../../src/com
 import { persistMediaReferences } from './media-references';
 import type { StoredProvider } from './models';
 import type { MediaStyleOption } from '../../../src/components/media-workspace/types';
+import { isLocalOrLanAddress } from './local-access';
 
-const localhost = new Set(['127.0.0.1','::1','::ffff:127.0.0.1']);
 /** Base64 reference images travel through this JSON endpoint. */
 const MAX_MEDIA_BODY = 128 * 1024 * 1024;
 function reply(res: ServerResponse,status:number,data:unknown) {
@@ -44,7 +44,7 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
   const handle=async(req:IncomingMessage,res:ServerResponse):Promise<boolean>=>{
     const path=new URL(req.url||'/', 'http://localhost').pathname;
     if(!path.startsWith('/api/media-generation/'))return false;
-    if(!localhost.has(req.socket.remoteAddress||'')){reply(res,403,{error:'生成任务 API 仅允许本机调用'});return true;}
+    if(!isLocalOrLanAddress(req.socket.remoteAddress)){reply(res,403,{error:'生成任务 API 仅允许本机或同一局域网调用'});return true;}
     const method=req.method||'GET';
     try{
       if(path==='/api/media-generation/jobs' && method==='GET'){

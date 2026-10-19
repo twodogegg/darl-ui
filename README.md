@@ -29,7 +29,7 @@ npm run dev
 
 **项目模块无需配置 PROJECT_API_BASE_URL、PROJECT_API_TOKEN，也不依赖旧网站的 FastAPI/MySQL。** Agent Chat 现有的 Node 服务处理项目接口；项目记录、风格以及上传的封面图片，统一存入 .local/agent-chat/data.sqlite。执行 npm run dev 即可启动，不需要第二个后端。
 
-项目创建后默认没有剧集。本期不包括剧集管理、剧本改编、图片 AI 生成或资产提取。项目 API 当前只允许本机访问，适用于单用户本地开发，不适合未经认证直接暴露公网。AGENT_CHAT_API_KEY 只用于真实模型聊天，不是项目模块的前置条件。
+项目创建后默认没有剧集。本期不包括剧集管理、剧本改编、图片 AI 生成或资产提取。项目 API 当前允许本机与同一局域网私有网段访问，适用于单用户本地开发，不适合未经认证直接暴露公网。AGENT_CHAT_API_KEY 只用于真实模型聊天，不是项目模块的前置条件。
 
 ### Sub Agent 持续会话（Agent Chat）
 
@@ -84,7 +84,7 @@ MCP 连接由宿主示例的服务端管理。将配置保存为 Git 忽略的 `
 - MCP 凭证不返回浏览器。原始工具结果只回传给模型，聊天界面和会话历史保存调用摘要；仅待确认操作向界面发送参数。
 - 当前只支持 Streamable HTTP 和可选 Bearer 凭证；OAuth、stdio、旧版 HTTP+SSE、MCP Apps 内嵌界面及文件授权尚未接入。示例仍仅供本机开发，生产环境的用户身份、会话存储和工具权限由宿主提供。
 
-单独启动：`npm run dev:agent-chat`；仅启动组件站：`npm run dev:playground`。示例服务仅监听本机，用于开发验证。`npm run build:agent-chat` 只构建前端到 `dist/agent-chat`，生产部署需由宿主提供 API、鉴权和存储。
+单独启动：`npm run dev:agent-chat`；仅启动组件站：`npm run dev:playground`。示例服务监听 `0.0.0.0`，「项目」「媒体生成」等本地数据 API 只接受本机与同一局域网私有网段（10/8、172.16/12、192.168/16、169.254/16）的调用，公网地址一律返回 403。`npm run build:agent-chat` 只构建前端到 `dist/agent-chat`，生产部署需由宿主提供 API、鉴权和存储。
 
 构建完整项目：
 
