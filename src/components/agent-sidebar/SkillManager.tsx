@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { Check, FileText, FolderOpen, Plus, Search, Sparkles, Star, Trash2, Upload, X } from 'lucide-react';
+import { Check, FileText, FolderOpen, Plus, Search, Sparkles, Star, Trash2, TriangleAlert, Upload, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Switch } from '../ui/FormControls';
 import type { AgentSkill, AgentSkillResource } from './types';
 import { importSkillPackage, newSkillDraft, nextSkillVersion, validateSkill } from './skill-package';
 
 type Filter = 'all' | 'favorite' | 'mine' | 'builtin';
+type ImportConflict = { preview: AgentSkill; existing: AgentSkill };
+const skillNameKey = (name: string) => name.trim().toLocaleLowerCase();
 
 export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport, onFavoriteChange }: {
   open: boolean;
@@ -24,7 +26,9 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
   const [resourcePath, setResourcePath] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [importPreview, setImportPreview] = useState<AgentSkill | null>(null);
+  const [importConflict, setImportConflict] = useState<ImportConflict | null>(null);
+  const [importConflictError, setImportConflictError] = useState('');
+  const [importConflictBusy, setImportConflictBusy] = useState(false);
   const importInput = useRef<HTMLInputElement>(null);
   const importFolderInput = useRef<HTMLInputElement>(null);
 
@@ -51,6 +55,9 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
     setResourcePath(null);
     setError('');
     setNotice('');
+    setImportConflict(null);
+    setImportConflictError('');
+    setImportConflictBusy(false);
     // The manager is intentionally reset only when it opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -103,34 +110,53 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
       setError(reason instanceof Error ? reason.message : '删除 Skill 失败');
     }
   };
-  const importFiles = async (files: File[]) => {
-    if (!files.length) return;
-    try {
-      const imported = await importSkillPackage(files);
-      setImportPreview(imported);
-      setNotice(`已读取“${imported.name}”，请确认导入。`);
-      setError('');
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '导入 Skill 失败');
+  const commitImport = async (preview: AgentSkill, existing?: AgentSkill) => {
+    const imported: AgentSkill = existing
+      ? { ...preview, id: existing.id, favorite: existing.favorite, scope: 'custom', updatedAt: new Date().toISOString() }
+      : preview;
+    if (existing) {
+      setImportConflictBusy(true);
+      setImportConflictError('');
     }
-  };
-  const confirmImport = async () => {
-    if (!importPreview) return;
-    const originalName = importPreview.name;
-    let name = originalName;
-    let suffix = 1;
-    while (skills.some((skill) => skill.name.toLocaleLowerCase() === name.toLocaleLowerCase())) name = `${originalName}（导入 ${suffix++}）`;
-    const imported = { ...importPreview, name };
     try {
       await onImport(imported);
       setSelectedId(imported.id);
       setDraft(imported);
       setResourcePath(null);
-      setImportPreview(null);
-      setNotice(`已导入“${imported.name}”。`);
+      setImportConflict(null);
+      setImportConflictError('');
+      setNotice(existing ? `已覆盖“${imported.name}”。` : `已导入“${imported.name}”。`);
+      setError('');
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : '导入 Skill 失败';
+      if (existing) setImportConflictError(message);
+      else setError(message);
+    } finally {
+      if (existing) setImportConflictBusy(false);
+    }
+  };
+  const importFiles = async (files: File[]) => {
+    if (!files.length) return;
+    setError('');
+    setImportConflictError('');
+    try {
+      const imported = await importSkillPackage(files);
+      const key = skillNameKey(imported.name);
+      const existing = skills.find((skill) => skillNameKey(skill.name) === key);
+      if (existing) {
+        setImportConflict({ preview: imported, existing });
+        return;
+      }
+      await commitImport(imported);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '导入 Skill 失败');
     }
+  };
+  const cancelImport = () => {
+    setImportConflict(null);
+    setImportConflictError('');
+    setNotice('已取消导入。');
+    setError('');
   };
   const close = () => {
     if (dirty && !window.confirm('当前 Skill 有未保存修改，是否放弃？')) return;
@@ -158,8 +184,7 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
       </header>
       <div className="darl-agent-skill-manager-body">
         <aside className="darl-agent-skill-list-pane">
-          <div className="darl-agent-manager-actions"><Button variant="outline" size="sm" onClick={create}><Plus data-icon="inline-start" />新建</Button><Button variant="outline" size="sm" onClick={() => importInput.current?.click()}><Upload data-icon="inline-start" />导入</Button><Button variant="outline" size="sm" onClick={() => importFolderInput.current?.click()}><FolderOpen data-icon="inline-start" />文件夹</Button><input ref={importInput} type="file" hidden multiple accept=".md,.zip,text/markdown,application/zip" onChange={(event) => { void importFiles(Array.from(event.target.files || [])); event.currentTarget.value = ''; }} /><input ref={(node) => { importFolderInput.current = node; node?.setAttribute('webkitdirectory', ''); }} type="file" hidden multiple onChange={(event) => { void importFiles(Array.from(event.target.files || [])); event.currentTarget.value = ''; }} /></div>
-          {importPreview && <div className="darl-agent-skill-import-preview"><strong>导入预览</strong><b>{importPreview.name}</b><span>{importPreview.description}</span><small>{importPreview.resources?.length || 0} 个资源 · v{importPreview.version}</small><div><Button size="sm" onClick={() => void confirmImport()}>确认导入</Button><Button size="sm" variant="ghost" onClick={() => setImportPreview(null)}>取消</Button></div></div>}
+          <div className="darl-agent-manager-actions"><Button variant="outline" size="sm" onClick={create}><Plus data-icon="inline-start" />新建</Button><Button variant="outline" size="sm" onClick={() => importInput.current?.click()}><Upload data-icon="inline-start" />导入</Button><Button variant="outline" size="sm" onClick={() => importFolderInput.current?.click()}><FolderOpen data-icon="inline-start" />文件夹</Button><input ref={importInput} type="file" hidden multiple aria-label="导入 Skill 文件" accept=".md,.zip,text/markdown,application/zip" onChange={(event) => { void importFiles(Array.from(event.target.files || [])); event.currentTarget.value = ''; }} /><input ref={(node) => { importFolderInput.current = node; node?.setAttribute('webkitdirectory', ''); }} type="file" hidden multiple aria-label="导入 Skill 文件夹" onChange={(event) => { void importFiles(Array.from(event.target.files || [])); event.currentTarget.value = ''; }} /></div>
           <label className="darl-agent-manager-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 Skill" aria-label="搜索 Skill" /></label>
           <div className="darl-agent-manager-filters" role="tablist" aria-label="Skill 筛选">{([['all', '全部'], ['favorite', '收藏'], ['mine', '我的'], ['builtin', '内置']] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={filter === value} onClick={() => setFilter(value)}>{label}</button>)}</div>
           <div className="darl-agent-skill-list">{visible.map((skill) => <div key={skill.id} className={`darl-agent-skill-list-row${skill.id === selectedId ? ' is-selected' : ''}`}><button type="button" className="darl-agent-skill-list-main" onClick={() => select(skill)}><span className="darl-agent-skill-list-icon"><Sparkles /></span><span><strong>{skill.name || '未命名 Skill'}</strong><small>{skill.description || '暂无描述'}</small><em>{skill.scope === 'builtin' ? '内置' : '我的'}{skill.version ? ` · v${skill.version}` : ''}</em></span></button><button type="button" className="darl-agent-skill-favorite" aria-label={skill.favorite ? `取消收藏 ${skill.name}` : `收藏 ${skill.name}`} aria-pressed={skill.favorite ? 'true' : 'false'} onClick={() => void toggleFavorite(skill)}><Star fill={skill.favorite ? 'currentColor' : 'none'} /></button>{skill.id === selectedId && <Check className="darl-agent-skill-selected-check" />}</div>)}{!visible.length && <p className="darl-agent-empty">没有匹配的 Skill</p>}</div>
@@ -173,5 +198,20 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
         </section>
       </div>
       </DialogPrimitive.Content>
+      <DialogPrimitive.Root open={Boolean(importConflict)} onOpenChange={(nextOpen) => { if (!nextOpen && !importConflictBusy) cancelImport(); }}>
+        <DialogPrimitive.Overlay className="darl-agent-skill-conflict-overlay" />
+        <DialogPrimitive.Content className="darl-agent-skill-conflict" role="alertdialog" aria-describedby="darl-agent-skill-conflict-description">
+          <span className="darl-agent-skill-conflict-icon" aria-hidden="true"><TriangleAlert /></span>
+          <DialogPrimitive.Title className="darl-agent-skill-conflict-title">已存在同名 Skill</DialogPrimitive.Title>
+          <DialogPrimitive.Description id="darl-agent-skill-conflict-description" className="darl-agent-skill-conflict-text">
+            {importConflict && <>名为“{importConflict.existing.name}”的 Skill 已存在。覆盖后原有描述、指令和资源将被替换，且无法恢复。</>}
+          </DialogPrimitive.Description>
+          {importConflictError && <p className="darl-agent-skill-conflict-error" role="alert">{importConflictError}</p>}
+          <div className="darl-agent-skill-conflict-actions">
+            <Button variant="outline" size="sm" disabled={importConflictBusy} onClick={cancelImport}>取消导入</Button>
+            <Button variant="destructive" size="sm" disabled={importConflictBusy} onClick={() => { if (importConflict) void commitImport(importConflict.preview, importConflict.existing); }}>{importConflictBusy ? '覆盖中…' : '覆盖'}</Button>
+          </div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Root>
   </DialogPrimitive.Root>;
 }
