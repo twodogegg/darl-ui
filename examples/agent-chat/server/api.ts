@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AgentExecutionEvent, AgentSkill, AgentToolCall } from '../../../src/index';
 import { defaultModelConfiguration, effectiveCapabilities, enabledBindings, validateModelConfiguration, type ModelConfiguration } from '../../../src/components/settings/model-config';
@@ -13,6 +14,8 @@ import { SubAgentThreadLocks, continueSubAgentConversation } from './subagent-co
 import { handleWorkspaceProjectRequest } from './projects';
 import { ProjectStore } from './project-store';
 import { createMediaJobsApi } from './media-jobs-api';
+import { mediaTaskResult } from './media-job-store';
+import { createFailureLog } from './failure-log';
 import { DEFAULT_AUTO_CONFIRM, validateAutoConfirmSettings, shouldConfirmMcp, type AutoConfirmSettings } from './approval-settings';
 
 /** Resolve Agent models against the same enabled logical bindings used by the Models page. */
@@ -40,6 +43,29 @@ function resolveAgentTextModel(providers: StoredProvider[], configuration: Model
 
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_DATA_URL_LENGTH = 64 + 4 * Math.ceil(MAX_IMAGE_BYTES / 3);
+
+/**
+ * Builtin tools live here, not inside the chat request handler, so the Tools
+ * settings page can render the exact schema the model receives.
+ */
+export const MEDIA_TOOLS = [
+  { name: 'builtin_generate_media', description: '向后台提交一条图片或视频生成任务。图片支持 gpt-image-2（可用参考图编辑），视频支持 minimax-h3-flash。调用前必须明确用户的生成意图，提交遵循项目二次确认设置。返回任务 ID，不等待媒体完成。', parameters: { type: 'object', properties: {
+    modelId: { type: 'string', enum: ['gpt-image-2', 'minimax-h3-flash'] },
+    prompt: { type: 'string', minLength: 1, maxLength: 16000, description: '图片描述或编辑指令。改编用户提供的图片时，描述要改什么，不需要复述原图内容。' },
+    options: { type: 'object', properties: {
+      size: { type: 'string', description: '精确输出尺寸，格式 WIDTHxHEIGHT，例如 1024x1024。优先于 aspectRatio/resolution。' },
+      aspectRatio: { type: 'string', description: '画幅：1:1、3:4、4:3、2:3、3:2、16:9、9:16' },
+      resolution: { type: 'string', enum: ['1K', '2K', '4K'], description: '分辨率档位，与 aspectRatio 组合得到推荐尺寸。渠道不支持时会自动回退到最接近的可用尺寸。' },
+      count: { type: 'integer', minimum: 1, maximum: 10, description: '生成张数，默认 1' },
+      quality: { type: 'string', enum: ['auto', 'low', 'medium', 'high'] },
+      background: { type: 'string', enum: ['opaque', 'transparent', 'auto'] },
+      outputFormat: { type: 'string', enum: ['png', 'jpeg', 'webp'] },
+      references: { type: 'array', maxItems: 16, items: { type: 'string' }, description: '必填场景：当用户提供了图片 URL 或要求改编已有图片（改风格、换背景、换配色、保持人物/物体一致性）时，必须把该 URL 放进这个数组。不填则视为纯文生图，原图会被忽略。支持公网 HTTP(S) URL 或 data: URL。仅图片模型支持。' },
+      duration: { type: 'integer', minimum: 4, maximum: 15, description: '视频时长（秒），仅视频' },
+    }, additionalProperties: false } },
+  required: ['modelId','prompt'], additionalProperties: false } },
+  { name: 'builtin_get_media_task', description: '按后台生成任务 ID 查询图片或视频的真实状态与结果（含结果 URL、供应商原始返回）。不会触发新的付费生成。', parameters: { type: 'object', properties: { taskId: { type: 'string', minLength: 36, maxLength: 36 } }, required: ['taskId'], additionalProperties: false } },
+] as const;
 type DefaultMediaSelection = {
   image: { modelId: 'gpt-image-2'; resolution: '1K' | '2K' | '4K'; aspectRatio: '1:1' | '3:4' | '4:3' | '16:9' | '9:16' };
   video: { modelId: 'minimax-h3-flash'; resolution: '480P'; aspectRatio: '16:9' };
@@ -188,6 +214,7 @@ export function findAttachedImageForUpload(tool: McpToolDescriptor, args: Record
 
 export function createApi(directory: string, env: Record<string, string>, promptFile: string) {
   const storage = new LocalStorage(directory);
+  const logFailure = createFailureLog(join(directory, 'logs'));
   const subAgentLocks = new SubAgentThreadLocks();
   const projectStore = new ProjectStore(storage.path);
   const mediaJobs = createMediaJobsApi(storage.path, () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), () => storage.getConfig<StoredProvider[]>('providers') || []);
@@ -252,8 +279,8 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       const defaultAgent: StoredAgent = { ...savedDefault, id: 'default', name: savedDefault?.name || '网站助手', avatar: savedDefault?.avatar || '/agent-default-avatar.png', description: savedDefault?.description || '系统默认 Agent', type: 'main_agent', source: 'system_default', selectable: true, callable: true, contextStrategy: 'inherit_filtered', instructions: savedDefault?.instructions || await loadPrompt(), providerId: savedDefault?.providerId || defaultProvider?.id || 'darl', modelId: savedDefault?.modelId || defaultModel?.id || env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash', skillIds: [], contextPolicy: savedDefault?.contextPolicy || { childContext: 'task-only', historyMode: 'summary', toolResultMode: 'standard' }, enabled: true, isDefault: true, builtIn: true };
       const agents = [defaultAgent, ...configuredAgents.filter((agent) => agent.id !== defaultAgent.id)];
       const path = request.url.split('?')[0];
-      if (path === '/api/auto-confirm' && request.method === 'GET') return send(200, storage.getConfig<AutoConfirmSettings>('autoConfirm') || DEFAULT_AUTO_CONFIRM);
-      if (path === '/api/auto-confirm' && request.method === 'POST') {
+      if (path === '/api/tools' && request.method === 'GET') return send(200, MEDIA_TOOLS.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.parameters })));
+      if (path === '/api/auto-confirm' && request.method === 'GET') return send(200, storage.getConfig<AutoConfirmSettings>('autoConfirm') || DEFAULT_AUTO_CONFIRM);      if (path === '/api/auto-confirm' && request.method === 'POST') {
         const next = validateAutoConfirmSettings(await readBody(request));
         storage.setConfig('autoConfirm', next);
         return send(200, next);
@@ -559,39 +586,58 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           }
           const functions = ownedConnections.flatMap((connection, appIndex) => connection.tools.map((tool, index) => ({ name: `mcp_${appIndex}_${index}`, connection, tool })));
           if (functions.length > 128) throw new Error('所选应用合计超过 128 个工具，请减少应用数量');
-          const mediaTools = [
-            { name: 'builtin_generate_media', description: '向后台提交一条图片或视频生成任务。仅支持 gpt-image-2 图片和 minimax-h3-flash 视频。调用前必须明确用户的生成意图；提交遵循项目二次确认设置。返回任务 ID，不等待媒体完成。', parameters: { type: 'object', properties: { modelId: { type: 'string', enum: ['gpt-image-2', 'minimax-h3-flash'] }, prompt: { type: 'string', minLength: 1, maxLength: 16000 }, options: { type: 'object', properties: { size: { type: 'string' }, resolution: { type: 'string' }, aspectRatio: { type: 'string' }, duration: { type: 'integer' } }, additionalProperties: false } }, required: ['modelId','prompt'], additionalProperties: false } },
-            { name: 'builtin_get_media_task', description: '按后台生成任务 ID 查询图片或视频的真实状态与结果路径，不会触发新的付费生成。', parameters: { type: 'object', properties: { taskId: { type: 'string', minLength: 36, maxLength: 36 } }, required: ['taskId'], additionalProperties: false } },
-          ];
+          const mediaTools = MEDIA_TOOLS;
           const execution: ToolExecution = {
           tools: [...functions.map(({ name, connection, tool }) => ({ name, description: `${connection.app.name} / ${tool.title || tool.name} (${tool.name}): ${tool.description || ''}`, parameters: tool.inputSchema })), ...mediaTools],
           execute: async (request: { name: string; arguments: string }, toolSignal = signal) => {
             const callSignal = AbortSignal.any([signal, toolSignal]);
+            const emitBuiltinTool = (toolName: string, status: AgentToolCall['status'], extra: Partial<AgentToolCall> = {}) => {
+              const call: AgentToolCall = { id: crypto.randomUUID(), appId: 'builtin:media', appName: '媒体生成', toolName, status, runId: executionRunId, ...(ownerAgentId ? { agentId: ownerAgentId } : {}), ...extra };
+              emitTool(call);
+              return call;
+            };
+            /** Failed builtin calls need the same structured error card as MCP tools. */
+            const failBuiltin = (toolName: string, args: unknown, message: string, code: string, options: { retryable?: boolean; suggestion?: string; callId?: string } = {}) => {
+              const errorInfo = createAgentError('mcp-tool', new Error(message), { requestId, runId: executionRunId, parentRunId, code, message, retryable: options.retryable ?? false, suggestion: options.suggestion || '检查任务或媒体模型配置后重试。' });
+              const call: AgentToolCall = { id: options.callId || crypto.randomUUID(), appId: 'builtin:media', appName: '媒体生成', toolName, input: args, status: 'error', error: message, errorInfo, runId: executionRunId, ...(ownerAgentId ? { agentId: ownerAgentId } : {}) };
+              emitTool(call);
+              logFailure({ requestId, runId: executionRunId, parentRunId, agentId: ownerAgentId, toolCallId: call.id, appId: 'builtin:media', appName: '媒体生成', toolName, stage: errorInfo.stage, code: errorInfo.code, message });
+              return JSON.stringify({ isError: true, error: message });
+            };
+            const mediaFailure = (message: string, code: string, args: unknown, toolName: string) => failBuiltin(toolName, args, message, code);
             if (request.name === 'builtin_generate_media' || request.name === 'builtin_get_media_task') {
               const args = JSON.parse(request.arguments || '{}') as { modelId?: string; prompt?: string; options?: Record<string, unknown>; taskId?: string };
               if (request.name === 'builtin_get_media_task') {
                 const job = mediaJobs.store.get(String(args.taskId || ''));
-                if (!job) return JSON.stringify({ error: '任务不存在' });
-                return JSON.stringify({ id: job.id, status: job.status, modelId: job.modelId, error: job.error,
-                  ...(job.status === 'completed' ? { resultUrl: `/api/media-generation/jobs/${job.id}/file` } : {}) });
+                if (!job) return mediaFailure('任务不存在', 'MEDIA_TASK_NOT_FOUND', args, 'get_media_task');
+                const result = mediaTaskResult(job);
+                if (!result.failed) {
+                  emitBuiltinTool('get_media_task', 'success', { input: args, output: { id: job.id, status: job.status } });
+                  return result.body;
+                }
+                return failBuiltin('get_media_task', args, result.message, result.code, { retryable: true, suggestion: job.status === 'uncertain' ? '该任务可能已在供应商侧提交。请先核对供应商记录，再决定是否重新生成。' : '查看「生成任务」页的失败原因后重新生成。' });
               }
               if (!['gpt-image-2','minimax-h3-flash'].includes(String(args.modelId)) || typeof args.prompt !== 'string' || !args.prompt.trim() || args.prompt.length > 16000)
-                return JSON.stringify({ error: '模型或提示词参数无效' });
+                return mediaFailure('模型或提示词参数无效', 'MEDIA_ARGUMENT_INVALID', args, 'generate_media');
+              const options = args.options && typeof args.options === 'object' && !Array.isArray(args.options) ? args.options as Record<string, unknown> : {};
+              if (args.modelId === 'minimax-h3-flash' && options.references)
+                return mediaFailure('视频暂不支持参考图，请去掉 references 后重试', 'MEDIA_REFERENCE_UNSUPPORTED', args, 'generate_media');
               const model = modelConfiguration.models.find(item => item.id === args.modelId && item.enabled !== false);
               const bindings = model?.bindings.filter(item => item.enabled !== false) || [];
               const binding = bindings[0];
               const selectedProvider = providers.find(item => item.id === binding?.providerId);
-              if (bindings.length !== 1 || !selectedProvider?.apiKey) return JSON.stringify({ error: '该模型需要且只能配置一个有效供应商及密钥' });
+              if (bindings.length !== 1 || !selectedProvider?.apiKey) return mediaFailure('该模型需要且只能配置一个有效供应商及密钥', 'MEDIA_PROVIDER_UNAVAILABLE', args, 'generate_media');
               const autoConfirm = storage.getConfig<AutoConfirmSettings>('autoConfirm') || DEFAULT_AUTO_CONFIRM;
               const mediaNeedsConfirmation = !(args.modelId === 'gpt-image-2' ? autoConfirm.image : autoConfirm.video);
               const confirmId = crypto.randomUUID();
               const toolCall: AgentToolCall = { id: confirmId, appId: 'builtin:media', appName: '媒体生成', toolName: 'generate_media', input: args, status: 'confirmation', runId: executionRunId, ...(ownerAgentId ? { agentId: ownerAgentId } : {}) };
               if (mediaNeedsConfirmation) {
                 emitTool(toolCall);
-                if (!await confirmations.wait(confirmId, toolSignal)) return JSON.stringify({ error: '用户拒绝了此次付费媒体生成' });
+                if (!await confirmations.wait(confirmId, toolSignal)) {
+                  return failBuiltin('generate_media', args, '用户拒绝了此次付费媒体生成', 'MEDIA_CONFIRMATION_REJECTED', { retryable: false, suggestion: '如仍需生成，请重新发起并在确认弹窗中允许。', callId: confirmId });
+                }
               }
               toolSignal.throwIfAborted();
-              const options = args.options && typeof args.options === 'object' && !Array.isArray(args.options) ? args.options : {};
               const job = mediaJobs.store.create({ modelId: args.modelId as 'gpt-image-2'|'minimax-h3-flash',
                 type: args.modelId === 'gpt-image-2' ? 'image' : 'video', prompt: args.prompt.trim(), options,
                 providerId: selectedProvider.id, upstreamModelId: binding.upstreamModelId, baseUrl: selectedProvider.baseUrl });
@@ -655,6 +701,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
               if (result.isError) {
                 call.error = mcpResultError(result, connection.app.apiKey);
                 call.errorInfo = createAgentError('mcp-tool', new Error(call.error), { requestId, runId: executionRunId, parentRunId, key: connection.app.apiKey, code: 'MCP_TOOL_FAILED', message: call.error });
+                logFailure({ requestId, runId: executionRunId, parentRunId, agentId: ownerAgentId, toolCallId: call.id, appId: connection.app.id, appName: connection.app.name, toolName: call.toolName, attempt: call.attempt, stage: 'mcp-tool', code: call.errorInfo.code, message: call.error, durationMs: call.durationMs, secret: connection.app.apiKey });
               }
               emitImages(result.content);
               emitToolExecution(result.isError ? 'error' : 'success', { endedAt: call.endedAt, durationMs: call.durationMs, ...(call.errorInfo ? { error: call.errorInfo } : {}) });
@@ -679,6 +726,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
               }
               call.error = error instanceof AgentFailure ? error.message : 'MCP 工具调用失败，请检查应用状态后重试';
               call.errorInfo = createAgentError(error instanceof AgentFailure ? error.stage : 'mcp-tool', error, { requestId, runId: executionRunId, parentRunId, key: connection.app.apiKey, ...(error instanceof AgentFailure ? { code: error.code, retryable: error.retryable, suggestion: error.suggestion } : {}) });
+              logFailure({ requestId, runId: executionRunId, parentRunId, agentId: ownerAgentId, toolCallId: call.id, appId: connection.app.id, appName: connection.app.name, toolName: call.toolName, attempt: call.attempt, stage: call.errorInfo.stage, code: call.errorInfo.code, message: error instanceof Error ? `${error.message}${error.cause instanceof Error ? ` / ${error.cause.message}` : ''}` : String(error), durationMs: call.durationMs, secret: connection.app.apiKey });
               emitToolExecution('error', { endedAt: call.endedAt, durationMs: call.durationMs, error: call.errorInfo });
               emitTool(call);
               if (callSignal.aborted) throw error;

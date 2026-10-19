@@ -78,6 +78,7 @@ MCP 连接由宿主示例的服务端管理。将配置保存为 Git 忽略的 `
 `apiKey` 可省略，用于无需鉴权的服务；URL 不接受内嵌凭证或查询参数。`readOnlyTools` 是宿主核实后的只读工具名单，无需这类覆盖时省略。工具 schema、名称和参数从 MCP 动态发现，设置 → 应用 / MCP 可查看连接状态和重新连接。聊天中用 `@` 引用一次应用，其工具在该对话后续消息中持续可用；服务端根据用户消息中的应用引用，每轮重新提供工具定义。刷新恢复后仍有效，新对话不继承，重新生成仅使用该轮之前的历史；已从服务端配置移除的历史应用会被忽略。同名工具通过服务端命名空间区分。询问应用用途或用法时，默认依据工具目录简短回答；只有明确需要真实数据或执行操作时才调用工具，避免额外浏览示例素材和无关文档。
 
 - 模型的 Chat Completions 和 Responses 两种协议均支持工具调用，最多 8 轮、合计最多 128 个工具。工具失败会回传模型，界面以紧凑记录展示应用、工具名和状态，不展开原始参数和结果；执行确认时展示待确认参数。
+- 工具失败在服务端同时写入 stderr 和 `.local/agent-chat/logs/failure.log`（每行一条 JSON，含 requestId、runId、toolCallId、错误码、耗时，凭证会被脱敏），便于在浏览器之外回溯失败原因。
 - 「设置 → 二次确认」可分别开启图片、视频与普通 MCP 工具的免确认开关；默认为关闭，保存在本机 SQLite。主 Agent 与子 Agent 复用这些开关；MCP `destructiveHint` 标记的破坏性工具始终要求确认。图片、视频与 MCP 共用 `InteractiveConfirmDialog` 弹窗，拒绝/停止/超时不会触发待批准的调用。
 - 默认情况下，除标记为只读或经宿主核实列入 `readOnlyTools` 的工具外，其他 MCP 调用均等待用户允许或拒绝。确认在服务端执行，停止、断连、超时后失效，不因刷新自动重试写操作。
 - MCP 凭证不返回浏览器。原始工具结果只回传给模型，聊天界面和会话历史保存调用摘要；仅待确认操作向界面发送参数。
@@ -454,7 +455,7 @@ import { InteractiveConfirmDialog } from '@darl/ui';
 - `open/onOpenChange`：受控弹窗开关；`title/description`：标题与描述；`questions`：按顺序展示的问题数组（`id` 必须唯一）。
 - `type`：`single` 单选、`multiple` 多选、`text` 单行文本、`textarea` 多行文本；选择题使用 `options: { value, label, description?, disabled? }[]`。
 - `required` 默认为否，`defaultValue` 提供初始答案；`placeholder` 设置输入提示。
-- 默认只显示确认按钮；需要额外的取消按钮时传入 `showCancel`，并可用 `confirmText/cancelText` 配置文案。`onCancel` 响应所有关闭方式，包括 Esc、遮罩、关闭按钮和取消按钮；`accentColor/className` 可覆盖样式。
+- 默认只显示确认按钮；需要额外的取消按钮时传入 `showCancel`，并可用 `confirmText/cancelText` 配置文案。`cancelVariant` 可为取消按钮选择 Button 变体（例如 `destructive` 显示危险红色），`onCancel` 响应所有关闭方式，包括 Esc、遮罩、关闭按钮和取消按钮；`accentColor/className` 可覆盖样式。
 - `onConfirm(answers)` 返回 `Record<questionId, string | string[]>`；多选始终是数组，输入题始终是字符串。支持 Promise：处理中禁用按钮，失败保留答案并显示错误；成功后由宿主关闭弹窗并恢复 Agent。
 
 Playground：`/#confirm-dialog`（含原著改编确认示例及模拟提交失败）。

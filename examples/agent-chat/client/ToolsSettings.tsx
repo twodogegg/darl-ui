@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, ChevronDown, CircleAlert, Search, ShieldCheck, Wrench } from 'lucide-react';
 
 type JsonSchema = Record<string, unknown>;
@@ -16,43 +16,28 @@ type ToolDescriptor = {
   source: 'builtin';
 };
 
-const builtinTools: ToolDescriptor[] = [
-  {
-    name: 'builtin_generate_media',
-    title: '提交媒体生成任务',
-    description: '向后台提交一条图片或视频生成任务。仅支持 gpt-image-2 图片和 minimax-h3-flash 视频。调用前必须明确用户的生成意图，提交遵循项目二次确认设置。返回任务 ID，不等待媒体完成。',
-    risk: 'write',
+/** Presentation only; name, description and schema come from the server. */
+const PRESENTATION: Record<string, { title: string; risk: ToolRisk; actions: string }> = {
+  builtin_generate_media: { title: '提交媒体生成任务', risk: 'write', actions: '需要有效的媒体模型绑定；图片和视频可在二次确认设置中调整。' },
+  builtin_get_media_task: { title: '查询媒体任务状态', risk: 'read', actions: '只读取本机媒体任务，不会创建新的生成任务。' },
+};
+
+/** The same MEDIA_TOOLS the model receives, so this page cannot drift from it. */
+type ServerTool = { name: string; description?: string; inputSchema?: JsonSchema };
+
+function descriptor(tool: ServerTool): ToolDescriptor {
+  const meta = PRESENTATION[tool.name] ?? { title: tool.name, risk: 'write', actions: '' };
+  return {
+    name: tool.name,
+    title: meta.title,
+    description: tool.description,
+    risk: meta.risk,
+    inputSchema: tool.inputSchema,
     appId: 'builtin:media',
     appName: '内置 / 媒体生成',
     source: 'builtin',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        modelId: { type: 'string', enum: ['gpt-image-2', 'minimax-h3-flash'] },
-        prompt: { type: 'string', minLength: 1, maxLength: 16000 },
-        options: {
-          type: 'object',
-          properties: { size: { type: 'string' }, resolution: { type: 'string' }, aspectRatio: { type: 'string' }, duration: { type: 'integer' } },
-          additionalProperties: false,
-        },
-      },
-      required: ['modelId', 'prompt'],
-      additionalProperties: false,
-    },
-    outputSchema: { type: 'object', properties: { id: { type: 'string' }, status: { type: 'string' }, message: { type: 'string' } } },
-  },
-  {
-    name: 'builtin_get_media_task',
-    title: '查询媒体任务状态',
-    description: '按后台生成任务 ID 查询图片或视频的真实状态与结果路径，不会触发新的付费生成。',
-    risk: 'read',
-    appId: 'builtin:media',
-    appName: '内置 / 媒体生成',
-    source: 'builtin',
-    inputSchema: { type: 'object', properties: { taskId: { type: 'string', minLength: 36, maxLength: 36 } }, required: ['taskId'], additionalProperties: false },
-    outputSchema: { type: 'object', properties: { id: { type: 'string' }, status: { type: 'string' }, modelId: { type: 'string' }, error: { type: 'string' }, resultUrl: { type: 'string' } } },
-  },
-];
+  };
+}
 
 const riskLabels: Record<ToolRisk, string> = { read: '只读', write: '执行前确认', dangerous: '高风险' };
 
@@ -77,12 +62,23 @@ export function ToolsSettings() {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'write' | 'read'>('all');
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [builtinTools, setBuiltinTools] = useState<ToolDescriptor[]>([]);
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/tools')
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then((tools: ServerTool[]) => { if (!cancelled) setBuiltinTools(tools.map(descriptor)); })
+      .catch((reason) => { if (!cancelled) setLoadError(reason instanceof Error ? reason.message : '读取工具定义失败'); });
+    return () => { cancelled = true; };
+  }, []);
 
   const tools = useMemo(() => builtinTools.filter((tool) => {
     if (filter !== 'all' && tool.risk !== filter) return false;
     const text = `${tool.title || ''} ${tool.name} ${tool.description || ''} ${tool.appName}`.toLowerCase();
     return !query.trim() || text.includes(query.trim().toLowerCase());
-  }), [filter, query]);
+  }), [builtinTools, filter, query]);
 
   return <section className="darl-tools-settings" aria-labelledby="darl-tools-settings-title">
     <header className="darl-tools-settings__header">
@@ -92,6 +88,7 @@ export function ToolsSettings() {
         <p>查看网站助手内置的工具、参数 schema 和执行配置。MCP 工具请在「应用 / MCP」页面管理和查看。</p>
       </div>
     </header>
+    {loadError && <p role="alert">无法读取工具定义：{loadError}</p>}
 
     <div className="darl-tools-stats" aria-label="工具统计">
       <div><span>可用工具</span><strong>{builtinTools.length}</strong></div>
@@ -123,9 +120,8 @@ export function ToolsSettings() {
             <p>{tool.description || '此工具没有提供描述。'}</p>
             <div className="darl-tool-schema-grid">
               <div><h3>输入参数</h3><pre>{formatJson(tool.inputSchema)}</pre></div>
-              <div><h3>输出与注解</h3><pre>{formatJson(tool.outputSchema || tool.annotations || {})}</pre></div>
             </div>
-            <div className="darl-tool-config"><span>配置</span><strong>{tool.name === 'builtin_generate_media' ? '需要有效的媒体模型绑定；图片和视频可在二次确认设置中调整。' : '只读取本机媒体任务，不会创建新的生成任务。'}</strong></div>
+            <div className="darl-tool-config"><span>配置</span><strong>{PRESENTATION[tool.name]?.actions || '—'}</strong></div>
           </div>}
         </article>;
       })}

@@ -1,16 +1,17 @@
 import { readFileSync } from 'node:fs';
 import { MediaJobStore, type MediaJob } from './media-job-store';
-import { generateImage, submitVideo, checkVideo } from './media-adapters';
+import { generateImages, submitVideo, checkVideo } from './media-adapters';
 
 type Credentials = { baseUrl: string; apiKey: string };
 type CredentialsResolver = (job: MediaJob) => Credentials | undefined;
+type FailureReporter = (job: MediaJob, message: string, secret: string) => void;
 
 /** Persistent jobs, in-memory local executor. Does not attempt multi-process coordination. */
 export class MediaJobRunner {
   private active = new Set<string>();
   private timer: ReturnType<typeof setInterval> | undefined;
   private busy = false;
-  constructor(readonly store: MediaJobStore, private credentials: CredentialsResolver) {}
+  constructor(readonly store: MediaJobStore, private credentials: CredentialsResolver, private onFailure: FailureReporter = () => {}) {}
 
   start() {
     this.store.recover();
@@ -52,21 +53,27 @@ export class MediaJobRunner {
     return config;
   }
   private async run(job:MediaJob){
+    let config:Credentials|undefined;
     try{
-      const config=this.resolve(job);
+      config=this.resolve(job);
       if(job.type==='image'){
-        const result=await generateImage(job,config.apiKey);
-        job.resultPath=this.store.saveMedia(job.id,result.data,result.ext);
+        const result=await generateImages(job,config.apiKey);
+        job.resultPaths=result.images.flatMap((image,index)=>image.kind==='b64'?[this.store.saveMedia(job.id+(index?'-'+index:''),image.data,image.ext)]:[]);
+        job.resultUrls=result.images.flatMap((image)=>image.kind==='url'?[image.url]:[]);
+        job.resultPath=job.resultPaths[0];
         job.status='completed';job.phase='completed';job.error=undefined;
+        job.resultForm=result.images[0]?.kind==='url'?'url':'b64_json';
+        job.providerResponse=result.provider as Record<string,unknown>;
       }else{
         const id=await submitVideo(job,config.apiKey);
         job.remoteTaskId=id;job.phase='remote-running';job.nextPollAt=Date.now()+5000;
       }
     }catch(error){
-      // A timeout after sending a paid request can mean that the upstream accepted it.
+      // Only an interrupted submission is genuinely unknown; a failed download is not.
       job.status=job.phase==='submitting'?'uncertain':'failed';
-      job.error=(error instanceof Error?error.message:String(error)).slice(0,600);
+      job.error=(error instanceof Error?error.message:String(error)).slice(0,1200);
       job.phase='error';
+      this.onFailure(job, job.error, config?.apiKey || '');
     }
     this.store.put(job);
   }
@@ -74,11 +81,11 @@ export class MediaJobRunner {
     try{
       const {apiKey}=this.resolve(job);
       const result=await checkVideo(job,apiKey);
-      if(result.state==='failed'){job.status='failed';job.error=result.error;}
+      if(result.state==='failed'){job.status='failed';job.error=result.error;this.onFailure(job,result.error||'远端任务失败',apiKey);}
       if(result.state==='completed'){
         if(!result.media)throw new Error('缺少视频内容');
         job.resultPath=this.store.saveMedia(job.id,result.media,'mp4');
-        job.status='completed';job.error=undefined;
+        job.status='completed';job.error=undefined;job.resultForm='url';
       }
       job.phase=job.status==='completed'?'completed':'remote-running';
       job.nextPollAt=job.status==='running'?Date.now()+5000:undefined;
@@ -86,13 +93,16 @@ export class MediaJobRunner {
       // A transient polling/download error never creates another paid video job.
       job.error=(error instanceof Error?error.message:String(error)).slice(0,600);
       job.nextPollAt=Date.now()+15000;
+      this.onFailure(job, job.error, this.credentials(job)?.apiKey || '');
     }
     this.store.put(job);
   }
-  media(job:MediaJob):{bytes:Buffer;mime:string}|undefined{
-    if(job.status!=='completed'||!job.resultPath)return undefined;
-    const extension=job.resultPath.split('.').pop();
-    const mime=extension==='mp4'?'video/mp4':extension==='jpeg'?'image/jpeg':extension==='webp'?'image/webp':'image/png';
-    return {bytes:readFileSync(job.resultPath),mime};
+  media(job:MediaJob,index=0):{bytes:Buffer;mime:string}|undefined{
+    if(job.status!=='completed')return undefined;
+    const path=job.resultPaths?.[index] ?? (index===0?job.resultPath:undefined);
+    if(!path)return undefined;
+    const extension=path.split('.').pop();
+    const mime=extension==='mp4'?'video/mp4':extension==='jpeg'?'image/jpeg':extension==='webp'?'image/webp':extension==='gif'?'image/gif':'image/png';
+    return {bytes:readFileSync(path),mime};
   }
 }
