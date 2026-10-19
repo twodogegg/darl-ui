@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { applicationCatalog, conversationApplications, createMcpOAuthProvider, loadApplications, MCP_OAUTH_CALLBACK_URL, McpConnectionManager, toolRisk, ToolConfirmations, type McpApplicationConfig } from '../examples/agent-chat/server/mcp';
+import { applicationCatalog, conversationApplications, createMcpOAuthProvider, loadApplications, MCP_OAUTH_CALLBACK_URL, McpConnectionManager, projectMcpToolResult, toolRisk, ToolConfirmations, type McpApplicationConfig } from '../examples/agent-chat/server/mcp';
 import { safeError } from '../examples/agent-chat/server/models';
 
 const app = { id: 'catalog', name: 'Catalog', url: 'https://example.test/mcp', readOnlyTools: ['search'] };
@@ -26,6 +26,31 @@ describe('MCP host policy', () => {
     expect(provider.clientMetadata.redirect_uris).toEqual([MCP_OAUTH_CALLBACK_URL]);
     expect(saved?.tokens?.access_token).toBe('secret');
     expect(value.oauth?.tokens?.access_token).toBe('secret');
+  });
+
+  it('keeps MCP images available for the browser without sending base64 to the model', () => {
+    const result = projectMcpToolResult({
+      content: [{ type: 'text', text: '图片已生成' }, { type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' }],
+    });
+    expect(result.images).toEqual([{ type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' }]);
+    expect(result.content[0]).toEqual({ type: 'text', text: '图片已生成' });
+    expect(JSON.stringify(result.content)).not.toContain('aGVsbG8=');
+  });
+
+  it('releases connections that have been idle for over thirty minutes', async () => {
+    const close = vi.fn().mockResolvedValue(undefined);
+    const connect = vi.fn(async (value: McpApplicationConfig) => ({ app: value, tools: [], close, call: vi.fn() }));
+    const manager = new McpConnectionManager(connect);
+    const signal = new AbortController().signal;
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-10-01T00:00:00Z'));
+      await manager.get('old-session', app, signal);
+      vi.setSystemTime(new Date('2026-10-01T00:31:00Z'));
+      await manager.get('new-session', app, signal);
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(connect).toHaveBeenCalledTimes(2);
+    } finally { vi.useRealTimers(); }
   });
 
   it('reuses concurrent and sequential connections only within a user/session scope', async () => {
