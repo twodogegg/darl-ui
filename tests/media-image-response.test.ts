@@ -1,5 +1,9 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { persistMediaReferences } from '../examples/agent-chat/server/media-references';
 import { closestAllowedSize, allowedSizesFromError, geminiImageEndpoint, generateGeminiImages, imageResponseRecord, imageSize, normalizeImageReferences } from '../examples/agent-chat/server/media-adapters';
 import type { MediaJob } from '../examples/agent-chat/server/media-job-store';
 
@@ -48,6 +52,34 @@ describe('image results', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respond({ data: [{ revised_prompt: '只返回了改写后的提示词' }] })));
     const { generateImages } = await import('../examples/agent-chat/server/media-adapters');
     await expect(generateImages(job(), 'key')).rejects.toThrow(/原始返回 .*"revised_prompt":"只返回了改写后的提示词"/);
+  });
+});
+
+describe('reference storage', () => {
+  it('stores data URLs on disk and reads them back as bytes', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'darl-media-'));
+    try {
+      const options = persistMediaReferences(directory, { references: [`data:image/png;base64,${PNG.toString('base64')}`] });
+      const references = options.references as Array<{ mediaReference: string; mimeType: string }>;
+      expect(references[0]).toMatchObject({ mimeType: 'image/png' });
+      expect(references[0].mediaReference.startsWith(directory)).toBe(true);
+      expect(JSON.stringify(options)).not.toContain('base64,');
+      const normalized = await normalizeImageReferences(references);
+      expect(normalized?.[0]).toMatchObject({ mimeType: 'image/png' });
+      expect(normalized?.[0] && 'data' in normalized[0] && normalized[0].data.equals(PNG)).toBe(true);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects non-image data URLs and oversized lists before writing', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'darl-media-'));
+    try {
+      expect(() => persistMediaReferences(directory, { references: ['data:text/plain;base64,aGVsbG8='] })).toThrow('参考素材必须是图片 data URL');
+      expect(() => persistMediaReferences(directory, { references: [42] })).toThrow('参考素材格式无效');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
 
@@ -169,6 +201,20 @@ describe('gemini images', () => {
   it('reports finishReason when no image comes back', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respond({ candidates: [{ finishReason: 'SAFETY', content: { parts: [{ text: 'blocked' }] } }] })));
     await expect(generateGeminiImages(geminiJob(), 'key')).rejects.toThrow(/SAFETY/);
+  });
+});
+
+describe('supplier error messages', () => {
+  it('shows the gateway reason instead of the raw JSON body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respond({ error: { message: '预扣费额度失败, 用户剩余额度: ¥0.01' } }, { status: 403 })));
+    const { generateImages } = await import('../examples/agent-chat/server/media-adapters');
+    await expect(generateImages(job(), 'key')).rejects.toThrow(/供应商 HTTP 403：预扣费额度失败/);
+  });
+
+  it('falls back to the raw body when it is not JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respond('upstream exploded', { status: 500 })));
+    const { generateImages } = await import('../examples/agent-chat/server/media-adapters');
+    await expect(generateImages(job(), 'key')).rejects.toThrow(/供应商 HTTP 500：upstream exploded/);
   });
 });
 

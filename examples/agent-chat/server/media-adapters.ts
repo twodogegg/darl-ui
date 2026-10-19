@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { MediaJob } from './media-job-store';
 import { createH3Video, getH3Video, downloadH3Video } from './h3-flash';
 
@@ -42,10 +43,15 @@ function ensureHttp(base: string) {
   const parsed = new URL(base);
   if (!['https:','http:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error('供应商地址无效');
 }
+function supplierMessage(body: string) {
+  const value = (() => { try { return JSON.parse(body) as { error?: { message?: string }; message?: string }; } catch { return null; } })();
+  const message = value?.error?.message || value?.message;
+  return typeof message === 'string' && message.trim() ? message.trim() : body.slice(0, 800);
+}
 async function checked(response: Response, key: string) {
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    const error = new Error('供应商 HTTP '+response.status+': '+body.replaceAll(key,'[REDACTED]').slice(0,800));
+    const error = new Error(`供应商 HTTP ${response.status}：${supplierMessage(body).replaceAll(key, '[REDACTED]')}`);
     // Keep the raw body so callers can retry against the channel's own limits.
     (error as Error & { body?: string }).body = body;
     throw error;
@@ -92,18 +98,33 @@ function sniffMime(data: Buffer) {
 
 /**
  * Accept the reference shapes a host can send: a `data:` URL, an HTTP(S) URL,
- * or `{ url }`. Remote links are passed through so the channel fetches them
- * directly; only local base64 needs re-uploading.
+ * `{ url }`, or the internal `{ mediaReference }` written by the media API.
+ * Remote links pass through so the channel fetches them; local files are read
+ * as bytes for multipart/inline upload.
  */
 export async function normalizeImageReferences(value: unknown, max = MAX_REFERENCE_IMAGES): Promise<ImageReference[] | undefined> {
   if (value === undefined || value === null) return undefined;
   const rows = Array.isArray(value) ? value : [value];
-  const picked = rows.flatMap((row) => typeof row === 'string' ? [row] : row && typeof row === 'object' && typeof (row as { url?: unknown }).url === 'string' ? [(row as { url: string }).url] : []);
+  type Source = { kind: 'value'; value: string } | { kind: 'file'; path: string; mimeType?: string };
+  const picked = rows.flatMap<Source>((row) => {
+    if (typeof row === 'string') return [{ kind: 'value', value: row }];
+    if (!row || typeof row !== 'object') return [];
+    const file = (row as { mediaReference?: unknown }).mediaReference;
+    if (typeof file === 'string') return [{ kind: 'file', path: file, mimeType: typeof (row as { mimeType?: unknown }).mimeType === 'string' ? (row as { mimeType: string }).mimeType : undefined }];
+    const url = (row as { url?: unknown }).url;
+    return typeof url === 'string' ? [{ kind: 'value', value: url }] : [];
+  });
   if (!picked.length) return undefined;
   if (picked.length > max) throw new Error(`参考图片最多 ${max} 张`);
   return picked.map((source, index) => {
-    const inline = DATA_URL.exec(source);
-    if (!inline) return { url: source };
+    if (source.kind === 'file') {
+      const data = readFileSync(source.path);
+      if (!data.length) throw new Error(`参考图片 ${index + 1} 为空`);
+      const mimeType = sniffMime(data) || source.mimeType || 'image/png';
+      return { name: `reference-${index + 1}.${mimeType.split('/')[1].replace('jpeg', 'jpg')}`, mimeType, data };
+    }
+    const inline = DATA_URL.exec(source.value);
+    if (!inline) return { url: source.value };
     const data = Buffer.from(inline[2], 'base64');
     if (!data.length) throw new Error(`参考图片 ${index + 1} 为空`);
     const mimeType = sniffMime(data) || inline[1].toLowerCase();
@@ -380,6 +401,6 @@ export async function checkVideo(job:MediaJob,key:string):Promise<{state:'runnin
   ensureHttp(job.baseUrl);
   const remote=await getH3Video(job.baseUrl,key,job.remoteTaskId,AbortSignal.timeout(30000));
   if(remote.status==='failed')return {state:'failed',error:remote.error||'视频生成失败'};
-  if(remote.status==='completed')return {state:'completed',media:Buffer.from(await downloadH3Video(job.baseUrl,key,remote,AbortSignal.timeout(120000)))};
+  if(remote.status==='succeeded')return {state:'completed',media:Buffer.from(await downloadH3Video(job.baseUrl,key,remote,AbortSignal.timeout(120000)))};
   return {state:'running'};
 }

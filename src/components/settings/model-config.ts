@@ -144,7 +144,7 @@ export const BUILTIN_TEMPLATES: CapabilityTemplate[] = [
       maxReferenceImages: 9, maxReferenceVideos: 3, maxReferenceAudios: 3,
       aspectRatios: ['16:9', '9:16'], resolutions: ['480', '768'], durations: { min: 4, max: 15 }, maxOutputs: 1,
     },
-    defaults: { resolution: '768', aspectRatio: '9:16', duration: 10 },
+    defaults: { resolution: '480', aspectRatio: '16:9', duration: 10 },
   },
 ];
 
@@ -187,6 +187,9 @@ export function upgradeModelConfiguration(configuration: ModelConfiguration): Mo
       gptImage.defaults = { resolution: '2K', aspectRatio: '16:9' };
     }
   }
+  // H3 keeps its protocol values, so the builtin default moves onto them too.
+  const h3Flash = next.templates.find((template) => template.id === 'h3-flash');
+  if (h3Flash && h3Flash.defaults?.resolution === '768') h3Flash.defaults = { resolution: '480', aspectRatio: '16:9', duration: 10 };
   const addedTemplates: CapabilityTemplate[] = BUILTIN_TEMPLATES.filter((template) => template.id === 'gemini-pro-image');
   for (const template of addedTemplates) {
     if (!next.templates.some((item) => item.id === template.id)) {

@@ -14,6 +14,7 @@ import { SubAgentThreadLocks, continueSubAgentConversation } from './subagent-co
 import { handleWorkspaceProjectRequest } from './projects';
 import { ProjectStore } from './project-store';
 import { createMediaJobsApi } from './media-jobs-api';
+import { persistMediaReferences } from './media-references';
 import { mediaTaskResult } from './media-job-store';
 import { createFailureLog } from './failure-log';
 import { DEFAULT_AUTO_CONFIRM, validateAutoConfirmSettings, shouldConfirmMcp, type AutoConfirmSettings } from './approval-settings';
@@ -54,7 +55,7 @@ export const MEDIA_TOOLS = [
     prompt: { type: 'string', minLength: 1, maxLength: 16000, description: '图片描述或编辑指令。改编用户提供的图片时，描述要改什么，不需要复述原图内容。' },
     options: { type: 'object', properties: {
       aspectRatio: { type: 'string', enum: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'], description: '画幅：按顺序为 1:1、2:3、3:2、3:4、4:3、9:16、16:9' },
-      resolution: { type: 'string', enum: ['1K', '2K', '4K'], description: '清晰度档位，与画幅组合由适配器映射为渠道尺寸。' },
+      resolution: { type: 'string', enum: ['1K', '2K', '4K', '480', '768'], description: '清晰度档位：图片为 1K/2K/4K，视频为 480/768。' },
       references: { type: 'array', maxItems: 16, items: { type: 'string' }, description: '必填场景：当用户提供了图片 URL 或要求改编已有图片（改风格、换背景、换配色、保持人物/物体一致性）时，必须把该 URL 放进这个数组。不填则视为纯文生图，原图会被忽略。支持公网 HTTP(S) URL 或 data: URL。仅图片模型支持，Gemini 最多 14 张。' },
       duration: { type: 'integer', minimum: 4, maximum: 15, description: '视频时长（秒），仅视频' },
     }, additionalProperties: false } },
@@ -63,13 +64,13 @@ export const MEDIA_TOOLS = [
 ] as const;
 type DefaultMediaSelection = {
   image: { modelId: string; resolution: '1K' | '2K' | '4K'; aspectRatio: '1:1' | '2:3' | '3:2' | '3:4' | '4:3' | '9:16' | '16:9' };
-  video: { modelId: 'minimax-h3-flash'; resolution: '480P'; aspectRatio: '16:9' };
+  video: { modelId: 'minimax-h3-flash'; resolution: '480' | '768'; aspectRatio: '16:9' | '9:16' };
 };
 const IMAGE_MODEL_IDS = ['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-image-preview'];
 const IMAGE_ASPECT_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'];
 const defaultMediaSelection: DefaultMediaSelection = {
   image: { modelId: 'gpt-image-2', resolution: '2K', aspectRatio: '16:9' },
-  video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' },
+  video: { modelId: 'minimax-h3-flash', resolution: '480', aspectRatio: '16:9' },
 };
 
 function validateDefaultMediaSelection(value: unknown): DefaultMediaSelection {
@@ -82,10 +83,14 @@ function validateDefaultMediaSelection(value: unknown): DefaultMediaSelection {
   const videoChoice = video as Record<string, unknown>;
   const imageResolutions = ['1K', '2K', '4K'];
   if (!IMAGE_MODEL_IDS.includes(String(imageChoice.modelId)) || !imageResolutions.includes(String(imageChoice.resolution)) || !IMAGE_ASPECT_RATIOS.includes(String(imageChoice.aspectRatio))) throw new Error('默认图片模型参数不受支持');
-  if (videoChoice.modelId !== 'minimax-h3-flash' || videoChoice.resolution !== '480P' || videoChoice.aspectRatio !== '16:9') throw new Error('默认视频模型参数不受支持');
+  if (videoChoice.modelId !== 'minimax-h3-flash' || !['480', '768'].includes(String(videoChoice.resolution)) || !['16:9', '9:16'].includes(String(videoChoice.aspectRatio))) throw new Error('默认视频模型参数不受支持');
   return {
     image: { modelId: String(imageChoice.modelId), resolution: imageChoice.resolution as DefaultMediaSelection['image']['resolution'], aspectRatio: imageChoice.aspectRatio as DefaultMediaSelection['image']['aspectRatio'] },
-    video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' },
+    video: {
+      modelId: 'minimax-h3-flash',
+      resolution: videoChoice.resolution as DefaultMediaSelection['video']['resolution'],
+      aspectRatio: videoChoice.aspectRatio as DefaultMediaSelection['video']['aspectRatio'],
+    },
   };
 }
 
@@ -625,7 +630,10 @@ export function createApi(directory: string, env: Record<string, string>, prompt
               if (!model || (model.type !== 'image' && model.type !== 'video'))
                 return mediaFailure('模型不存在或不是图片/视频模型', 'MEDIA_ARGUMENT_INVALID', args, 'generate_media');
               const options = args.options && typeof args.options === 'object' && !Array.isArray(args.options) ? args.options as Record<string, unknown> : {};
-              if (model.type === 'video' && options.references)
+              if (options.references !== undefined && !Array.isArray(options.references))
+                return mediaFailure('参考图片格式无效', 'MEDIA_ARGUMENT_INVALID', args, 'generate_media');
+              const referenceCount = Array.isArray(options.references) ? options.references.length : 0;
+              if (referenceCount && model.type === 'video')
                 return mediaFailure('视频暂不支持参考图，请去掉 references 后重试', 'MEDIA_REFERENCE_UNSUPPORTED', args, 'generate_media');
               const bindings = model.bindings.filter(item => item.enabled !== false);
               const binding = bindings[0];
@@ -642,8 +650,20 @@ export function createApi(directory: string, env: Record<string, string>, prompt
                 }
               }
               toolSignal.throwIfAborted();
+              const effective = effectiveCapabilities(modelConfiguration, model, binding);
+              const maxReferences = effective && 'maxReferenceImages' in effective ? effective.maxReferenceImages : 0;
+              if (referenceCount > maxReferences)
+                return mediaFailure(`参考图片最多 ${maxReferences} 张`, 'MEDIA_REFERENCE_UNSUPPORTED', args, 'generate_media');
+              const imageOrVideo = effective && ('resolutions' in effective || 'aspectRatios' in effective) ? effective as { resolutions?: string[]; aspectRatios?: string[] } : undefined;
+              if (typeof options.resolution === 'string' && imageOrVideo?.resolutions && !imageOrVideo.resolutions.includes(options.resolution))
+                return mediaFailure(`该模型不支持清晰度 ${options.resolution}`, 'MEDIA_ARGUMENT_INVALID', args, 'generate_media');
+              if (typeof options.aspectRatio === 'string' && imageOrVideo?.aspectRatios && !imageOrVideo.aspectRatios.includes(options.aspectRatio))
+                return mediaFailure(`该模型不支持画幅 ${options.aspectRatio}`, 'MEDIA_ARGUMENT_INVALID', args, 'generate_media');
+              let storedOptions: Record<string, unknown>;
+              try { storedOptions = persistMediaReferences(mediaJobs.store.mediaRoot, options); }
+              catch (reason) { return mediaFailure(reason instanceof Error ? reason.message : '参考图片无效', 'MEDIA_ARGUMENT_INVALID', args, 'generate_media'); }
               const job = mediaJobs.store.create({ modelId: model.id,
-                type: model.type, prompt: args.prompt.trim(), options, protocolKey: binding.protocolKey,
+                type: model.type, prompt: args.prompt.trim(), options: storedOptions, protocolKey: binding.protocolKey,
                 providerId: selectedProvider.id, upstreamModelId: binding.upstreamModelId, baseUrl: selectedProvider.baseUrl });
               emitTool({ ...toolCall, status: 'success', output: { id: job.id, status: job.status } });
               void mediaJobs.runner.tick();

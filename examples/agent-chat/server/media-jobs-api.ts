@@ -3,19 +3,22 @@ import { dirname, join } from 'node:path';
 import { MediaJobStore } from './media-job-store';
 import { MediaJobRunner } from './media-runner';
 import { createFailureLog } from './failure-log';
-import type { ModelConfiguration } from '../../../src/components/settings/model-config';
+import { effectiveCapabilities, type ModelConfiguration } from '../../../src/components/settings/model-config';
+import { persistMediaReferences } from './media-references';
 import type { StoredProvider } from './models';
 
 const localhost = new Set(['127.0.0.1','::1','::ffff:127.0.0.1']);
+/** Base64 reference images travel through this JSON endpoint. */
+const MAX_MEDIA_BODY = 128 * 1024 * 1024;
 function reply(res: ServerResponse,status:number,data:unknown) {
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(JSON.stringify(data));
 }
-async function body(req:IncomingMessage) {
+async function body(req:IncomingMessage, limit=100_000) {
   let data='';
   for await(const part of req) {
     data+=part.toString();
-    if(data.length>100_000)throw new Error('任务请求体超过限制');
+    if(data.length>limit)throw new Error('任务请求体超过限制');
   }
   return JSON.parse(data) as Record<string,unknown>;
 }
@@ -45,7 +48,7 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         reply(res,200,store.limits());return true;
       }
       if(path==='/api/media-generation/jobs' && method==='POST'){
-        const input=await body(req);
+        const input=await body(req, MAX_MEDIA_BODY);
         if(typeof input.modelId!=='string'||!input.modelId)throw new Error('模型必填');
         if(typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>16000)throw new Error('提示词无效');
         const model=config().models.find(m=>m.id===input.modelId&&m.enabled!==false);
@@ -56,9 +59,15 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         const provider=providers().find(p=>p.id===binding.providerId);
         if(!provider?.apiKey)throw new Error('供应商缺少 API Key');
         const type=model.type;
-        const options=input.options&&typeof input.options==='object'&&!Array.isArray(input.options)?input.options as Record<string,unknown>:{};
-        if(options.references&&type!=='image')throw new Error('视频参考素材模式待真实网关核验后开放');
-        // 适配器在提交时再下载/解码参考图，这里只保留原始值。
+        const rawOptions=input.options&&typeof input.options==='object'&&!Array.isArray(input.options)?input.options as Record<string,unknown>:{};
+        if(rawOptions.references!==undefined&&!Array.isArray(rawOptions.references))throw new Error('参考素材必须是数组');
+        const referenceCount=Array.isArray(rawOptions.references)?rawOptions.references.length:0;
+        if(referenceCount&&type!=='image')throw new Error('视频参考素材模式待真实网关核验后开放');
+        const effective=effectiveCapabilities(config(),model,binding);
+        const maxReferences=effective&&'maxReferenceImages' in effective?effective.maxReferenceImages:0;
+        if(referenceCount>maxReferences)throw new Error(`参考图片最多 ${maxReferences} 张`);
+        // Large data URLs stay out of the job row; adapters read the saved files.
+        const options=persistMediaReferences(store.mediaRoot, rawOptions);
         const job=store.create({modelId:model.id,type,prompt:input.prompt.trim(),providerId:provider.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey,baseUrl:provider.baseUrl,options});
         void runner.tick();
         reply(res,201,job);return true;

@@ -93,6 +93,13 @@ body { margin: 0; background: #101113; }
 .example-media-concurrency-row .darl-button { width: 100%; height: 34px; }
 .example-media-concurrency .example-media-concurrency-message { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--darl-border); }
 @media (max-width: 560px) { .example-media-concurrency { padding: 16px; }.example-media-concurrency-row { grid-template-columns: minmax(0, 1fr) 84px 60px; gap: 8px; } }
+.example-media-generation { display: grid; gap: 16px; max-width: 1180px; min-width: 0; margin: 0 auto; padding: 24px 16px 40px; }
+.example-media-generation-head { display: flex; align-items: flex-start; gap: 14px; }
+.example-media-generation-head h1 { margin: 6px 0 4px; font-size: 23px; }
+.example-media-generation-head p { margin: 0; color: var(--darl-muted); font-size: 12px; line-height: 1.6; }
+.example-media-generation-error { margin: 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--darl-danger) 40%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--darl-danger) 12%, transparent); color: var(--darl-danger); font-size: 12px; }
+.example-media-generation-loading { margin: 0; color: var(--darl-muted); font-size: 12px; }
+@media (max-width: 700px) { .example-media-generation { padding: 12px 12px 24px; }.example-media-generation-head { flex-direction: column; gap: 8px; } }
 .example-applications { max-width: 960px; min-width: 0; }
 .example-applications p { color: var(--darl-muted); line-height: 1.7; overflow-wrap: anywhere; }
 .example-applications article { margin-top: 20px; padding: 18px; border: 1px solid var(--darl-border); border-radius: 10px; }
