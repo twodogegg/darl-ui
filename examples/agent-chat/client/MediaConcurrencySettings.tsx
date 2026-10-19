@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 
-type Limits = { 'gpt-image-2': number; 'minimax-h3-flash': number };
-const names: Array<{ id:keyof Limits; title:string }>=[
+type Limits = Record<string, number>;
+const names: Array<{ id:string; title:string }>=[
   {id:'gpt-image-2',title:'GPT Image 2 图片并发'},
+  {id:'gpt-image-2.5',title:'GPT Image 2.5 图片并发'},
+  {id:'gemini-3-pro-image-preview',title:'Gemini 3 Pro Image Preview 图片并发'},
   {id:'minimax-h3-flash',title:'MiniMax H3 Flash 视频并发'},
 ];
 export function MediaConcurrencySettings(){
-  const [limits,setLimits]=useState<Limits>({'gpt-image-2':4,'minimax-h3-flash':4});
+  const [limits,setLimits]=useState<Limits>(Object.fromEntries(names.map((item)=>[item.id,4])));
   const [pending,setPending]=useState(false);
   const [message,setMessage]=useState('');
   useEffect(()=>{

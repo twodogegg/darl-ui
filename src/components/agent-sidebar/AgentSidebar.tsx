@@ -368,8 +368,8 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const pendingConfirmation = activeSession?.messages.flatMap(message => message.toolCalls || []).find(call => call.status === 'confirmation');
   const pendingInput = pendingConfirmation?.input && typeof pendingConfirmation.input === 'object' ? pendingConfirmation.input as Record<string, unknown> : {};
   const isMediaConfirmation = pendingConfirmation?.appId === 'builtin:media';
-  const mediaKind = pendingInput.modelId === 'gpt-image-2' ? '图片' : '视频';
-  const mediaModelLabel = pendingInput.modelId === 'gpt-image-2' ? 'GPT Image 2' : pendingInput.modelId === 'minimax-h3-flash' ? 'MiniMax H3 Flash' : String(pendingInput.modelId || '—');
+  const mediaKind = ['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-image-preview'].includes(String(pendingInput.modelId)) ? '图片' : '视频';
+  const mediaModelLabel = ({ 'gpt-image-2': 'GPT Image 2', 'gpt-image-2.5': 'GPT Image 2.5', 'gemini-3-pro-image-preview': 'Gemini 3 Pro Image Preview', 'minimax-h3-flash': 'MiniMax H3 Flash' } as Record<string, string>)[String(pendingInput.modelId)] ?? String(pendingInput.modelId || '—');
   const mediaRows = mediaOptionRows(pendingInput.options, mediaKind === '图片' ? 'image' : 'video');
   const confirmAction = async (approved: boolean) => {
     if (!pendingConfirmation || !onToolConfirm || confirmBusy) return;

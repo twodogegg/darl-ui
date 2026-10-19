@@ -325,7 +325,7 @@ import { AgentPlaza } from '@darl/ui';
 
 `examples/agent-chat` 的设置中心提供独立的 Agents 页面。每个 Agent 在服务端保存名称和系统提示词；模型与推理强度在聊天输入框旁按当前会话选择。Skills 与 MCP 应用对所有 Agent 默认可用，无需逐个授权；API Key 仍只保存在服务端。设置默认 Agent 后，聊天可以直接选择专业 Agent，也可以由主 Agent 通过 AI SDK 7 `ToolLoopAgent` 按需委派给其他已启用的 Agent。
 
-设置中心的模型页面顶部同时提供默认媒体模型设置，目前只配置图片和视频：默认图片为 `gpt-image-2`（2K、16:9），默认视频为 `minimax-h3-flash`（480P、16:9）。配置保存在示例服务的本地 SQLite 中；文本模型在聊天输入框旁选择。
+设置中心的模型页面顶部同时提供默认媒体模型设置，目前只配置图片和视频：默认图片为 `gpt-image-2`（2K、16:9），也可以选择 `gpt-image-2.5` 或 `gemini-3-pro-image-preview`；默认视频为 `minimax-h3-flash`（480P、16:9）。图片产品选项只有画幅、1K/2K/4K 档位和参考图数量。配置保存在示例服务的本地 SQLite 中；文本模型在聊天输入框旁选择。
 
 每次委派只把任务说明传给子 Agent，子 Agent 使用自己的模型、提示词和当前会话启用的 Skill / MCP 应用，完成后只返回最终摘要。MCP 写操作继续复用宿主的 `ToolConfirmations`，因此允许、拒绝、停止和超时都在服务端生效；NDJSON 工具事件包含 `runId`、`parentRunId` 和 `agentId`，现有侧栏会显示委派、执行和审批状态。Agent 配置保存在 `.local/agent-chat/data.sqlite`，不会写入浏览器存储。
 

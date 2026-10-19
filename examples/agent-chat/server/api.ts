@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AgentExecutionEvent, AgentSkill, AgentToolCall } from '../../../src/index';
-import { defaultModelConfiguration, effectiveCapabilities, enabledBindings, validateModelConfiguration, type ModelConfiguration } from '../../../src/components/settings/model-config';
+import { defaultModelConfiguration, effectiveCapabilities, enabledBindings, upgradeModelConfiguration, validateModelConfiguration, type ModelConfiguration } from '../../../src/components/settings/model-config';
 import { auth } from '@modelcontextprotocol/sdk/client/auth.js';
 import { applicationCatalog, connectApplication, conversationApplications, createMcpOAuthProvider, loadApplications, saveApplications, MCP_OAUTH_CALLBACK_PATH, McpConnectionManager, toolRisk, ToolConfirmations } from './mcp';
 import { loadAgents, publicAgent, validateAgent, validateAgents, type StoredAgent } from './agents';
@@ -49,27 +49,24 @@ const MAX_IMAGE_DATA_URL_LENGTH = 64 + 4 * Math.ceil(MAX_IMAGE_BYTES / 3);
  * settings page can render the exact schema the model receives.
  */
 export const MEDIA_TOOLS = [
-  { name: 'builtin_generate_media', description: '向后台提交一条图片或视频生成任务。图片支持 gpt-image-2（可用参考图编辑），视频支持 minimax-h3-flash。调用前必须明确用户的生成意图，提交遵循项目二次确认设置。返回任务 ID，不等待媒体完成。', parameters: { type: 'object', properties: {
-    modelId: { type: 'string', enum: ['gpt-image-2', 'minimax-h3-flash'] },
+  { name: 'builtin_generate_media', description: '向后台提交一条图片或视频生成任务。图片支持 gpt-image-2、gpt-image-2.5、gemini-3-pro-image-preview（可用参考图编辑），视频支持 minimax-h3-flash。调用前必须明确用户的生成意图，提交遵循项目二次确认设置。返回任务 ID，不等待媒体完成。', parameters: { type: 'object', properties: {
+    modelId: { type: 'string', enum: ['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-image-preview', 'minimax-h3-flash'] },
     prompt: { type: 'string', minLength: 1, maxLength: 16000, description: '图片描述或编辑指令。改编用户提供的图片时，描述要改什么，不需要复述原图内容。' },
     options: { type: 'object', properties: {
-      size: { type: 'string', description: '精确输出尺寸，格式 WIDTHxHEIGHT，例如 1024x1024。优先于 aspectRatio/resolution。' },
-      aspectRatio: { type: 'string', description: '画幅：1:1、3:4、4:3、2:3、3:2、16:9、9:16' },
-      resolution: { type: 'string', enum: ['1K', '2K', '4K'], description: '分辨率档位，与 aspectRatio 组合得到推荐尺寸。渠道不支持时会自动回退到最接近的可用尺寸。' },
-      count: { type: 'integer', minimum: 1, maximum: 10, description: '生成张数，默认 1' },
-      quality: { type: 'string', enum: ['auto', 'low', 'medium', 'high'] },
-      background: { type: 'string', enum: ['opaque', 'transparent', 'auto'] },
-      outputFormat: { type: 'string', enum: ['png', 'jpeg', 'webp'] },
-      references: { type: 'array', maxItems: 16, items: { type: 'string' }, description: '必填场景：当用户提供了图片 URL 或要求改编已有图片（改风格、换背景、换配色、保持人物/物体一致性）时，必须把该 URL 放进这个数组。不填则视为纯文生图，原图会被忽略。支持公网 HTTP(S) URL 或 data: URL。仅图片模型支持。' },
+      aspectRatio: { type: 'string', enum: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'], description: '画幅：按顺序为 1:1、2:3、3:2、3:4、4:3、9:16、16:9' },
+      resolution: { type: 'string', enum: ['1K', '2K', '4K'], description: '清晰度档位，与画幅组合由适配器映射为渠道尺寸。' },
+      references: { type: 'array', maxItems: 16, items: { type: 'string' }, description: '必填场景：当用户提供了图片 URL 或要求改编已有图片（改风格、换背景、换配色、保持人物/物体一致性）时，必须把该 URL 放进这个数组。不填则视为纯文生图，原图会被忽略。支持公网 HTTP(S) URL 或 data: URL。仅图片模型支持，Gemini 最多 14 张。' },
       duration: { type: 'integer', minimum: 4, maximum: 15, description: '视频时长（秒），仅视频' },
     }, additionalProperties: false } },
   required: ['modelId','prompt'], additionalProperties: false } },
   { name: 'builtin_get_media_task', description: '按后台生成任务 ID 查询图片或视频的真实状态与结果（含结果 URL、供应商原始返回）。不会触发新的付费生成。', parameters: { type: 'object', properties: { taskId: { type: 'string', minLength: 36, maxLength: 36 } }, required: ['taskId'], additionalProperties: false } },
 ] as const;
 type DefaultMediaSelection = {
-  image: { modelId: 'gpt-image-2'; resolution: '1K' | '2K' | '4K'; aspectRatio: '1:1' | '3:4' | '4:3' | '16:9' | '9:16' };
+  image: { modelId: string; resolution: '1K' | '2K' | '4K'; aspectRatio: '1:1' | '2:3' | '3:2' | '3:4' | '4:3' | '9:16' | '16:9' };
   video: { modelId: 'minimax-h3-flash'; resolution: '480P'; aspectRatio: '16:9' };
 };
+const IMAGE_MODEL_IDS = ['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-image-preview'];
+const IMAGE_ASPECT_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'];
 const defaultMediaSelection: DefaultMediaSelection = {
   image: { modelId: 'gpt-image-2', resolution: '2K', aspectRatio: '16:9' },
   video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' },
@@ -84,11 +81,10 @@ function validateDefaultMediaSelection(value: unknown): DefaultMediaSelection {
   const imageChoice = image as Record<string, unknown>;
   const videoChoice = video as Record<string, unknown>;
   const imageResolutions = ['1K', '2K', '4K'];
-  const imageRatios = ['1:1', '3:4', '4:3', '16:9', '9:16'];
-  if (imageChoice.modelId !== 'gpt-image-2' || !imageResolutions.includes(String(imageChoice.resolution)) || !imageRatios.includes(String(imageChoice.aspectRatio))) throw new Error('默认图片模型参数不受支持');
+  if (!IMAGE_MODEL_IDS.includes(String(imageChoice.modelId)) || !imageResolutions.includes(String(imageChoice.resolution)) || !IMAGE_ASPECT_RATIOS.includes(String(imageChoice.aspectRatio))) throw new Error('默认图片模型参数不受支持');
   if (videoChoice.modelId !== 'minimax-h3-flash' || videoChoice.resolution !== '480P' || videoChoice.aspectRatio !== '16:9') throw new Error('默认视频模型参数不受支持');
   return {
-    image: { modelId: 'gpt-image-2', resolution: imageChoice.resolution as DefaultMediaSelection['image']['resolution'], aspectRatio: imageChoice.aspectRatio as DefaultMediaSelection['image']['aspectRatio'] },
+    image: { modelId: String(imageChoice.modelId), resolution: imageChoice.resolution as DefaultMediaSelection['image']['resolution'], aspectRatio: imageChoice.aspectRatio as DefaultMediaSelection['image']['aspectRatio'] },
     video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' },
   };
 }
@@ -230,7 +226,12 @@ export function createApi(directory: string, env: Record<string, string>, prompt
 
   const initial: StoredProvider[] = [{ id: 'darl', name: 'Darl', baseUrl: env.AGENT_CHAT_BASE_URL || 'https://api.darl.cn/v1', protocol: 'openai-completions', apiKey: env.AGENT_CHAT_API_KEY || '', status: 'unknown', models: [{ id: env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash', name: env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash', providerId: 'darl', type: 'text', enabled: true }] }];
   if (!storage.getConfig<StoredProvider[]>('providers')) storage.setConfig('providers', initial);
-  if (!storage.getConfig<ModelConfiguration>('modelConfiguration')) storage.setConfig('modelConfiguration', defaultModelConfiguration());
+  const storedConfiguration = storage.getConfig<ModelConfiguration>('modelConfiguration');
+  if (!storedConfiguration) storage.setConfig('modelConfiguration', defaultModelConfiguration());
+  else {
+    const upgraded = upgradeModelConfiguration(storedConfiguration);
+    if (JSON.stringify(upgraded) !== JSON.stringify(storedConfiguration)) storage.setConfig('modelConfiguration', upgraded);
+  }
   if (!storage.getConfig<DefaultMediaSelection>('defaultMediaModels')) storage.setConfig('defaultMediaModels', defaultMediaSelection);
   if (!storage.getConfig<string>('systemPrompt')) {
     storage.setConfig('systemPrompt', validatePrompt(readFileSync(promptFile, 'utf8')));
@@ -618,18 +619,20 @@ export function createApi(directory: string, env: Record<string, string>, prompt
                 }
                 return failBuiltin('get_media_task', args, result.message, result.code, { retryable: true, suggestion: job.status === 'uncertain' ? '该任务可能已在供应商侧提交。请先核对供应商记录，再决定是否重新生成。' : '查看「生成任务」页的失败原因后重新生成。' });
               }
-              if (!['gpt-image-2','minimax-h3-flash'].includes(String(args.modelId)) || typeof args.prompt !== 'string' || !args.prompt.trim() || args.prompt.length > 16000)
+              if (typeof args.modelId !== 'string' || !args.modelId || typeof args.prompt !== 'string' || !args.prompt.trim() || args.prompt.length > 16000)
                 return mediaFailure('模型或提示词参数无效', 'MEDIA_ARGUMENT_INVALID', args, 'generate_media');
-              const options = args.options && typeof args.options === 'object' && !Array.isArray(args.options) ? args.options as Record<string, unknown> : {};
-              if (args.modelId === 'minimax-h3-flash' && options.references)
-                return mediaFailure('视频暂不支持参考图，请去掉 references 后重试', 'MEDIA_REFERENCE_UNSUPPORTED', args, 'generate_media');
               const model = modelConfiguration.models.find(item => item.id === args.modelId && item.enabled !== false);
-              const bindings = model?.bindings.filter(item => item.enabled !== false) || [];
+              if (!model || (model.type !== 'image' && model.type !== 'video'))
+                return mediaFailure('模型不存在或不是图片/视频模型', 'MEDIA_ARGUMENT_INVALID', args, 'generate_media');
+              const options = args.options && typeof args.options === 'object' && !Array.isArray(args.options) ? args.options as Record<string, unknown> : {};
+              if (model.type === 'video' && options.references)
+                return mediaFailure('视频暂不支持参考图，请去掉 references 后重试', 'MEDIA_REFERENCE_UNSUPPORTED', args, 'generate_media');
+              const bindings = model.bindings.filter(item => item.enabled !== false);
               const binding = bindings[0];
               const selectedProvider = providers.find(item => item.id === binding?.providerId);
               if (bindings.length !== 1 || !selectedProvider?.apiKey) return mediaFailure('该模型需要且只能配置一个有效供应商及密钥', 'MEDIA_PROVIDER_UNAVAILABLE', args, 'generate_media');
               const autoConfirm = storage.getConfig<AutoConfirmSettings>('autoConfirm') || DEFAULT_AUTO_CONFIRM;
-              const mediaNeedsConfirmation = !(args.modelId === 'gpt-image-2' ? autoConfirm.image : autoConfirm.video);
+              const mediaNeedsConfirmation = !(model.type === 'image' ? autoConfirm.image : autoConfirm.video);
               const confirmId = crypto.randomUUID();
               const toolCall: AgentToolCall = { id: confirmId, appId: 'builtin:media', appName: '媒体生成', toolName: 'generate_media', input: args, status: 'confirmation', runId: executionRunId, ...(ownerAgentId ? { agentId: ownerAgentId } : {}) };
               if (mediaNeedsConfirmation) {
@@ -639,8 +642,8 @@ export function createApi(directory: string, env: Record<string, string>, prompt
                 }
               }
               toolSignal.throwIfAborted();
-              const job = mediaJobs.store.create({ modelId: args.modelId as 'gpt-image-2'|'minimax-h3-flash',
-                type: args.modelId === 'gpt-image-2' ? 'image' : 'video', prompt: args.prompt.trim(), options,
+              const job = mediaJobs.store.create({ modelId: model.id,
+                type: model.type, prompt: args.prompt.trim(), options, protocolKey: binding.protocolKey,
                 providerId: selectedProvider.id, upstreamModelId: binding.upstreamModelId, baseUrl: selectedProvider.baseUrl });
               emitTool({ ...toolCall, status: 'success', output: { id: job.id, status: job.status } });
               void mediaJobs.runner.tick();

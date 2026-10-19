@@ -77,6 +77,8 @@ export function imageResponseRecord(value: unknown, form: ImageForm | 'unknown')
 
 /** GPT Image 2 accepts at most 16 reference images. */
 export const MAX_REFERENCE_IMAGES = 16;
+/** Gemini image models accept at most 14 reference images in total. */
+export const MAX_GEMINI_REFERENCE_IMAGES = 14;
 
 /** Either a remote link the channel can fetch itself, or inline bytes it cannot. */
 export type ImageReference = { url: string } | { name: string; mimeType: string; data: Buffer };
@@ -93,12 +95,12 @@ function sniffMime(data: Buffer) {
  * or `{ url }`. Remote links are passed through so the channel fetches them
  * directly; only local base64 needs re-uploading.
  */
-export async function normalizeImageReferences(value: unknown): Promise<ImageReference[] | undefined> {
+export async function normalizeImageReferences(value: unknown, max = MAX_REFERENCE_IMAGES): Promise<ImageReference[] | undefined> {
   if (value === undefined || value === null) return undefined;
   const rows = Array.isArray(value) ? value : [value];
   const picked = rows.flatMap((row) => typeof row === 'string' ? [row] : row && typeof row === 'object' && typeof (row as { url?: unknown }).url === 'string' ? [(row as { url: string }).url] : []);
   if (!picked.length) return undefined;
-  if (picked.length > MAX_REFERENCE_IMAGES) throw new Error(`参考图片最多 ${MAX_REFERENCE_IMAGES} 张`);
+  if (picked.length > max) throw new Error(`参考图片最多 ${max} 张`);
   return picked.map((source, index) => {
     const inline = DATA_URL.exec(source);
     if (!inline) return { url: source };
@@ -239,6 +241,121 @@ export async function generateImages(job: MediaJob, key: string): Promise<{ imag
     }
   }
   return { images, provider: { requestedSize: size, usedSize, ...imageResponseRecord(payload, images[0]?.kind === 'url' ? 'url' : 'b64_json') } };
+}
+
+const GEMINI_TIERS = new Set(['0.5K', '1K', '2K', '4K']);
+/** This gateway returns Gemini images as a data URL inside a text part. */
+const DATA_IMAGE = /data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)/gi;
+
+/** The gateway keeps `/v1` for other protocols; Gemini lives under `/v1beta`. */
+export function geminiImageEndpoint(baseUrl: string, model: string) {
+  const base = new URL(baseUrl);
+  const root = base.pathname.replace(/\/+$/, '').replace(/\/v1(?:beta)?$/, '').replace(/\/+$/, '');
+  return new URL(`${root}/v1beta/models/${encodeURIComponent(model)}:generateContent`, base.origin).toString();
+}
+
+/** Keep the Gemini payload for diagnostics, eliding inline image bytes. */
+export function geminiResponseRecord(value: unknown) {
+  const result = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const candidates = Array.isArray(result.candidates) ? result.candidates : [];
+  return {
+    ...result,
+    candidates: candidates.map((candidate) => {
+      if (!candidate || typeof candidate !== 'object') return candidate;
+      const item = candidate as Record<string, unknown>;
+      const content = item.content && typeof item.content === 'object' ? item.content as Record<string, unknown> : undefined;
+      const parts = content && Array.isArray(content.parts) ? content.parts : [];
+      if (!content) return item;
+      return {
+        ...item,
+        content: {
+          ...content,
+          parts: parts.map((part) => {
+            if (!part || typeof part !== 'object') return part;
+            const inline = (part as { inlineData?: unknown }).inlineData;
+            const data = inline && typeof inline === 'object' ? (inline as { data?: unknown }).data : undefined;
+            if (typeof data === 'string') return { ...part, inlineData: { ...(inline as object), data: `<base64 ${data.length} 字符，已保存为文件>` } };
+            const partText = (part as { text?: unknown }).text;
+            return typeof partText === 'string' ? { ...part, text: partText.replace(DATA_IMAGE, '<base64 图片，已保存为文件>') } : part;
+          }),
+        },
+      };
+    }),
+  };
+}
+
+function mimeExtension(mimeType: string) {
+  return mimeType === 'image/jpeg' ? 'jpeg' : mimeType === 'image/webp' ? 'webp' : mimeType === 'image/gif' ? 'gif' : 'png';
+}
+
+/**
+ * Gemini image generation and reference editing share one endpoint. Images are
+ * inline Base64 or an upstream-reachable file URI; the result is inline Base64.
+ */
+export async function generateGeminiImages(job: MediaJob, key: string): Promise<{ images: MediaImage[]; provider: unknown }> {
+  ensureHttp(job.baseUrl);
+  const references = await normalizeImageReferences(job.options.references, MAX_GEMINI_REFERENCE_IMAGES);
+  const parts: Record<string, unknown>[] = [{ text: job.prompt }];
+  for (const reference of references || []) {
+    parts.push('url' in reference
+      ? { fileData: { fileUri: reference.url } }
+      : { inlineData: { mimeType: reference.mimeType, data: reference.data.toString('base64') } });
+  }
+  const aspectRatio = typeof job.options.aspectRatio === 'string' ? job.options.aspectRatio : '1:1';
+  const requestedTier = typeof job.options.resolution === 'string' ? job.options.resolution : '2K';
+  const imageSize = GEMINI_TIERS.has(requestedTier) ? requestedTier : '2K';
+  const response = await checked(await fetch(geminiImageEndpoint(job.baseUrl, job.upstreamModelId), {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts }],
+      generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio, imageSize } },
+    }),
+    signal: AbortSignal.timeout(180000),
+  }), key);
+  const text = await response.text();
+  let payload: { candidates?: unknown[]; promptFeedback?: { blockReason?: unknown } };
+  try { payload = JSON.parse(text) as typeof payload; }
+  catch { throw new Error(`供应商返回的不是 JSON：${text.slice(0, 800)}`); }
+  if (typeof payload.promptFeedback?.blockReason === 'string' && payload.promptFeedback.blockReason) {
+    throw new Error(`Gemini 拒绝生成：${payload.promptFeedback.blockReason}`);
+  }
+  const candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+  const images: MediaImage[] = [];
+  const texts: string[] = [];
+  const finishes: string[] = [];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    const item = candidate as { finishReason?: unknown; content?: { parts?: unknown[] } };
+    if (typeof item.finishReason === 'string' && item.finishReason) finishes.push(item.finishReason);
+    for (const part of item.content?.parts || []) {
+      if (!part || typeof part !== 'object') continue;
+      const { inlineData, text: partText } = part as { inlineData?: { data?: unknown; mimeType?: unknown }; text?: unknown };
+      if (typeof partText === 'string') {
+        const visible = partText.replace(DATA_IMAGE, '').trim();
+        if (visible) texts.push(visible);
+        for (const match of partText.matchAll(DATA_IMAGE)) {
+          const data = Buffer.from(match[2], 'base64');
+          if (!data.length) continue;
+          const ext = sniffImage(data) || mimeExtension(match[1].toLowerCase());
+          images.push({ kind: 'b64', data, ext, raw: JSON.stringify({ mimeType: match[1], base64Length: match[2].length }) });
+        }
+      }
+      if (typeof inlineData?.data !== 'string') continue;
+      const data = Buffer.from(inlineData.data, 'base64');
+      if (!data.length) continue;
+      const mimeType = typeof inlineData.mimeType === 'string' ? inlineData.mimeType : '';
+      const ext = sniffImage(data) || (mimeType.startsWith('image/') ? mimeExtension(mimeType) : undefined);
+      if (!ext) continue;
+      images.push({ kind: 'b64', data, ext, raw: JSON.stringify({ mimeType, base64Length: inlineData.data.length }) });
+    }
+  }
+  if (!images.length) {
+    const reason = finishes.length ? `（finishReason: ${finishes.join(', ')}）` : '';
+    const detail = texts.length ? `：${texts.join(' ').slice(0, 300)}` : `；原始返回 ${JSON.stringify(geminiResponseRecord(payload))}`;
+    throw new Error(`Gemini 未返回图片${reason}${detail}`);
+  }
+  return { images, provider: { aspectRatio, imageSize, ...geminiResponseRecord(payload) } };
 }
 
 /** Single-image convenience wrapper used by callers that only keep one result. */

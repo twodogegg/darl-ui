@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { closestAllowedSize, allowedSizesFromError, imageResponseRecord, imageSize, normalizeImageReferences } from '../examples/agent-chat/server/media-adapters';
+import { closestAllowedSize, allowedSizesFromError, geminiImageEndpoint, generateGeminiImages, imageResponseRecord, imageSize, normalizeImageReferences } from '../examples/agent-chat/server/media-adapters';
 import type { MediaJob } from '../examples/agent-chat/server/media-job-store';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
@@ -132,6 +132,43 @@ describe('channel size rejection', () => {
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ size: '1024x1536' });
     expect(images[0]).toMatchObject({ kind: 'url' });
     expect(provider).toMatchObject({ requestedSize: '672x1008', usedSize: '1024x1536' });
+  });
+});
+
+describe('gemini images', () => {
+  const geminiJob = (options: Record<string, unknown> = {}) => ({
+    ...job(options), modelId: 'gemini-3-pro-image-preview', upstreamModelId: 'gemini-3-pro-image-preview', protocolKey: 'gemini-generate-content',
+  });
+
+  it('builds the v1beta endpoint from a v1 provider base', () => {
+    expect(geminiImageEndpoint('https://api.darl.cn/v1', 'gemini-3-pro-image-preview')).toBe('https://api.darl.cn/v1beta/models/gemini-3-pro-image-preview:generateContent');
+    expect(geminiImageEndpoint('https://api.darl.cn', 'gemini-3-pro-image-preview')).toBe('https://api.darl.cn/v1beta/models/gemini-3-pro-image-preview:generateContent');
+  });
+
+  it('maps ratio and tier into imageConfig and decodes the gateway markdown data URL', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respond({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: `![image](data:image/png;base64,${PNG.toString('base64')})` }] } }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { images, provider } = await generateGeminiImages(geminiJob({ aspectRatio: '16:9', resolution: '4K' }), 'key');
+    const [target, init] = fetchMock.mock.calls[0];
+    expect(String(target)).toBe('https://api.example.test/v1beta/models/gemini-3-pro-image-preview:generateContent');
+    expect(JSON.parse(init.body)).toMatchObject({ generationConfig: { imageConfig: { aspectRatio: '16:9', imageSize: '4K' } } });
+    expect(images[0]).toMatchObject({ kind: 'b64', ext: 'png' });
+    expect(provider).toMatchObject({ aspectRatio: '16:9', imageSize: '4K' });
+  });
+
+  it('decodes an inlineData part', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respond({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: PNG.toString('base64') } }] } }] })));
+    const { images } = await generateGeminiImages(geminiJob(), 'key');
+    expect(images[0]).toMatchObject({ kind: 'b64', ext: 'png' });
+  });
+
+  it('rejects more than 14 references', async () => {
+    await expect(generateGeminiImages(geminiJob({ references: Array.from({ length: 15 }, () => 'https://cdn.example.test/x.png') }), 'key')).rejects.toThrow('最多 14 张');
+  });
+
+  it('reports finishReason when no image comes back', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respond({ candidates: [{ finishReason: 'SAFETY', content: { parts: [{ text: 'blocked' }] } }] })));
+    await expect(generateGeminiImages(geminiJob(), 'key')).rejects.toThrow(/SAFETY/);
   });
 });
 

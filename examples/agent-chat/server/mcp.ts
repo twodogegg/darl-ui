@@ -266,7 +266,7 @@ export async function connectApplication(app: McpApplicationConfig, signal: Abor
     if (new Set(tools.map((tool) => tool.name)).size !== tools.length) throw new Error('MCP 返回重复的工具名称');
     return { app, tools, close, call: async (name: string, args: Record<string, unknown>, callSignal = signal) => {
       const result = await client.callTool({ name, arguments: args }, undefined, { signal: AbortSignal.any([signal, callSignal]), timeout: 60_000 });
-      return projectMcpToolResult(result, app.apiKey);
+      return projectMcpToolResult(result as { content?: unknown; structuredContent?: unknown; isError?: boolean }, app.apiKey);
     } };
   } catch (error) {
     await close().catch(() => {});

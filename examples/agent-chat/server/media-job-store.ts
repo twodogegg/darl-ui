@@ -4,8 +4,8 @@ import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 export type MediaJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'uncertain';
-export type MediaJob = { id: string; modelId: 'gpt-image-2' | 'minimax-h3-flash'; type: 'image' | 'video'; status: MediaJobStatus;
-  prompt: string; options: Record<string, unknown>; providerId: string; upstreamModelId: string; baseUrl: string;
+export type MediaJob = { id: string; modelId: string; type: 'image' | 'video'; status: MediaJobStatus;
+  prompt: string; options: Record<string, unknown>; providerId: string; upstreamModelId: string; baseUrl: string; protocolKey?: string;
   remoteTaskId?: string; resultPath?: string; error?: string; phase?: string; attempts: number;
   /** Every saved file, when the request asked for more than one image. */
   resultPaths?: string[];
@@ -46,6 +46,8 @@ export function mediaTaskResult(job: MediaJob) {
   };
 }
 
+export const MEDIA_MODEL_IDS = ['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-image-preview', 'minimax-h3-flash'] as const;
+
 /** The DB, not a timer or browser tab, owns job state. One local Node server is supported. */
 export class MediaJobStore {
   private db: DatabaseSync;
@@ -80,9 +82,9 @@ export class MediaJobStore {
     const row = this.db.prepare('SELECT concurrency FROM media_model_limits WHERE model_id=?').get(model) as { concurrency:number } | undefined;
     return row?.concurrency ?? 4;
   }
-  limits() { return { 'gpt-image-2': this.limit('gpt-image-2'), 'minimax-h3-flash': this.limit('minimax-h3-flash') }; }
+  limits() { return Object.fromEntries(MEDIA_MODEL_IDS.map((model) => [model, this.limit(model)])); }
   setLimit(model: string, limit: number) {
-    if (!['gpt-image-2','minimax-h3-flash'].includes(model) || !Number.isSafeInteger(limit) || limit<1 || limit>100000) throw new Error('并发配置无效（1–100000）');
+    if (!(MEDIA_MODEL_IDS as readonly string[]).includes(model) || !Number.isSafeInteger(limit) || limit<1 || limit>100000) throw new Error('并发配置无效（1–100000）');
     this.db.prepare('INSERT INTO media_model_limits(model_id,concurrency) VALUES(?,?) ON CONFLICT(model_id) DO UPDATE SET concurrency=excluded.concurrency').run(model, limit);
   }
   /** Unknown remote submission MUST NOT be automatically repeated (billing risk). */

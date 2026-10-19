@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { MediaJobStore, type MediaJob } from './media-job-store';
-import { generateImages, submitVideo, checkVideo } from './media-adapters';
+import { generateImages, generateGeminiImages, submitVideo, checkVideo } from './media-adapters';
 
 type Credentials = { baseUrl: string; apiKey: string };
 type CredentialsResolver = (job: MediaJob) => Credentials | undefined;
@@ -57,7 +57,7 @@ export class MediaJobRunner {
     try{
       config=this.resolve(job);
       if(job.type==='image'){
-        const result=await generateImages(job,config.apiKey);
+        const result=job.protocolKey==='gemini-generate-content'?await generateGeminiImages(job,config.apiKey):await generateImages(job,config.apiKey);
         job.resultPaths=result.images.flatMap((image,index)=>image.kind==='b64'?[this.store.saveMedia(job.id+(index?'-'+index:''),image.data,image.ext)]:[]);
         job.resultUrls=result.images.flatMap((image)=>image.kind==='url'?[image.url]:[]);
         job.resultPath=job.resultPaths[0];

@@ -46,20 +46,20 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
       }
       if(path==='/api/media-generation/jobs' && method==='POST'){
         const input=await body(req);
-        if(!['gpt-image-2','minimax-h3-flash'].includes(String(input.modelId)))throw new Error('首期只支持 GPT Image 2 和 MiniMax H3 Flash');
+        if(typeof input.modelId!=='string'||!input.modelId)throw new Error('模型必填');
         if(typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>16000)throw new Error('提示词无效');
         const model=config().models.find(m=>m.id===input.modelId&&m.enabled!==false);
-        if(!model)throw new Error('模型未启用');
+        if(!model||(model.type!=='image'&&model.type!=='video'))throw new Error('模型不存在或不是图片/视频模型');
         const enabled=model.bindings.filter(b=>b.enabled!==false);
         if(enabled.length!==1)throw new Error('每个模型必须且只能绑定一个已启用供应商');
         const binding=enabled[0];
         const provider=providers().find(p=>p.id===binding.providerId);
         if(!provider?.apiKey)throw new Error('供应商缺少 API Key');
-        const type=input.modelId==='gpt-image-2'?'image':'video';
+        const type=model.type;
         const options=input.options&&typeof input.options==='object'&&!Array.isArray(input.options)?input.options as Record<string,unknown>:{};
         if(options.references&&type!=='image')throw new Error('视频参考素材模式待真实网关核验后开放');
         // 适配器在提交时再下载/解码参考图，这里只保留原始值。
-        const job=store.create({modelId:input.modelId as 'gpt-image-2'|'minimax-h3-flash',type,prompt:input.prompt.trim(),providerId:provider.id,upstreamModelId:binding.upstreamModelId,baseUrl:provider.baseUrl,options});
+        const job=store.create({modelId:model.id,type,prompt:input.prompt.trim(),providerId:provider.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey,baseUrl:provider.baseUrl,options});
         void runner.tick();
         reply(res,201,job);return true;
       }
