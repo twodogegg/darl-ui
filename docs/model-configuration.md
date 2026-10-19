@@ -70,11 +70,41 @@ DeepSeek 官方将请求 `medium` 映射到实际 `high`，因此不在 UI 中�
 
 ### 图片
 
-- 文生图、参考图编辑是否支持；**不要求用户手动切换生成/编辑**，由当前输入中是否有参考图推断，但必须验证渠道确实支持。
-- `maxReferenceImages`；最大输出数量；可选画质、文件格式、背景透明设置。
-- 输出规格按 API 支持的 **`size` / 宽高组合**保存，不能把 `1K`、`2K` 标签当成实际 `size` 参数；某些协议可能接受画幅 + 分辨率，应由其适配器转换。
-- GPT Image 2 官方编辑接口最多 16 张参考图；常用 `size` 包括 `auto`、`1024x1024`、`1536x1024`、`1024x1536`，还可以采用符合 API 约束的自定义宽高；这是官方能力参考，第三方渠道仍可覆盖。
-- 图片返回 Base64 或 URL 的差异**由协议适配器统一规范为宿主结果对象**，不是能力模板字段。
+**2026-10-19 校准依据：用户提供的《GPT 与 Google 图像 API》接口说明。** 该说明是用户所接入网关的契约，不应拿通用的“1K / 2K / 4K”标签替代真实参数；以下能力默认值需在实际渠道验证后启用。第一期仍只预置 GPT Image 2；Gemini 图像列为可配置的后续模板，不代表其协议适配器已实现。
+
+- 文生图、参考图编辑是否支持：用户不需要显式“生成 / 编辑”模式开关；宿主协议适配器根据参考图输入和该渠道支持情况选择接口。
+- **尺寸必须支持两种明确的类型化表示，不能只有一个抽象 `resolution` 字段。**
+  - **GPT Image 2（`explicit-size`）**：实际请求为 `size=auto` 或 `WIDTHxHEIGHT`；画幅 × 1K/2K/4K 是界面**推荐预设**，最终要映射到真实像素尺寸。自定义值宽高为 16 的倍数、最长边 ≤3840、宽高比 ≤3:1；本文下面尺寸表所有取值的总像素在 655360–8294400 之间。
+  - **Gemini 图像（`ratio-tier`）**：请求用 `generationConfig.imageConfig.aspectRatio` 与 `imageSize`；`1K/2K/4K` 等是**原生 API 参数值**，K 必须大写。Flash Image 支持 `0.5K`，Pro Image 不支持。
+- **参考图上限**要有“未在渠道文档声明”状态，不得把未知上限写成固定数量。
+  - GPT Image 2：当前提供的编辑接口说明只明确 `image[]` 可包含一张或多张，每张 <50MB，支持 PNG/JPEG/WebP/非动画 GIF；**没有给出精确的参考图总上限**。只有网关核验后才设置 `maxReferenceImages`。
+  - Gemini Flash Image：最多 10 张物体 + 4 张人物，总数 ≤14。
+  - Gemini Pro Image：最多 6 张物体 + 5 张人物 + 3 张风格，总数 ≤14。
+  - 分类约束需要支持 `maxTotal`、按用途角色分组限额；在 UI 无法获得可靠角色信息时不能声称已经执行分类校验。
+- **GPT Image 2**：`/v1/images/generations` 是 JSON 文生图；`/v1/images/edits` 是 multipart 图像编辑；`quality` 可为 `auto/low/medium/high`，`n` 为 1–10，`output_format` 为 `png/jpeg/webp`，`background` 为 `opaque/transparent/auto`。`response_format` 为 `url/b64_json`，默认 `url`，属于协议请求/响应适配，**不要增加独立“响应处理”配置页面**。
+- **Gemini 图像**：`POST /v1beta/models/{model}:generateContent`；提示词与图像使用 `contents[].parts[]`，图像可为纯 Base64 的 `inlineData` 或上游可访问的 `fileData.fileUri`；`responseModalities` 为 `[IMAGE]` 或 `[TEXT,IMAGE]`。响应包含 `candidates[].content.parts[].inlineData`，可能混有文本；多轮编辑必须按协议保留并回传 `thoughtSignature`，并处理 `finishReason/promptFeedback`。可选 `googleSearch` 属于协议/渠道能力，并非尺寸设置。
+- Gemini 通用画幅：`1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`4:5`、`5:4`、`9:16`、`16:9`、`21:9`；Flash 另支持 `1:4`、`4:1`、`1:8`、`8:1`。
+- `n` 是 GPT Images 接口的已定义字段，**不可自动在 Gemini `generateContent` UI 中显示同名输出数量控件**，因用户提供的 Gemini 文档未列出此参数。
+- 不配置 Seed、CFG、采样器等当前闭源接口未开放的调参项。
+
+**GPT Image 2 尺寸推荐预设（UI 档位 → 实际 `size`）**
+
+| 比例 | 1K | 2K | 4K |
+| --- | --- | --- | --- |
+| 1:1 | `1024x1024` | `2048x2048` | `2880x2880` |
+| 3:4 | `768x1024` | `1536x2048` | `2448x3264` |
+| 4:3 | `1024x768` | `2048x1536` | `3264x2448` |
+| 2:3 | `672x1008` | `2048x3072` | `2336x3504` |
+| 3:2 | `1008x672` | `3072x2048` | `3504x2336` |
+| 16:9 | `1280x720` | `2048x1152` | `3840x2160` |
+| 9:16 | `720x1280` | `1152x2048` | `2160x3840` |
+
+**Gemini 图像能力候选模板（本期不自动启用）**
+
+| 模型 ID | imageSize | 参考图分类上限 |
+| --- | --- | --- |
+| `gemini-3.1-flash-image-preview` / `gemini-3.1-flash-image` | `0.5K,1K,2K,4K` | 物体 10 / 人物 4；总数 ≤14 |
+| `gemini-3-pro-image-preview` / `gemini-3-pro-image` | `1K,2K,4K` | 物体 6 / 人物 5 / 风格 3；总数 ≤14 |
 
 ### 视频
 
