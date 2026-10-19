@@ -15,14 +15,15 @@
 
 ## 限制、未验收
 
-1. **图片链路已用真实网关跑通。** GPT 系无参考图走 `/v1/images/generations`，有参考图走 `/v1/images/edits`：远程 HTTP(S) 参考图用 JSON（`image: [url]`，网关自己拉取，已实测可用），本地 base64 用 multipart。结果同时支持 `url` 与 `b64_json`，返回 URL 时直接把它作为结果保存，**不下载**。UI 的推荐尺寸表（画幅 × 1K/2K/4K）由适配器映射为 `size`；被渠道拒绝时会按返回的 `allowed` 选最接近的画幅重试一次，`requestedSize` / `usedSize` 都会记录。`gpt-image-2.5-sunburst` 已实测 `16:9` + `1K`（`1280x720`）生成成功。
-2. **Gemini 图片已实测。** `POST /v1beta/models/{model}:generateContent` 使用 `imageConfig.aspectRatio` + `imageSize`；Base64 参考图用 `inlineData`。当前网关文生图会把图片作为 Markdown data URL 放在 text part，参考图编辑会返回 `inlineData`，适配器两种都识别。仅限制参考图总数 14 张，不声称执行物体 / 人物 / 风格分类限额。
+1. **图片链路已用真实网关跑通。** GPT 系无参考图走 `/v1/images/generations`，有参考图走 `/v1/images/edits`：远程 HTTP(S) 参考图用 JSON（`image: [url]`，网关自己拉取，已实测可用），本地 base64 用 multipart。结果同时支持 `url` 与 `b64_json`，返回 URL 时直接把它作为结果保存，**不下载**。UI 的推荐尺寸表（画幅 × 1K/2K/4K）由适配器映射为 `size`；被渠道拒绝时会按返回的 `allowed` 选最接近的画幅重试一次，`requestedSize` / `usedSize` 都会记录。
+   实测组合（`gpt-image-2.5-sunburst`，2026-10-20）：`1K`+`16:9`、`1K`+`1:1`、`2K`+`16:9`、`2K`+`1:1`、`2K`+`3:2` 均成功，`gpt-image-2` 的 `2K`+`16:9` 也成功。渠道实际出图尺寸与请求值只是接近而不相等（请求 `1280x720` 出 `1280x720`，请求 `1024x1024` 出 `1254x1254`，请求 `3072x2048` 出 `1536x1024`），不要把 `size` 当成返回尺寸断言。
+2. **Gemini 图片已实测。** `POST /v1beta/models/{model}:generateContent` 使用 `imageConfig.aspectRatio` + `imageSize`；Base64 参考图用 `inlineData`。当前网关文生图会把图片作为 Markdown data URL 放在 text part，参考图编辑会返回 `inlineData`，适配器两种都识别。仅限制参考图总数 14 张，不声称执行物体 / 人物 / 风格分类限额。实测 `2K`+`16:9` 的文生图与参考图编辑都落盘为 2752x1536 JPEG（`b64_json` 路径），走本地文件端点在页面展示。
 2b. **H3 Flash 视频已实测。** `POST /v1/videos` 接受 `seconds` / `resolution`（`480` 或 `768`）/ `aspect_ratio`；轮询 `GET /v1/videos/{id}` 的真实状态词是 `processing` / `succeeded`，`video_url` 是相对路径，需按 API 根地址补全。适配器按这套词表工作，因此 H3 的清晰度必须用协议值 `480` / `768`，UI 标签不能再写成 `480P`。
 3. 暂不支持 H3 Flash 参考图/音视频及首尾帧：新版接口未定义首/尾帧角色字段，没有真实网关核验前禁止假装已实现。
 4. 当前仅支持本机单 Node 服务，**没有跨进程租约和分布式一致性保护**；不适合多个 Node 进程共用 SQLite 提交任务。
 5. 已入队的视频如果在 HTTP 已提交但还没收到远端 ID 时中断，会成为 `uncertain`，需要人工对照供应商记录后处理。不要盲目重试。
 6. 自动失败重试、取消远端任务、结果资产管理和生产级用户认证仍未完成。任务 API 限制本机访问，勿把开发服务器直接暴露到公网。
-7. 网关 5xx 会用扁平的 `{ code, message }` 响应体（例如余额不足返回 HTTP 502），已按此解析并显示真实原因；OpenAI 风格的 `{ error }` 仍然支持。
+7. 网关错误统一是 OpenAI 风格的 `{ error: { message } }`，余额不足为 HTTP 403（`insufficient_user_quota`），上游失败为 HTTP 502（`openai_error`）。适配器优先取 `error.message`，取不到才显示原始文本，并且会隐藏请求里的 API Key。余额不足时网关在参数校验之前就拒绝，所以此时连非法参数都只会看到扣费错误。
 
 ## 验证
 
