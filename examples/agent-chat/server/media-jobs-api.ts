@@ -6,6 +6,7 @@ import { createFailureLog } from './failure-log';
 import { effectiveCapabilities, type ModelConfiguration } from '../../../src/components/settings/model-config';
 import { persistMediaReferences } from './media-references';
 import type { StoredProvider } from './models';
+import type { MediaStyleOption } from '../../../src/components/media-workspace/types';
 
 const localhost = new Set(['127.0.0.1','::1','::ffff:127.0.0.1']);
 /** Base64 reference images travel through this JSON endpoint. */
@@ -13,6 +14,16 @@ const MAX_MEDIA_BODY = 128 * 1024 * 1024;
 function reply(res: ServerResponse,status:number,data:unknown) {
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(JSON.stringify(data));
+}
+function parseStyle(value: unknown): MediaStyleOption | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const item = value as Record<string, unknown>;
+  if (typeof item.id !== 'string' || typeof item.name !== 'string') throw new Error('视觉风格参数无效');
+  return {
+    id: item.id.slice(0, 120), name: item.name.slice(0, 120),
+    ...(typeof item.description === 'string' && item.description.trim() ? { description: item.description.slice(0, 1000) } : {}),
+    ...(typeof item.category === 'string' ? { category: item.category.slice(0, 80) } : {}),
+  };
 }
 async function body(req:IncomingMessage, limit=100_000) {
   let data='';
@@ -68,7 +79,8 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         if(referenceCount>maxReferences)throw new Error(`参考图片最多 ${maxReferences} 张`);
         // Large data URLs stay out of the job row; adapters read the saved files.
         const options=persistMediaReferences(store.mediaRoot, rawOptions);
-        const job=store.create({modelId:model.id,type,prompt:input.prompt.trim(),providerId:provider.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey,baseUrl:provider.baseUrl,options});
+        const style = parseStyle(input.style);
+        const job=store.create({modelId:model.id,type,prompt:input.prompt.trim(),...(style ? { style } : {}),providerId:provider.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey,baseUrl:provider.baseUrl,options});
         void runner.tick();
         reply(res,201,job);return true;
       }

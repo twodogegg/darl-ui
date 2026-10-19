@@ -67,6 +67,8 @@ export function Studio({ startGeneration }: {
 | --- | --- |
 | `models` | `MediaModel[]`，必填；可动态更新 |
 | `tasks` | `MediaTask[]`，必填；组件只展示数据 |
+| `styles` | `MediaStyleOption[]`，可选；提供后输入区出现「风格」选择器，选择结果通过 `GenerateRequest.style` 交给宿主 |
+| `onCreateStyle` | `(request: StyleCreateRequest) => void \| Promise<void>`；提供后可在风格弹窗内创建风格，失败保留表单 |
 | `routingStrategy` | `'selected-binding' | 'auto'`；默认选择当前模型绑定，`auto` 交给宿主按逻辑模型路由 |
 | `activeTaskId` | 可选受控任务 ID；不传时组件内部维护选择，默认第一项 |
 | `onTaskChange` | `(taskId) => void`，切换任务通知 |
@@ -119,6 +121,7 @@ type GenerateRequest = {
     providerId?: string;
   };
   mode?: 'text-to-image' | 'reference-edit' | 'text-to-video' | 'first-last-frame' | 'reference';
+  style?: { id: string; name: string; description?: string; category?: string };
   prompt: string;
   references?: {
     images?: MediaInput[]; videos?: MediaInput[]; audios?: MediaInput[];
@@ -133,6 +136,8 @@ type GenerateRequest = {
 
 `mode` 由当前模型能力、输入方式和素材角色自动规范化：无参考图时使用文生图 / 文生视频，有图片编辑素材时使用 `reference-edit` / `reference`，选择首尾帧时使用 `first-last-frame`。有绑定元数据时，默认 `route.strategy` 为 `selected-binding`；传入 `routingStrategy="auto"` 后交给宿主按逻辑模型选择渠道。宿主仍负责凭据、上传、协议适配、轮询和错误映射，组件不会拼接供应商原生请求体。
 
+宿主通过 `styles` 提供风格时，输入区出现「风格」按钮；确认选择后 `GenerateRequest.style` 携带 `{ id, name, description?, category? }`，宿主自行决定如何把风格注入提示词或模型参数。风格列表必须带 `isOwned`，否则自己创建的风格既进不了「我的风格」，还会漏进「风格广场」。传入 `onCreateStyle` 后可直接在弹窗内创建风格，保存成功后由宿主更新 `styles`。
+
 `onGenerate` 只在提示词非空、任务与模型存在且参考数量合法时触发。等待提交 Promise 期间禁止重复提交；抛错显示在输入区，保留草稿方便重试。长期运行状态由宿主更新，不用提交 Promise 模拟轮询。
 
 ## 批次和结果
@@ -141,6 +146,7 @@ type GenerateRequest = {
 
 - `type?: 'image' | 'video'`：建议保存，以便历史模型从配置中删除后仍可播放结果。
 - `logicalModelId?`、`bindingId?`、`providerId?`、`upstreamModelId?`、`protocolKey?`、`route?`、`mode?`：建议保存，使历史批次能够复用原始逻辑模型和渠道路由。
+- `style?: MediaStyleOption`：建议保存，复用时恢复当时的风格选择。
 - `references?: MediaReferences`：历史复用时恢复素材；缺省恢复为空。跨会话保存前应由宿主将本地文件转成远程素材对象。
 
 结果含 `id`、`status`、可选 `url`、`error` 和 `favorited?: boolean`。状态为 `queued | running | completed | failed | cancelled`。每次生成由宿主追加批次，组件按 `batches` 原顺序展示；结果失败互不影响。

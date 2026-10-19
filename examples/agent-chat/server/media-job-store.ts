@@ -2,10 +2,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import type { MediaStyleOption } from '../../../src/components/media-workspace/types';
 
 export type MediaJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'uncertain';
 export type MediaJob = { id: string; modelId: string; type: 'image' | 'video'; status: MediaJobStatus;
-  prompt: string; options: Record<string, unknown>; providerId: string; upstreamModelId: string; baseUrl: string; protocolKey?: string;
+  prompt: string; options: Record<string, unknown>; style?: MediaStyleOption; providerId: string; upstreamModelId: string; baseUrl: string; protocolKey?: string;
   remoteTaskId?: string; resultPath?: string; error?: string; phase?: string; attempts: number;
   /** Every saved file, when the request asked for more than one image. */
   resultPaths?: string[];

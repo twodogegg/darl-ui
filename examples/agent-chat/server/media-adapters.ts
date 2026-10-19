@@ -9,6 +9,13 @@ export type MediaImage =
 /** A provider may answer with inline base64 or with a URL to fetch. Both are valid. */
 export type ImageForm = 'b64_json' | 'url';
 
+function promptFor(job: MediaJob): string {
+  const style = job.style;
+  if (!style) return job.prompt;
+  const description = style.description?.trim();
+  return `${job.prompt}\n\n视觉风格：${style.name}${description ? `。${description}` : ''}`;
+}
+
 /** Recommended output sizes: aspect ratio × tier → WIDTHxHEIGHT. */
 export const IMAGE_SIZE_TABLE: Record<string, Record<'1K'|'2K'|'4K', string>> = {
   '1:1': { '1K': '1024x1024', '2K': '2048x2048', '4K': '2880x2880' },
@@ -182,7 +189,7 @@ export function allowedSizesFromError(body: string) {
 function editForm(job: MediaJob, size: string, references: ImageReference[]) {
   const form = new FormData();
   form.set('model', job.upstreamModelId);
-  form.set('prompt', job.prompt);
+  form.set('prompt', promptFor(job));
   if (size !== 'auto') form.set('size', size);
   for (const [key, value] of Object.entries(requestOptions(job.options))) form.set(key, value);
   references.forEach((reference) => {
@@ -195,7 +202,7 @@ function editForm(job: MediaJob, size: string, references: ImageReference[]) {
 function editJson(job: MediaJob, size: string, references: ImageReference[]) {
   return {
     model: job.upstreamModelId,
-    prompt: job.prompt,
+    prompt: promptFor(job),
     image: references.map((reference) => 'url' in reference ? reference.url : `data:${reference.mimeType};base64,${reference.data.toString('base64')}`),
     ...(size !== 'auto' ? { size } : {}),
     ...jsonOptions(job.options),
@@ -222,6 +229,7 @@ async function readImage(value: unknown): Promise<MediaImage> {
  */
 export async function generateImages(job: MediaJob, key: string): Promise<{ images: MediaImage[]; provider: unknown }> {
   ensureHttp(job.baseUrl);
+  const prompt = promptFor(job);
   const size = imageSize(job.options);
   const references = await normalizeImageReferences(job.options.references);
   const request = (requestedSize: string) => references?.length
@@ -230,7 +238,7 @@ export async function generateImages(job: MediaJob, key: string): Promise<{ imag
         : { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: editForm(job, requestedSize, references), signal: AbortSignal.timeout(180000) })
     : fetch(url(job.baseUrl, 'images/generations'), {
         method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: job.upstreamModelId, prompt: job.prompt, size: requestedSize, ...jsonOptions(job.options) }),
+        body: JSON.stringify({ model: job.upstreamModelId, prompt, size: requestedSize, ...jsonOptions(job.options) }),
         signal: AbortSignal.timeout(180000),
       });
   let response: Response;
@@ -315,8 +323,9 @@ function mimeExtension(mimeType: string) {
  */
 export async function generateGeminiImages(job: MediaJob, key: string): Promise<{ images: MediaImage[]; provider: unknown }> {
   ensureHttp(job.baseUrl);
+  const prompt = promptFor(job);
   const references = await normalizeImageReferences(job.options.references, MAX_GEMINI_REFERENCE_IMAGES);
-  const parts: Record<string, unknown>[] = [{ text: job.prompt }];
+  const parts: Record<string, unknown>[] = [{ text: prompt }];
   for (const reference of references || []) {
     parts.push('url' in reference
       ? { fileData: { fileUri: reference.url } }
@@ -389,7 +398,7 @@ export async function submitVideo(job:MediaJob,key:string):Promise<string>{
   ensureHttp(job.baseUrl);
   if(job.options.references)throw new Error('H3 参考素材上传协议尚未实测，不允许直接提交');
   const result=await createH3Video(job.baseUrl,key,{
-    prompt:job.prompt, seconds:Number(job.options.duration??10),
+    prompt:promptFor(job), seconds:Number(job.options.duration??10),
     resolution:(job.options.resolution ?? '768') as '480'|'768',
     aspectRatio:(job.options.aspectRatio ?? '9:16') as '16:9'|'9:16',
     mode:'text-to-video',

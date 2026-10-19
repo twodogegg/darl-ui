@@ -1,27 +1,35 @@
-import { useId, useRef, type KeyboardEvent } from 'react';
+import { useId, useRef, useState, type KeyboardEvent } from 'react';
 import { Button } from '../ui/Button';
+import { StyleSelector, type StyleCreateRequest } from '../style-selector/StyleSelector';
 import { Alert, Choice, Popover } from './WorkspaceUI';
-import { durations, filterReferences, generationModeLabels, outputLimit, referenceLimit, selectedGenerationMode, supportsFrames, type MediaInputMode } from './model';
-import type { GenerateRequest, MediaModel } from './types';
+import { durations, filterReferences, generationModeLabels, generationModes, outputLimit, referenceLimit, selectedGenerationMode, supportsFrames, type MediaInputMode } from './model';
+import type { GenerateRequest, MediaGenerationMode, MediaModel, MediaStyleOption } from './types';
 import type { ReferenceDraft } from './useReferences';
 
 const labels = { images: '参考图片', videos: '参考视频', audios: '参考音频' };
 const typeLabels = { image: '图片', video: '视频' };
-export function MediaComposer({ models, model, mediaType, onMediaTypeChange, options, onModelChange, onOptionsChange, prompt, onPromptChange, draft, inputMode, onInputModeChange, error, onError, pending, canGenerate, onGenerate }: {
+export function MediaComposer({ models, model, mediaType, onMediaTypeChange, options, onModelChange, onOptionsChange, prompt, onPromptChange, draft, inputMode, onInputModeChange, generationMode, onGenerationModeChange, styles, styleId, onStyleChange, onCreateStyle, error, onError, pending, canGenerate, onGenerate }: {
   models: MediaModel[]; model?: MediaModel; mediaType: MediaModel['type']; onMediaTypeChange: (type: MediaModel['type']) => void;
   options: GenerateRequest['options'];
   onModelChange: (id: string) => void; onOptionsChange: (options: GenerateRequest['options']) => void;
   prompt: string; onPromptChange: (prompt: string) => void; draft: ReferenceDraft;
   inputMode: MediaInputMode; onInputModeChange: (mode: MediaInputMode) => void;
+  generationMode?: MediaGenerationMode; onGenerationModeChange: (mode: MediaGenerationMode) => void;
+  styles: MediaStyleOption[]; styleId?: string; onStyleChange: (styleId: string) => void;
+  onCreateStyle?: (request: StyleCreateRequest) => void | Promise<void>;
   error: string; onError: (message: string) => void; pending: boolean; canGenerate: boolean; onGenerate: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const frameInput = useRef<HTMLInputElement>(null);
   const inputId = useId();
   const frameRole = useRef<'firstFrame' | 'lastFrame'>('firstFrame');
+  const [styleOpen, setStyleOpen] = useState(false);
   const modelTypes = (['image', 'video'] as const).filter((type) => models.some((item) => item.type === type));
   const accept = model ? (['images', 'videos', 'audios'] as const).filter((kind) => referenceLimit(model, kind)).map((kind) => kind === 'images' ? 'image/*' : kind === 'videos' ? 'video/*' : 'audio/*') : [];
-  const selectedMode = model ? selectedGenerationMode(model, inputMode, filterReferences(model, draft.references, inputMode) || {}) : undefined;
+  const availableModes = generationModes(model);
+  const selectedMode = generationMode && availableModes.includes(generationMode)
+    ? generationMode
+    : model ? selectedGenerationMode(model, inputMode, filterReferences(model, draft.references, inputMode) || {}) : undefined;
   const add = (files: File[]) => {
     if (!model) return;
     onError('');
@@ -36,6 +44,10 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
     const supported = files.filter((file) => accept.some((pattern) => file.type.startsWith(pattern.split('/')[0] + '/')));
     if (supported.length !== files.length) onError('部分文件类型不受当前模型支持');
     draft.addFiles(supported);
+    if (supported.length && model) {
+      const nextMode = model.type === 'image' ? 'reference-edit' : 'reference';
+      if (availableModes.includes(nextMode)) onGenerationModeChange(nextMode);
+    }
   };
   const chooseFrame = (role: 'firstFrame' | 'lastFrame') => {
     frameRole.current = role;
@@ -67,11 +79,14 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
     <label htmlFor={inputId} className="darl-visually-hidden">生成提示词</label><textarea id={inputId} className="darl-mw-prompt" rows={2} value={prompt} onChange={(event) => onPromptChange(event.target.value)} onKeyDown={keyDown} aria-invalid={Boolean(error)} placeholder="描述想生成的画面，或添加参考素材后说明修改要求…"/>
     {error && <Alert>{error}</Alert>}
     <div className="darl-mw-controls">
-      {supportsFrames(model) && !!accept.length && <Choice label="素材方式" value={inputMode === 'frames' ? '首尾帧' : '参考素材'} choices={['首尾帧', '参考素材']} onChange={(value) => onInputModeChange(value === '首尾帧' ? 'frames' : 'references')}/>}
+      {model?.type === 'video' && availableModes.length > 1 && <Choice label="生成方式" ariaLabel={selectedMode ? `生成方式：${generationModeLabels[selectedMode]}` : '生成方式'} choices={availableModes} value={selectedMode} format={(value) => generationModeLabels[value as MediaGenerationMode]} onChange={(value) => onGenerationModeChange(value as MediaGenerationMode)}/>} 
+      {supportsFrames(model) && !!accept.length && <Choice label="素材方式" value={inputMode === 'frames' ? '首尾帧' : '参考素材'} choices={['首尾帧', '参考素材']} onChange={(value) => onInputModeChange(value === '首尾帧' ? 'frames' : 'references')}/>} 
       {inputMode === 'references' && !!accept.length && <Button variant="secondary" size="sm" onClick={chooseFiles} aria-label="添加参考素材">＋ 素材</Button>}
-      {selectedMode && <span className="darl-mw-mode" aria-label={`生成方式：${generationModeLabels[selectedMode]}`}>生成方式 · {generationModeLabels[selectedMode]}</span>}
-      {inputMode === 'references' && model && <span className="darl-mw-capacity">{(['images', 'videos', 'audios'] as const).filter((kind) => referenceLimit(model, kind)).map((kind) => `${labels[kind]} ${draft.references[kind]?.length ?? 0}/${referenceLimit(model, kind)}`).join(' · ')}</span>}
       <Popover label="选择模型" trigger={model ? `${model.type === 'image' ? '▧' : '▷'} ${model.name}` : '无可用模型'}>{(close) => <div className="darl-mw-models">{models.filter((item) => item.type === mediaType).map((item) => <Button key={item.id} variant={item.id === model?.id ? 'secondary' : 'ghost'} size="sm" onClick={() => { onModelChange(item.id); close(); }} aria-pressed={item.id === model?.id}>{item.name}</Button>)}</div>}</Popover>
+      {(!!styles.length || !!onCreateStyle) && <>
+        <Button variant="secondary" size="sm" onClick={() => setStyleOpen(true)} aria-label="选择风格">风格 <b>{styleId ? styles.find((style) => style.id === styleId)?.name || '已选择' : '默认'}</b></Button>
+        <StyleSelector styles={styles} open={styleOpen} onOpenChange={setStyleOpen} value={styleId || null} onChange={(style) => onStyleChange(style?.id || '')} onCreate={onCreateStyle} />
+      </>}
       {!!model?.capabilities.aspectRatios?.length && <Choice label={model.type === 'image' ? '画幅' : '比例'} choices={model.capabilities.aspectRatios} value={options.aspectRatio} onChange={(aspectRatio) => onOptionsChange({ ...options, aspectRatio: String(aspectRatio) })}/>}
       {!!model?.capabilities.resolutions?.length && <Choice label={model.type === 'image' ? '清晰度' : '分辨率'} choices={model.capabilities.resolutions} value={options.resolution} onChange={(resolution) => onOptionsChange({ ...options, resolution: String(resolution) })}/>}
       {model && durations(model).length > 0 && <Choice label="时长" choices={durations(model)} value={options.duration} format={(value) => `${value}秒`} onChange={(duration) => onOptionsChange({ ...options, duration: Number(duration) })}/>}

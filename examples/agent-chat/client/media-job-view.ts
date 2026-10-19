@@ -1,4 +1,4 @@
-import type { GenerateRequest, MediaBatch, MediaResult, MediaTask } from '../../../src/components/media-workspace/types';
+import type { GenerateRequest, MediaBatch, MediaResult, MediaStyleOption, MediaTask } from '../../../src/components/media-workspace/types';
 
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'uncertain';
 export type MediaJob = {
@@ -8,6 +8,7 @@ export type MediaJob = {
   status: JobStatus;
   prompt: string;
   options: Record<string, unknown>;
+  style?: MediaStyleOption;
   providerId: string;
   upstreamModelId: string;
   protocolKey?: string;
@@ -54,6 +55,7 @@ export function jobToBatch(job: MediaJob): MediaBatch {
     modelId: job.modelId,
     prompt: job.prompt,
     options: jobOptions(job),
+    ...(job.style ? { style: job.style } : {}),
     results: jobResults(job),
     providerId: job.providerId,
     upstreamModelId: job.upstreamModelId,

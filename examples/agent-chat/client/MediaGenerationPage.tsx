@@ -1,14 +1,28 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { MediaWorkspace, toMediaModels, type GenerateRequest, type MediaModel, type MediaTask, type ModelConfiguration } from '@darl/ui';
+import { MediaWorkspace, toMediaModels, type GenerateRequest, type MediaModel, type MediaStyleOption, type MediaTask, type ModelConfiguration, type StyleCreateRequest } from '@darl/ui';
 import { Button } from '../../../src/components/ui/Button';
 import { jobToBatch, jobToTask, type MediaJob } from './media-job-view';
+import { styleOptionsFromCatalog, type StyleCatalog } from './workspace-styles';
 
 async function request<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`/api/${path}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  const init: RequestInit = body instanceof FormData
+    ? { method: 'POST', body }
+    : body
+      ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+      : {};
+  const response = await fetch(`/api/${path}`, init);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : data.error?.message || `请求失败：HTTP ${response.status}`);
   return data as T;
+}
+
+async function styleForm(input: StyleCreateRequest): Promise<FormData> {
+  const data = new FormData();
+  data.set('name', input.name);
+  data.set('prompt', input.description);
+  if (input.referenceImage) data.set('reference_image', input.referenceImage);
+  return data;
 }
 
 function newTask(): MediaTask {
@@ -43,10 +57,23 @@ async function referenceImages(references: GenerateRequest['references']): Promi
 
 export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
   const [models, setModels] = useState<MediaModel[]>([]);
+  const [styles, setStyles] = useState<MediaStyleOption[]>([]);
   const [tasks, setTasks] = useState<MediaTask[]>([]);
   const [activeTaskId, setActiveTaskId] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  const loadStyles = useCallback(async () => {
+    const catalog = await request<{ data: StyleCatalog }>('workspace/styles');
+    const next = styleOptionsFromCatalog(catalog.data || {});
+    setStyles(next);
+    return next;
+  }, []);
+
+  const createStyle = async (input: StyleCreateRequest) => {
+    await request<{ data: { id: number } }>('workspace/styles', await styleForm(input));
+    await loadStyles();
+  };
 
   const mergeJobs = useCallback((jobs: MediaJob[]) => {
     setTasks((current) => {
@@ -73,9 +100,14 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
     let alive = true;
     const bootstrap = async () => {
       try {
-        const [configuration, jobs] = await Promise.all([request<ModelConfiguration>('model-config'), request<MediaJob[]>('media-generation/jobs')]);
+        const [configuration, jobs, styleCatalog] = await Promise.all([
+          request<ModelConfiguration>('model-config'),
+          request<MediaJob[]>('media-generation/jobs'),
+          request<{ data: StyleCatalog }>('workspace/styles'),
+        ]);
         if (!alive) return;
         setModels(supportedModels(configuration));
+        setStyles(styleOptionsFromCatalog(styleCatalog.data || {}));
         const loaded = jobs.map(jobToTask);
         const draft = newTask();
         setTasks(loaded.length ? loaded : [draft]);
@@ -99,14 +131,15 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
     setActiveTaskId(task.id);
   };
 
-  const submit = async (taskId: string, payload: { modelId: string; prompt: string; options: GenerateRequest['options']; references?: GenerateRequest['references'] }) => {
+  const submit = async (taskId: string, payload: { modelId: string; prompt: string; options: GenerateRequest['options']; references?: GenerateRequest['references']; style?: GenerateRequest['style'] }) => {
     const references = await referenceImages(payload.references);
     const job = await request<MediaJob>('media-generation/jobs', {
       modelId: payload.modelId,
       prompt: payload.prompt,
       options: { ...payload.options, ...(references.length ? { references } : {}) },
+      ...(payload.style ? { style: payload.style } : {}),
     });
-    const batch = { ...jobToBatch(job), ...(payload.references ? { references: payload.references } : {}) };
+    const batch = { ...jobToBatch(job), ...(payload.references ? { references: payload.references } : {}), ...(payload.style ? { style: payload.style } : {}) };
     setTasks((current) => {
       const exists = current.some((task) => task.id === taskId);
       if (!exists) return [{ id: taskId, title: payload.prompt.slice(0, 24) || '媒体任务', batches: [batch] }, ...current];
@@ -120,7 +153,7 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
   const generate = async (request_: GenerateRequest) => {
     setError('');
     try {
-      await submit(request_.taskId, { modelId: request_.modelId, prompt: request_.prompt, options: request_.options, ...(request_.references ? { references: request_.references } : {}) });
+      await submit(request_.taskId, { modelId: request_.modelId, prompt: request_.prompt, options: request_.options, ...(request_.references ? { references: request_.references } : {}), ...(request_.style ? { style: request_.style } : {}) });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '提交生成任务失败');
       throw reason;
@@ -133,7 +166,7 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
     if (!owner || !batch) return;
     setError('');
     try {
-      await submit(owner.id, { modelId: batch.modelId, prompt: batch.prompt, options: batch.options, ...(batch.references ? { references: batch.references } : {}) });
+      await submit(owner.id, { modelId: batch.modelId, prompt: batch.prompt, options: batch.options, ...(batch.references ? { references: batch.references } : {}), ...(batch.style ? { style: batch.style } : {}) });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '重新生成失败');
     }
@@ -154,12 +187,14 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
     {error && <p className="example-media-generation-error" role="alert">{error}</p>}
     {loading ? <p className="example-media-generation-loading">正在读取模型与任务…</p> : <MediaWorkspace
       models={models}
+      styles={styles}
       tasks={tasks}
       activeTaskId={activeTaskId}
       onTaskChange={setActiveTaskId}
       onCreateTask={createTask}
       onRenameTask={(taskId, title) => setTasks((current) => current.map((task) => task.id === taskId ? { ...task, title } : task))}
       onGenerate={generate}
+      onCreateStyle={createStyle}
       onRetry={(batchId) => { void retry(batchId); }}
       onRegenerate={(batchId) => { void retry(batchId); }}
       onFavoriteChange={favorite}

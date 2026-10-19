@@ -265,6 +265,30 @@ describe('MediaWorkspace', () => {
     prompt(); submit(); await waitFor(() => expect(onGenerate).toHaveBeenCalled());
     expect(onGenerate.mock.calls[0][0].references.images).toEqual([image]);
   });
+  it('风格只有传入 isOwned 时进入我的风格，并可创建新风格', async () => {
+    const styles = [
+      { id: 'market', name: '电影感', category: '真人风格', description: '自然肤色' },
+      { id: 'owned', name: '我的短剧感', category: '我的风格', description: '柔和逆光', isOwned: true },
+    ];
+    const onCreateStyle = vi.fn().mockResolvedValue(undefined);
+    const onGenerate = vi.fn();
+    render(<MediaWorkspace models={models} tasks={tasks} styles={styles} onCreateStyle={onCreateStyle} onGenerate={onGenerate}/>);
+    fireEvent.click(screen.getByRole('button', { name: '选择风格' }));
+    fireEvent.mouseDown(screen.getByRole('tab', { name: '我的风格' }));
+    expect(screen.getByRole('button', { name: '预览我的短剧感' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '预览电影感' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '创建风格' }));
+    fireEvent.change(screen.getByLabelText(/风格名称/), { target: { value: '新风格' } });
+    fireEvent.change(screen.getByLabelText(/风格描述词/), { target: { value: '冷色霓虹' } });
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    fireEvent.click(screen.getByRole('button', { name: '创建风格' }));
+    await waitFor(() => expect(onCreateStyle).toHaveBeenCalledWith({ name: '新风格', description: '冷色霓虹' }));
+    fireEvent.mouseDown(screen.getByRole('tab', { name: '风格广场' }));
+    fireEvent.click(screen.getByRole('button', { name: '预览电影感' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认选择' }));
+    prompt(); submit();
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith(expect.objectContaining({ style: styles[0] })));
+  });
   it('普通文本粘贴不拦截，图片粘贴复用素材队列；无模型或任务不可提交', () => {
     const { rerender } = render(<MediaWorkspace models={models} tasks={tasks} onGenerate={vi.fn()}/>);
     const textEvent = new Event('paste', { bubbles: true, cancelable: true });
