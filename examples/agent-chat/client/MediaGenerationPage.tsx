@@ -5,12 +5,12 @@ import { Button } from '../../../src/components/ui/Button';
 import { jobToBatch, jobToTask, type MediaJob } from './media-job-view';
 import { styleOptionsFromCatalog, type StyleCatalog } from './workspace-styles';
 
-async function request<T>(path: string, body?: unknown): Promise<T> {
+async function request<T>(path: string, body?: unknown, method?: string): Promise<T> {
   const init: RequestInit = body instanceof FormData
     ? { method: 'POST', body }
     : body
       ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-      : {};
+      : method ? { method } : {};
   const response = await fetch(`/api/${path}`, init);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : data.error?.message || `请求失败：HTTP ${response.status}`);
@@ -38,10 +38,10 @@ function readFile(file: File): Promise<string> {
   });
 }
 
-/** The H3 adapter is still text-to-video only; do not offer unverified reference modes. */
+/** H3 accepts image references; video/audio references and first/last frames are not enabled yet. */
 function supportedModels(configuration: ModelConfiguration): MediaModel[] {
   return toMediaModels(configuration).map((model) => model.type === 'video'
-    ? { ...model, capabilities: { ...model.capabilities, images: 0, videos: 0, audios: 0, generationModes: ['text-to-video'], firstLastFrame: false } }
+    ? { ...model, capabilities: { ...model.capabilities, images: Math.min(model.capabilities.images ?? 0, 9), videos: 0, audios: 0, generationModes: ['text-to-video', 'reference'], firstLastFrame: false } }
     : model);
 }
 
@@ -131,6 +131,21 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
     setActiveTaskId(task.id);
   };
 
+  const deleteTask = async (taskId: string) => {
+    const task = tasks.find((item) => item.id === taskId);
+    if (!task) return;
+    setError('');
+    try {
+      await Promise.all(task.batches.map((batch) => request(`media-generation/jobs/${batch.id}`, undefined, 'DELETE')));
+      const remaining = tasks.filter((item) => item.id !== taskId);
+      const next = remaining.length ? remaining : [newTask()];
+      setTasks(next);
+      if (activeTaskId === taskId) setActiveTaskId(next[0].id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '删除任务失败');
+    }
+  };
+
   const submit = async (taskId: string, payload: { modelId: string; prompt: string; options: GenerateRequest['options']; references?: GenerateRequest['references']; style?: GenerateRequest['style'] }) => {
     const references = await referenceImages(payload.references);
     const job = await request<MediaJob>('media-generation/jobs', {
@@ -193,6 +208,7 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
       onTaskChange={setActiveTaskId}
       onCreateTask={createTask}
       onRenameTask={(taskId, title) => setTasks((current) => current.map((task) => task.id === taskId ? { ...task, title } : task))}
+      onDeleteTask={deleteTask}
       onGenerate={generate}
       onCreateStyle={createStyle}
       onRetry={(batchId) => { void retry(batchId); }}

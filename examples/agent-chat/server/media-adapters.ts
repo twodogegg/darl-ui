@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import type { MediaJob } from './media-job-store';
-import { createH3Video, getH3Video, downloadH3Video } from './h3-flash';
+import { createH3Video, getH3Video, downloadH3Video, resolveH3File, uploadH3File } from './h3-flash';
 
 /** A finished image is either inline bytes or a link. The link IS the result. */
 export type MediaImage =
@@ -109,7 +109,7 @@ function sniffMime(data: Buffer) {
  * Remote links pass through so the channel fetches them; local files are read
  * as bytes for multipart/inline upload.
  */
-export async function normalizeImageReferences(value: unknown, max = MAX_REFERENCE_IMAGES): Promise<ImageReference[] | undefined> {
+export async function normalizeImageReferences(value: unknown, max = MAX_REFERENCE_IMAGES, localMedia?: (url: string) => { bytes: Buffer; mime: string } | undefined): Promise<ImageReference[] | undefined> {
   if (value === undefined || value === null) return undefined;
   const rows = Array.isArray(value) ? value : [value];
   type Source = { kind: 'value'; value: string } | { kind: 'file'; path: string; mimeType?: string };
@@ -131,6 +131,12 @@ export async function normalizeImageReferences(value: unknown, max = MAX_REFEREN
       return { name: `reference-${index + 1}.${mimeType.split('/')[1].replace('jpeg', 'jpg')}`, mimeType, data };
     }
     const inline = DATA_URL.exec(source.value);
+    const local = /^\/api\/media-generation\/jobs\/([a-f0-9-]+)\/file(?:\?index=(\d+))?$/.exec(source.value);
+    if (local) {
+      const saved = localMedia?.(source.value);
+      if (!saved) throw new Error(`参考图片 ${index + 1} 不存在或尚未完成`);
+      return { name: `reference-${index + 1}.${saved.mime.split('/')[1].replace('jpeg', 'jpg')}`, mimeType: saved.mime, data: saved.bytes };
+    }
     if (!inline) return { url: source.value };
     const data = Buffer.from(inline[2], 'base64');
     if (!data.length) throw new Error(`参考图片 ${index + 1} 为空`);
@@ -394,14 +400,23 @@ export async function generateImage(job: MediaJob, key: string) {
   return images[0];
 }
 
-export async function submitVideo(job:MediaJob,key:string):Promise<string>{
+export async function submitVideo(job:MediaJob,key:string,localMedia?:(url:string)=>{bytes:Buffer;mime:string}|undefined):Promise<string>{
   ensureHttp(job.baseUrl);
-  if(job.options.references)throw new Error('H3 参考素材上传协议尚未实测，不允许直接提交');
+  const references=await normalizeImageReferences(job.options.references,9,localMedia);
+  const referenceImages:string[]=[];
+  for(const reference of references||[]){
+    if('url' in reference){referenceImages.push(reference.url);continue;}
+    const blob=new Blob([new Uint8Array(reference.data)],{type:reference.mimeType});
+    const uploaded=await uploadH3File(job.baseUrl,key,blob,reference.name,'vision',AbortSignal.timeout(60000));
+    const resolved=await resolveH3File(job.baseUrl,key,uploaded.id,AbortSignal.timeout(30000));
+    if(!resolved.url)throw new Error('H3 参考图片没有返回公网 URL');
+    referenceImages.push(resolved.url);
+  }
   const result=await createH3Video(job.baseUrl,key,{
     prompt:promptFor(job), seconds:Number(job.options.duration??10),
     resolution:(job.options.resolution ?? '768') as '480'|'768',
     aspectRatio:(job.options.aspectRatio ?? '9:16') as '16:9'|'9:16',
-    mode:'text-to-video',
+    ...(referenceImages.length?{referenceImages,mode:'reference' as const}:{mode:'text-to-video' as const}),
   },AbortSignal.timeout(30000));
   return result.id;
 }

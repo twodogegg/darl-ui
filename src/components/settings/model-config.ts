@@ -105,7 +105,7 @@ export const BUILTIN_PROTOCOLS: ProtocolAdapterDefinition[] = [
   { key: 'openai-responses', label: 'OpenAI Responses', types: ['text'], implemented: true },
   { key: 'openai-images', label: 'OpenAI Images', types: ['image'], implemented: true, description: '宿主已接通文生图与参考图编辑' },
   { key: 'gemini-generate-content', label: 'Gemini Generate Content', types: ['image'], implemented: true, description: '宿主已接通 imageConfig 生成与参考图编辑' },
-  { key: 'darl-h3-flash-unified', label: 'Darl H3 Flash（新版统一视频）', types: ['video'], implemented: true, description: '宿主已接通基础文生视频；参考素材与首尾帧仍待网关验收' },
+  { key: 'darl-h3-flash-unified', label: 'Darl H3 Flash（新版统一视频）', types: ['video'], implemented: true, description: '宿主已接通文生视频与参考图片；首尾帧仍待网关验收' },
 ];
 
 export const BUILTIN_TEMPLATES: CapabilityTemplate[] = [

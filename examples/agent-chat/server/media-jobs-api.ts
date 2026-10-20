@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { MediaJobStore } from './media-job-store';
 import { MediaJobRunner } from './media-runner';
@@ -73,7 +74,6 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         const rawOptions=input.options&&typeof input.options==='object'&&!Array.isArray(input.options)?input.options as Record<string,unknown>:{};
         if(rawOptions.references!==undefined&&!Array.isArray(rawOptions.references))throw new Error('参考素材必须是数组');
         const referenceCount=Array.isArray(rawOptions.references)?rawOptions.references.length:0;
-        if(referenceCount&&type!=='image')throw new Error('视频参考素材模式待真实网关核验后开放');
         const effective=effectiveCapabilities(config(),model,binding);
         const maxReferences=effective&&'maxReferenceImages' in effective?effective.maxReferenceImages:0;
         if(referenceCount>maxReferences)throw new Error(`参考图片最多 ${maxReferences} 张`);
@@ -85,6 +85,13 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         reply(res,201,job);return true;
       }
       const match=path.match(/^\/api\/media-generation\/jobs\/([a-f0-9-]+)(\/file)?$/);
+      if(match && !match[2] && method==='DELETE'){
+        const job=store.delete(match[1]);
+        if(!job){reply(res,404,{error:'任务不存在'});return true;}
+        const paths=job.resultPaths?.length?job.resultPaths:job.resultPath?[job.resultPath]:[];
+        for(const file of paths){try{unlinkSync(file);}catch{}}
+        reply(res,200,{ok:true});return true;
+      }
       if(match && method==='GET'){
         const job=store.get(match[1]);
         if(!job){reply(res,404,{error:'任务不存在'});return true;}

@@ -74,6 +74,7 @@ export function Studio({ startGeneration }: {
 | `onTaskChange` | `(taskId) => void`，切换任务通知 |
 | `onCreateTask` | `() => void`；不传时隐藏新建入口 |
 | `onRenameTask` | `(taskId, title) => void`；不传时隐藏重命名入口 |
+| `onDeleteTask` | `(taskId) => void \| Promise<void>`；提供后任务项显示删除入口，删除确认由组件处理 |
 | `onGenerate` | `(request: GenerateRequest) => void \| Promise<void>`，必填 |
 | `onRetry` | `(batchId, resultId) => void`；仅失败结果显示重试 |
 | `onCancel` | `(batchId, resultId) => void`；仅等待 / 运行结果显示取消 |

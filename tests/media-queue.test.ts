@@ -34,4 +34,13 @@ describe('SQLite media generation queue',()=>{
       expect(()=>db.setLimit('other',10)).toThrow();
     }finally{rmSync(dir,{recursive:true,force:true});}
   });
+  it('reuses an already saved media file on a repeated completion poll',()=>{
+    const dir=mkdtempSync(join(tmpdir(),'media-queue-'));
+    try{
+      const db=new MediaJobStore(join(dir,'db.sqlite'));
+      const first=db.saveMedia('job-1',Buffer.from('first'),'mp4');
+      const second=db.saveMedia('job-1',Buffer.from('second'),'mp4');
+      expect(second).toBe(first);
+    }finally{rmSync(dir,{recursive:true,force:true});}
+  });
 });

@@ -120,6 +120,7 @@ export interface MediaWorkspaceProps {
   onTaskChange?: (taskId: string) => void;
   onCreateTask?: () => void;
   onRenameTask?: (taskId: string, title: string) => void;
+  onDeleteTask?: (taskId: string) => void | Promise<void>;
   onGenerate: (request: GenerateRequest) => void | Promise<void>;
   onRetry?: (batchId: string, resultId: string) => void;
   onCancel?: (batchId: string, resultId: string) => void;

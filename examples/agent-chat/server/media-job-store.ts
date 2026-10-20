@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { MediaStyleOption } from '../../../src/components/media-workspace/types';
@@ -69,6 +69,13 @@ export class MediaJobStore {
     const row = this.db.prepare('SELECT data FROM media_generation_jobs WHERE id=?').get(id) as Row | undefined;
     return row ? JSON.parse(row.data) as MediaJob : undefined;
   }
+  delete(id: string) {
+    const job = this.get(id);
+    if (!job) return undefined;
+    if (job.status === 'queued' || job.status === 'running') throw new Error('任务仍在生成，请等待完成或失败后再删除');
+    this.db.prepare('DELETE FROM media_generation_jobs WHERE id=?').run(id);
+    return job;
+  }
   put(job: MediaJob) {
     job.updatedAt = now();
     this.db.prepare('INSERT INTO media_generation_jobs(id,model_id,status,updated_at,data) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at,data=excluded.data')
@@ -105,6 +112,8 @@ export class MediaJobStore {
   saveMedia(id: string, bytes: Buffer, ext: 'png'|'jpeg'|'webp'|'gif'|'mp4'): string {
     if (bytes.length > 200*1024*1024) throw new Error('生成文件超过 200MB');
     const path = join(this.mediaRoot, id+'.'+ext);
+    // A repeated success poll must reuse the saved file instead of failing on EEXIST.
+    if (existsSync(path)) return path;
     writeFileSync(path, bytes, { flag:'wx', mode:0o600 });
     return path;
   }

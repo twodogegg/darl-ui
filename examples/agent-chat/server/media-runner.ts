@@ -65,7 +65,11 @@ export class MediaJobRunner {
         job.resultForm=result.images[0]?.kind==='url'?'url':'b64_json';
         job.providerResponse=result.provider as Record<string,unknown>;
       }else{
-        const id=await submitVideo(job,config.apiKey);
+        const id=await submitVideo(job,config.apiKey,(url)=>{
+          const match=/^\/api\/media-generation\/jobs\/([a-f0-9-]+)\/file(?:\?index=(\d+))?$/.exec(url);
+          const owner=match?this.store.get(match[1]):undefined;
+          return owner?this.media(owner,Number(match?.[2]||0)):undefined;
+        });
         job.remoteTaskId=id;job.phase='remote-running';job.nextPollAt=Date.now()+5000;
       }
     }catch(error){

@@ -20,8 +20,12 @@
 .darl-mw-task-heading { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 18px 12px 10px; color: var(--darl-muted); font-size: 11px; }
 .darl-mw-task-heading .darl-button { font-size: 10px; min-height: 26px; }
 .darl-mw-task-list { padding: 0 9px; display: flex; flex-direction: column; gap: 5px; overflow: auto; }
-.darl-media-workspace .darl-mw-task { justify-content: flex-start; padding: 8px; border: 1px solid transparent; border-radius: 9px; text-align: left; min-height: 61px; gap: 10px; white-space: normal; }
+.darl-mw-task-row { position: relative; flex: none; }
+.darl-media-workspace .darl-mw-task { width: 100%; justify-content: flex-start; padding: 8px; padding-right: 31px; border: 1px solid transparent; border-radius: 9px; text-align: left; min-height: 61px; gap: 10px; white-space: normal; }
 .darl-mw-task[aria-current='page'] { background: color-mix(in srgb, var(--darl-primary) 18%, var(--darl-surface)); border-color: color-mix(in srgb, var(--darl-primary) 25%, transparent); color: var(--darl-text); }
+.darl-media-workspace .darl-mw-task-delete { position: absolute; right: 5px; top: 6px; width: 24px; min-width: 24px; height: 24px; padding: 0; color: var(--darl-muted); opacity: 0; }
+.darl-mw-task-row:hover .darl-mw-task-delete, .darl-mw-task-row:focus-within .darl-mw-task-delete { opacity: 1; }
+.darl-mw-task-delete:hover { color: var(--darl-danger); background: color-mix(in srgb, var(--darl-danger) 12%, transparent); }
 .darl-mw-task img, .darl-mw-task-symbol { width: 44px; height: 44px; object-fit: cover; border-radius: 7px; flex: none; }
 .darl-mw-task-symbol { display: grid; place-items: center; background: var(--darl-mw-hover); font-size: 24px; }
 .darl-mw-task > span:last-child { min-width: 0; }
@@ -117,7 +121,9 @@
   .darl-mw-brand small, .darl-mw-sidebar-footer { display: none; }
   .darl-mw-task-heading { padding: 0 12px 4px; }.darl-mw-task-heading > span { display: none; }
   .darl-mw-task-list { flex-direction: row; padding: 0 10px 7px; overflow-x: auto; }
-  .darl-media-workspace .darl-mw-task { width: 160px; flex: none; padding: 5px; min-height: 42px; }.darl-mw-task img, .darl-mw-task-symbol { width: 32px; height: 32px; }
+  .darl-mw-task-row { width: 160px; }
+  .darl-media-workspace .darl-mw-task { width: 160px; flex: none; padding: 5px; padding-right: 28px; min-height: 42px; }.darl-mw-task img, .darl-mw-task-symbol { width: 32px; height: 32px; }
+  .darl-media-workspace .darl-mw-task-delete { opacity: 1; top: 3px; right: 3px; }
   .darl-mw-main { flex: 1; }.darl-mw-topbar { height: 42px; padding: 0 12px; }.darl-mw-topbar > .darl-mw-muted { display: none; }
   .darl-mw-content { padding: 16px 12px 20px; }.darl-mw-title h2 { font-size: 18px; }.darl-mw-result-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
   .darl-mw-composer-shell { padding: 8px 10px 10px; }.darl-mw-controls { gap: 5px; }.darl-mw-controls .darl-button { font-size: 10px; padding: 0 7px; }.darl-mw-composer-hint { display: none; }.darl-mw-prompt { min-height: 46px; }

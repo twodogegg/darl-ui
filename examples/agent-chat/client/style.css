@@ -93,7 +93,7 @@ body { margin: 0; background: #101113; }
 .example-media-concurrency-row .darl-button { width: 100%; height: 34px; }
 .example-media-concurrency .example-media-concurrency-message { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--darl-border); }
 @media (max-width: 560px) { .example-media-concurrency { padding: 16px; }.example-media-concurrency-row { grid-template-columns: minmax(0, 1fr) 84px 60px; gap: 8px; } }
-.example-media-generation { display: grid; gap: 16px; max-width: 1180px; min-width: 0; margin: 0 auto; padding: 24px 16px 40px; }
+.example-media-generation { display: grid; gap: 16px; width: min(100%, 1680px); min-width: 0; margin: 0 auto; padding: 24px 24px 40px; }
 .example-media-generation-head { display: flex; align-items: flex-start; gap: 14px; }
 .example-media-generation-head h1 { margin: 6px 0 4px; font-size: 23px; }
 .example-media-generation-head p { margin: 0; color: var(--darl-muted); font-size: 12px; line-height: 1.6; }
