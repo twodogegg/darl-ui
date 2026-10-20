@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { MediaWorkspace, toMediaModels, type GenerateRequest, type MediaModel, type MediaStyleOption, type MediaTask, type ModelConfiguration, type StyleCreateRequest } from '@darl/ui';
 import { Button } from '../../../src/components/ui/Button';
-import { jobToBatch, jobToTask, type MediaJob } from './media-job-view';
+import { jobToBatch, jobsToTasks, type MediaJob } from './media-job-view';
 import { styleOptionsFromCatalog, type StyleCatalog } from './workspace-styles';
 
 async function request<T>(path: string, body?: unknown, method?: string): Promise<T> {
@@ -78,21 +78,17 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
   const mergeJobs = useCallback((jobs: MediaJob[]) => {
     setTasks((current) => {
       const batches = new Map(jobs.map((job) => [job.id, jobToBatch(job)]));
-      const next = current.map((task) => ({
-        ...task,
-        batches: task.batches.map((batch) => {
+      return current.map((task) => {
+        const taskJobs = jobs.filter((job) => (job.taskId || job.id) === task.id);
+        const currentBatches = task.batches.map((batch) => {
           const updated = batches.get(batch.id);
           if (!updated) return batch;
           const favorites = new Set(batch.results.filter((result) => result.favorited).map((result) => result.id));
-          return {
-            ...updated,
-            ...(batch.references ? { references: batch.references } : {}),
-            results: updated.results.map((result) => favorites.has(result.id) ? { ...result, favorited: true } : result),
-          };
-        }),
-      }));
-      const known = new Set(next.flatMap((task) => task.batches.map((batch) => batch.id)));
-      return [...jobs.filter((job) => !known.has(job.id)).map(jobToTask), ...next];
+          return { ...updated, ...(batch.references ? { references: batch.references } : {}), results: updated.results.map((result) => favorites.has(result.id) ? { ...result, favorited: true } : result) };
+        });
+        const known = new Set(currentBatches.map((batch) => batch.id));
+        return { ...task, batches: [...currentBatches, ...taskJobs.filter((job) => !known.has(job.id)).map(jobToBatch)] };
+      }).concat(jobsToTasks(jobs.filter((job) => !current.some((task) => task.id === (job.taskId || job.id)))));
     });
   }, []);
 
@@ -108,7 +104,7 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
         if (!alive) return;
         setModels(supportedModels(configuration));
         setStyles(styleOptionsFromCatalog(styleCatalog.data || {}));
-        const loaded = jobs.map(jobToTask);
+        const loaded = jobsToTasks(jobs);
         const draft = newTask();
         setTasks(loaded.length ? loaded : [draft]);
         setActiveTaskId(loaded[0]?.id || draft.id);
@@ -150,6 +146,7 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
     const references = await referenceImages(payload.references);
     const job = await request<MediaJob>('media-generation/jobs', {
       modelId: payload.modelId,
+      taskId,
       prompt: payload.prompt,
       options: { ...payload.options, ...(references.length ? { references } : {}) },
       ...(payload.style ? { style: payload.style } : {}),

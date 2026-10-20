@@ -61,6 +61,7 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
       }
       if(path==='/api/media-generation/jobs' && method==='POST'){
         const input=await body(req, MAX_MEDIA_BODY);
+        if(typeof input.taskId!=='string'||!input.taskId.trim()||input.taskId.length>120)throw new Error('任务 ID 无效');
         if(typeof input.modelId!=='string'||!input.modelId)throw new Error('模型必填');
         if(typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>16000)throw new Error('提示词无效');
         const model=config().models.find(m=>m.id===input.modelId&&m.enabled!==false);
@@ -80,7 +81,7 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         // Large data URLs stay out of the job row; adapters read the saved files.
         const options=persistMediaReferences(store.mediaRoot, rawOptions);
         const style = parseStyle(input.style);
-        const job=store.create({modelId:model.id,type,prompt:input.prompt.trim(),...(style ? { style } : {}),providerId:provider.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey,baseUrl:provider.baseUrl,options});
+        const job=store.create({taskId:input.taskId.trim(),modelId:model.id,type,prompt:input.prompt.trim(),...(style ? { style } : {}),providerId:provider.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey,baseUrl:provider.baseUrl,options});
         void runner.tick();
         reply(res,201,job);return true;
       }

@@ -3,6 +3,7 @@ import type { GenerateRequest, MediaBatch, MediaResult, MediaStyleOption, MediaT
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'uncertain';
 export type MediaJob = {
   id: string;
+  taskId?: string;
   modelId: string;
   type: 'image' | 'video';
   status: JobStatus;
@@ -65,4 +66,16 @@ export function jobToBatch(job: MediaJob): MediaBatch {
 
 export function jobToTask(job: MediaJob): MediaTask {
   return { id: job.id, title: job.prompt.trim().slice(0, 24) || '媒体任务', batches: [jobToBatch(job)] };
+}
+
+/** Group persisted jobs by their owning task; legacy jobs remain standalone tasks. */
+export function jobsToTasks(jobs: MediaJob[]): MediaTask[] {
+  const tasks = new Map<string, MediaTask>();
+  for (const job of jobs) {
+    const id = job.taskId || job.id;
+    const task = tasks.get(id);
+    if (task) task.batches.push(jobToBatch(job));
+    else tasks.set(id, { id, title: job.prompt.trim().slice(0, 24) || '媒体任务', batches: [jobToBatch(job)] });
+  }
+  return [...tasks.values()];
 }
