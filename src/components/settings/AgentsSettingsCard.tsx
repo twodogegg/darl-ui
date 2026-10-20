@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { ArrowLeft, Pencil, Plus, Save, Trash2, Upload } from 'lucide-react';
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Field, FieldDescription, FieldLabel, Input, NativeSelect, Switch, Textarea } from '../ui/FormControls';
 import { Button } from '../ui/Button';
@@ -6,28 +6,24 @@ import type { AgentConfig, AgentsSettingsCardProps } from './types';
 import './settings.css';
 
 const avatarPresets = ['🤖', '🎨', '🧠', '🛠️', '✍️', '🔍'];
-const emptyAgent = (models: AgentsSettingsCardProps['models'] = []): AgentConfig => {
-  const defaultModel = models[0];
-  return { id: '', name: '', avatar: '🤖', type: 'main_agent', source: 'user_created', selectable: true, callable: true, contextStrategy: 'inherit_filtered', instructions: '', providerId: defaultModel?.providerId || '', modelId: defaultModel?.id || '', contextPolicy: { childContext: 'task-only', historyMode: 'summary', toolResultMode: 'standard' }, enabled: true };
-};
+const emptyAgent = (): AgentConfig => ({ id: '', name: '', avatar: '🤖', type: 'main_agent', source: 'user_created', selectable: true, callable: true, contextStrategy: 'inherit_filtered', instructions: '', contextPolicy: { childContext: 'task-only', historyMode: 'summary', toolResultMode: 'standard' }, enabled: true });
 function cloneAgent(agent: AgentConfig): AgentConfig { return { ...agent, skillIds: [...(agent.skillIds || [])] }; }
 function Avatar({ value, name }: { value?: string; name: string }) { if (value?.startsWith('/') || value?.startsWith('http') || value?.startsWith('data:image/')) return <img className="darl-agent-avatar" src={value} alt="" />; return <span className="darl-agent-avatar" aria-hidden="true">{value || name.slice(0, 1).toUpperCase()}</span>; }
 
-export function AgentsSettingsCard({ agents, models = [], onSave, onDelete }: AgentsSettingsCardProps) {
+export function AgentsSettingsCard({ agents, onSave, onDelete }: AgentsSettingsCardProps) {
   const idPrefix = useId();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AgentConfig | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const textModels = useMemo(() => models.filter((model) => model.type === 'text' && model.enabled !== false), [models]);
   const selected = editingId ? agents.find((agent) => agent.id === editingId) : undefined;
   useEffect(() => { if (!editingId) return; const current = agents.find((agent) => agent.id === editingId); if (current) setDraft(cloneAgent(current)); else { setEditingId(null); setDraft(null); } }, [agents, editingId]);
-  const beginCreate = () => { setEditingId(''); setDraft(emptyAgent(textModels)); setMessage('填写 Agent 信息后保存。模型和推理等级在聊天输入框中选择。'); };
+  const beginCreate = () => { setEditingId(''); setDraft(emptyAgent()); setMessage('填写 Agent 信息后保存。模型和推理等级在聊天输入框中选择。'); };
   const beginEdit = (agent: AgentConfig) => { setEditingId(agent.id); setDraft(cloneAgent(agent)); setMessage(''); };
   const closeEditor = () => { if (!busy) { setEditingId(null); setDraft(null); setMessage(''); } };
   const update = (patch: Partial<AgentConfig>) => setDraft((current) => current ? { ...current, ...patch } : current);
   const uploadAvatar = (file: File) => { if (!file.type.match(/^image\/(png|jpe?g|webp)$/i)) return setMessage('头像只支持 PNG、JPEG 或 WebP。'); if (file.size > 8 * 1024 * 1024) return setMessage('头像不能超过 8 MiB。'); const reader = new FileReader(); reader.onerror = () => setMessage('头像读取失败，请重试。'); reader.onload = () => update({ avatar: String(reader.result) }); reader.readAsDataURL(file); };
-  const save = async () => { if (!draft || !onSave) return setMessage('宿主尚未接入 Agent 保存。'); if (!draft.id.trim() || !draft.name.trim() || !draft.instructions.trim()) return setMessage('请填写 Agent ID、名称和系统提示词。'); if (!draft.providerId || !draft.modelId) return setMessage('请先在模型设置中配置并启用文本模型。'); setBusy(true); setMessage(''); try { await onSave({ ...draft, id: draft.id.trim(), name: draft.name.trim(), instructions: draft.instructions }); setEditingId(draft.id.trim()); setMessage('Agent 已保存。'); } catch (reason) { setMessage(reason instanceof Error ? reason.message : '保存 Agent 失败。'); } finally { setBusy(false); } };
+  const save = async () => { if (!draft || !onSave) return setMessage('宿主尚未接入 Agent 保存。'); if (!draft.id.trim() || !draft.name.trim() || !draft.instructions.trim()) return setMessage('请填写 Agent ID、名称和系统提示词。'); setBusy(true); setMessage(''); try { await onSave({ ...draft, id: draft.id.trim(), name: draft.name.trim(), instructions: draft.instructions }); setEditingId(draft.id.trim()); setMessage('Agent 已保存。'); } catch (reason) { setMessage(reason instanceof Error ? reason.message : '保存 Agent 失败。'); } finally { setBusy(false); } };
   const remove = async () => { if (!selected || !onDelete) return; setBusy(true); setMessage(''); try { await onDelete(selected.id); setEditingId(null); setDraft(null); setMessage('Agent 已删除。'); } catch (reason) { setMessage(reason instanceof Error ? reason.message : '删除 Agent 失败。'); } finally { setBusy(false); } };
 
   if (!draft) return <section className="darl-agents-settings-card" aria-labelledby="darl-agents-settings-title"><header className="darl-settings-card-header"><div><span className="darl-settings-eyebrow">AGENTS</span><h2 id="darl-agents-settings-title">Agents</h2><p>主 Agent 可以由用户选择；Sub Agent 只供其他 Agent 委派调用。</p></div><Button variant="outline" size="sm" onClick={beginCreate}><Plus data-icon="inline-start" />添加 Agent</Button></header><div className="darl-agent-list">{agents.map((agent) => <button type="button" className="darl-agent-list-row" key={agent.id} onClick={() => beginEdit(agent)}><div className="darl-agent-card-visual"><Avatar value={agent.avatar} name={agent.name} /><span className="darl-agent-card-edit"><Pencil data-icon="inline-start" /></span></div><div className="darl-agent-card-body"><div className="darl-agent-card-name"><strong>{agent.name}</strong><Badge>{agent.builtIn ? '系统默认' : agent.type === 'sub_agent' ? 'Sub Agent' : agent.enabled === false ? '已停用' : agent.isDefault ? '默认' : '主 Agent'}</Badge></div><small>{agent.description || agent.id}</small></div></button>)}{!agents.length && <div className="darl-settings-empty">还没有配置 Agent，点击右上角添加。</div>}</div></section>;

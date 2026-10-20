@@ -88,13 +88,16 @@ describe('Agent configuration API', () => {
     await writeFile(promptFile, '默认提示词');
     try {
       await withApi(directory, promptFile, async (request) => {
-        const agent = { id: 'art', name: '美术 Agent', instructions: '只负责美术任务', providerId: 'darl', modelId: 'deepseek-v4.1-flash', isDefault: true };
+        const agent = { id: 'art', name: '美术 Agent', instructions: '只负责美术任务', isDefault: true, providerId: 'darl', modelId: 'legacy-model' };
         const saved = await request('agents', { agent });
         expect(saved.status).toBe(200);
         const savedBody = await saved.json();
         expect(savedBody).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'art', isDefault: true })]));
         expect(JSON.stringify(savedBody)).not.toContain('apiKey');
-        expect(dbJson<Array<{ id: string }>>(directory, 'agents').find((item) => item.id === 'art')).toMatchObject(agent);
+        const stored = dbJson<Array<Record<string, unknown>>>(directory, 'agents').find((item) => item.id === 'art');
+        expect(stored).toMatchObject({ id: 'art', name: '美术 Agent', instructions: '只负责美术任务' });
+        expect(stored).not.toHaveProperty('providerId');
+        expect(stored).not.toHaveProperty('modelId');
         const updated = await request('agents', { agent: { ...agent, name: '美术 Agent v2', enabled: false } });
         expect((await updated.json()).find((item: { id: string }) => item.id === 'art')).toMatchObject({ name: '美术 Agent v2', enabled: false });
         const removed = await request('agents/art', undefined, 'DELETE');

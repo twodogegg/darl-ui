@@ -36,7 +36,7 @@ npm run dev
 主 Agent 委派给同一个专业 Sub Agent 的历史由服务端 SQLite 的 `subagent_threads` 表保存。在同一个主聊天会话中再次委派同一个 Sub Agent，会自动带上**该子会话自己的历史任务和最终回复**；页面刷新或本机服务重启后也可以接续。新建主聊天、切换主 Agent 或切换 Sub Agent 不共享子会话历史。
 
 - 子会话身份由本地单用户作用域、主聊天 `sessionId`、主 Agent ID 和 Sub Agent ID 组合确定，与每次执行的新 `runId` / `parentRunId` 不同。
-- 只保存子任务及最终回复，**不会**跨子 Agent 复制上下文，也不持久化原始 MCP 工具结果、隐藏推理或密钥。子 Agent 的提示词、模型、Skills 和 MCP 工具每次从当前配置重新确认。
+- 只保存子任务及最终回复，**不会**跨子 Agent 复制上下文，也不持久化原始 MCP 工具结果、隐藏推理或密钥。子 Agent 的提示词、Skills 和 MCP 工具每次从当前配置重新确认；模型使用当前聊天选择的文本模型。
 - 子历史按子模型的上下文预算与 Agent 上下文策略压缩；失败、取消或超时不写入虚假成功回复。同一子会话的并行调用在本地进程内排队，SQLite 版本校验防止其他写入者静默覆盖。
 - 当前示例仅面向**本地单用户**。子会话使用固定 `local` 作用域；部署为多用户服务之前必须接入真实的宿主用户鉴权与隔离，不能把请求头视为身份凭据。
 - 此功能支持主 Agent **间接续聊**子 Agent；子会话的独立列表、可选多线程切换和 UI 历史查看仍是后续扩展。
@@ -327,7 +327,7 @@ import { AgentPlaza } from '@darl/ui';
 
 设置中心的模型页面顶部同时提供默认媒体模型设置，目前只配置图片和视频：默认图片为 `gpt-image-2`（2K、16:9），也可以选择 `gpt-image-2.5` 或 `gemini-3-pro-image-preview`；默认视频为 `minimax-h3-flash`（480、16:9）。图片产品选项只有画幅、1K/2K/4K 档位和参考图数量；视频清晰度用 H3 协议值 480/768。配置保存在示例服务的本地 SQLite 中；文本模型在聊天输入框旁选择。
 
-每次委派只把任务说明传给子 Agent，子 Agent 使用自己的模型、提示词和当前会话启用的 Skill / MCP 应用，完成后只返回最终摘要。MCP 写操作继续复用宿主的 `ToolConfirmations`，因此允许、拒绝、停止和超时都在服务端生效；NDJSON 工具事件包含 `runId`、`parentRunId` 和 `agentId`，现有侧栏会显示委派、执行和审批状态。Agent 配置保存在 `.local/agent-chat/data.sqlite`，不会写入浏览器存储。
+每次委派只把任务说明传给子 Agent，子 Agent 使用当前聊天选择的文本模型、自己的提示词和当前会话启用的 Skill / MCP 应用，完成后只返回最终摘要。MCP 写操作继续复用宿主的 `ToolConfirmations`，因此允许、拒绝、停止和超时都在服务端生效；NDJSON 工具事件包含 `runId`、`parentRunId` 和 `agentId`，现有侧栏会显示委派、执行和审批状态。Agent 配置保存在 `.local/agent-chat/data.sqlite`，不会写入浏览器存储。
 
 ## StyleSelector｜风格选择弹窗
 

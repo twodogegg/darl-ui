@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { publicAgent, validateAgent, validateAgents } from '../examples/agent-chat/server/agents';
 
-const agent = (id: string) => ({ id, name: id, instructions: `负责 ${id}`, providerId: 'darl', modelId: 'text' });
+const agent = (id: string) => ({ id, name: id, instructions: `负责 ${id}` });
 
 describe('server-managed Agent configuration', () => {
   it('normalizes lists and never exposes credentials', () => {
@@ -10,6 +10,8 @@ describe('server-managed Agent configuration', () => {
     expect(value).toMatchObject({ avatar: '🎨', skillIds: ['one'], enabled: true });
     expect(publicAgent(value)).not.toHaveProperty('apiKey');
     expect(publicAgent(value)).not.toHaveProperty('applicationIds');
+    expect(publicAgent(value)).not.toHaveProperty('providerId');
+    expect(publicAgent(value)).not.toHaveProperty('modelId');
   });
 
   it('accepts multiple enabled Agents without a delegation allow-list', () => {

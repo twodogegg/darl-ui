@@ -79,9 +79,6 @@ export interface AgentConfig {
   avatar?: string;
   description?: string;
   instructions: string;
-  providerId: string;
-  modelId: string;
-  reasoningEfforts?: string[];
   skillIds?: string[];
   contextPolicy?: AgentContextPolicy;
   enabled?: boolean;
@@ -90,7 +87,6 @@ export interface AgentConfig {
 
 export interface AgentsSettingsCardProps {
   agents: AgentConfig[];
-  models?: AgentModelConfig[];
   skills?: Array<{ id: string; name: string; enabled?: boolean }>;
   onSave?: (agent: AgentConfig) => void | Promise<void>;
   onDelete?: (agentId: string) => void | Promise<void>;
