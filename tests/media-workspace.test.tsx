@@ -237,6 +237,21 @@ describe('MediaWorkspace', () => {
     expect(onGenerate.mock.calls[0][0]).toMatchObject({ prompt: '生成测试画面', references: { images: [{ id: 'image-result', url: '/image.png' }], videos: [{ id: 'video-result', url: '/video.mp4' }] } });
     expect(onGenerate.mock.calls[0][0].options).toEqual({ count: 1, duration: 8, generateAudio: true });
   });
+  it('图片和视频结果都可以加入统一对比并在面板中移除', () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const history: MediaTask[] = [{ ...tasks[0], batches: [
+      { id: 'compare-image', modelId: 'image', type: 'image', prompt: '图片', options: { count: 1 }, results: [{ id: 'compare-image-result', status: 'completed', url: '/image.png' }] },
+      { id: 'compare-video', modelId: 'video', type: 'video', prompt: '视频', options: { count: 1 }, results: [{ id: 'compare-video-result', status: 'completed', url: '/video.mp4' }] },
+    ] }];
+    render(<MediaWorkspace models={models} tasks={history} onGenerate={vi.fn()}/>);
+    fireEvent.click(screen.getAllByRole('button', { name: '加入对比' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: '加入对比' })[0]);
+    expect(screen.getByRole('dialog')).toHaveTextContent('媒体对比');
+    expect(screen.getByRole('img', { name: '图片 1' })).toBeInTheDocument();
+    expect(document.querySelector('.darl-compare-media-stage video')).toHaveAttribute('src', '/video.mp4');
+    fireEvent.click(screen.getByRole('button', { name: '移除 图片 1' }));
+    expect(screen.queryByRole('img', { name: '图片 1' })).toBeNull();
+  });
   it('用作参考时提交统一文件存储的真实 fileId 而非结果卡片展示 ID', async () => {
     const history: MediaTask[] = [{ ...tasks[0], batches: [
       { id: 'image-batch', modelId: 'image', type: 'image', prompt: '图片源提示词', options: { count: 1 }, results: [{ id: 'job-1-0', fileId: 'file-1', status: 'completed', url: '/api/media-generation/jobs/job-1/file', thumbnailUrl: '/api/files/file-1?width=320' }] },

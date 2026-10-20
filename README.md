@@ -239,9 +239,11 @@ const videos = [
 <VideoCompare videos={videos} bestVideoId={bestId} onBestChange={setBestId} />
 ```
 
-`VideoCompare` 支持 `videos`（2–3 项、至少 2 项可比较）、`layout: 'auto' | 'vertical' | 'horizontal'`、`audioSourceId/defaultAudioSourceId/onAudioSourceChange`、`bestVideoId/defaultBestVideoId/onBestChange`、`onRemove`、`onError`、`loop`、`accentColor` 与 `className`。
+`VideoCompare` 支持 `videos`（2–3 项、至少 2 项可比较），也支持通过 `media` 传入图片 / 视频素材；另有 `layout: 'auto' | 'vertical' | 'horizontal'`、`audioSourceId/defaultAudioSourceId/onAudioSourceChange`、`bestVideoId/defaultBestVideoId/onBestChange`、`onRemove`、`onError`、`loop`、`accentColor` 与 `className`。
 
 **边界**：所有视频从各自 0 秒同步；全局时长取最长视频，短视频停留末帧，切换声音不重置时间轴，选为最佳不修改音源。播放依赖浏览器解码能力，并做适度时间轴纠偏，不承诺专业软件级逐帧锁定。不会合成视频、管理资产或保存最佳记录；业务网站可通过 `onBestChange(id)` 持久化选择。组件不会上传视频，演示页面中的本地文件仅通过浏览器 Blob URL 使用。
+
+`MediaWorkspace` 已在每个成功结果上提供「加入对比」，选中 2–3 个图片或视频后点击「打开对比」即可直接复用 `VideoCompare`；组件只消费宿主传入的 URL，不上传或持久化媒体。
 
 ## MediaWorkspace｜图片 / 视频生成工作台
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '../ui/Button';
 import { Alert, Badge, Empty, Modal } from './WorkspaceUI';
+import { VideoCompare, type CompareMedia } from '../video-compare/VideoCompare';
 import type { MediaBatch, MediaInput, MediaModel, MediaReferences, MediaResult, MediaTask, MediaWorkspaceProps } from './types';
 
 const statusLabels = { queued: '等待生成', running: '生成中', completed: '生成完成', failed: '生成失败', cancelled: '已取消' };
@@ -37,12 +38,23 @@ export function MediaResults({ task, models, onReuse, onReference, onRetry, onCa
   onReference: (result: MediaResult, type: 'image' | 'video') => void;
 } & Pick<MediaWorkspaceProps, 'onRetry' | 'onCancel' | 'onRegenerate' | 'onDeleteBatch' | 'onFavoriteChange'>) {
   const [preview, setPreview] = useState<{ result: MediaResult; prompt: string; type: 'image' | 'video' } | null>(null);
+  const [compareItems, setCompareItems] = useState<CompareMedia[]>([]);
+  const [compareOpen, setCompareOpen] = useState(false);
   useEffect(() => setPreview(null), [task?.id]);
+  useEffect(() => { setCompareItems([]); setCompareOpen(false); }, [task?.id]);
   if (!task?.batches.length) return <Empty title={task ? '开始你的第一批创作' : '创建一个创作任务'}>填写提示词，选择模型，生成图片或视频。</Empty>;
   const batches = task.batches.every((batch) => batch.createdAt && Number.isFinite(Date.parse(batch.createdAt)))
     ? [...task.batches].sort((a, b) => Date.parse(a.createdAt!) - Date.parse(b.createdAt!))
     : task.batches;
-  return <><div className="darl-mw-collection">{task.batches.length} 个生成批次</div>{batches.map((batch, index) => {
+  const toggleCompare = (item: CompareMedia) => {
+    const selected = compareItems.some((entry) => entry.id === item.id);
+    if (!selected && compareItems.length >= 1 && compareItems.length < 3) setCompareOpen(true);
+    setCompareItems((current) => {
+      if (current.some((entry) => entry.id === item.id)) return current.filter((entry) => entry.id !== item.id);
+      return current.length < 3 ? [...current, item] : current;
+    });
+  };
+  return <><div className="darl-mw-collection"><span>{task.batches.length} 个生成批次</span></div>{compareItems.length > 0 && <div className="darl-mw-compare-summary"><span>已选 {compareItems.length} 个对比素材{compareItems.length < 2 ? '，再选择 1 个即可打开对比' : ''}</span><Button size="sm" variant="outline" disabled={compareItems.length < 2} onClick={() => setCompareOpen(true)}>打开对比</Button><Button size="sm" variant="ghost" onClick={() => setCompareItems([])}>清空</Button></div>}{batches.map((batch, index) => {
     const model = models.find((item) => item.id === batch.modelId);
     const type = batch.type ?? model?.type;
     return <section key={batch.id} className="darl-mw-batch" aria-label={`批次 ${index + 1}`}><div className="darl-mw-batch-header"><div><h3 title={batch.prompt}>{batch.prompt}</h3><div className="darl-mw-batch-meta"><Badge>{model?.name ?? batch.modelId}</Badge>{type && <Badge>{type === 'image' ? '图片' : '视频'}</Badge>}{batch.options.aspectRatio && <Badge>{batch.options.aspectRatio}</Badge>}{batch.options.resolution && <Badge>{batch.options.resolution}</Badge>}{batch.options.duration !== undefined && <Badge>{batch.options.duration}秒</Badge>}{batch.options.generateAudio !== undefined && <Badge>{batch.options.generateAudio ? '有声' : '无声'}</Badge>}</div><BatchReferences references={batch.references}/></div><div className="darl-mw-batch-actions"><Button size="sm" variant="outline" onClick={() => onReuse(batch)}>复用参数</Button>{onDeleteBatch && <Button size="sm" variant="ghost" onClick={() => { if (window.confirm('确定永久删除这一生成批次及其结果文件？')) void onDeleteBatch(batch.id); }}>删除批次</Button>}</div></div>
@@ -59,11 +71,12 @@ export function MediaResults({ task, models, onReuse, onReference, onRetry, onCa
         <div className="darl-mw-result-actions">{result.status === 'completed' && result.url && <>
           {onRegenerate && <Button variant="ghost" size="icon" title="重新生成这一张" aria-label={`重新生成结果 ${result.id}`} onClick={() => onRegenerate(batch.id, result.id)}><svg data-icon="inline-start" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></Button>}
           {type && <Button variant="ghost" size="sm" onClick={() => onReference(result, type)}>用作参考</Button>}
+          {type && <Button variant="ghost" size="sm" aria-pressed={compareItems.some((item) => item.id === `${batch.id}:${result.id}`)} disabled={!compareItems.some((item) => item.id === `${batch.id}:${result.id}`) && compareItems.length >= 3} title={!compareItems.some((item) => item.id === `${batch.id}:${result.id}`) && compareItems.length >= 3 ? '最多同时对比 3 个素材' : undefined} onClick={() => toggleCompare({ id: `${batch.id}:${result.id}`, name: `${type === 'image' ? '图片' : '视频'} ${resultIndex + 1}`, type, src: result.url!, ...(result.thumbnailUrl ? { poster: result.thumbnailUrl } : {}) })}>{compareItems.some((item) => item.id === `${batch.id}:${result.id}`) ? '移出对比' : '加入对比'}</Button>}
           <a href={result.url} download={`media-${result.id}`} target="_blank" rel="noreferrer" aria-label={`下载结果 ${result.id}`}>下载</a>
           {onFavoriteChange && <Button className="darl-mw-favorite" variant="ghost" size="icon" title={result.favorited ? '取消收藏' : '收藏'} aria-label={`${result.favorited ? '取消收藏' : '收藏'}结果 ${result.id}`} aria-pressed={result.favorited ?? false} onClick={() => onFavoriteChange(batch.id, result.id, !result.favorited)}><svg data-icon="inline-start" width="15" height="15" viewBox="0 0 24 24" fill={result.favorited ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M20.8 4.8c-2.7-2.7-6.2-1-8.8 1.6C9.4 3.8 5.9 2.1 3.2 4.8c-2.7 2.7-1.6 6 .5 8.4L12 21l8.3-7.8c2.1-2.4 3.2-5.7.5-8.4Z"/></svg></Button>}
         </>}</div>
       </article>)}</div>
       {!batch.results.length && <Empty title="暂无结果">宿主更新任务后会显示生成状态。</Empty>}
     </section>;
-  })}<Modal title="结果预览" open={Boolean(preview)} onOpenChange={(open) => { if (!open) setPreview(null); }}>{preview && <><div className="darl-mw-preview"><ResultMedia type={preview.type} result={preview.result} prompt={preview.prompt} full/></div><p className="darl-mw-preview-caption">{preview.prompt}</p></>}</Modal></>;
+  })}<Modal title="结果预览" open={Boolean(preview)} onOpenChange={(open) => { if (!open) setPreview(null); }}>{preview && <><div className="darl-mw-preview"><ResultMedia type={preview.type} result={preview.result} prompt={preview.prompt} full/></div><p className="darl-mw-preview-caption">{preview.prompt}</p></>}</Modal><Modal title="媒体对比" open={compareOpen} onOpenChange={setCompareOpen}><VideoCompare videos={[]} media={compareItems} onRemove={(id) => setCompareItems((current) => current.filter((item) => item.id !== id))} /></Modal></>;
 }
