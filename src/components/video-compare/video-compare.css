@@ -23,6 +23,8 @@
 .darl-compare-grid--horizontal .darl-compare-stage { aspect-ratio:9 / 16; }
 .darl-compare-grid--pending .darl-compare-stage { height:160px; }
 .darl-compare-stage video { width:100%; height:100%; position:absolute; inset:0; object-fit:contain; }
+.darl-compare-media-stage img, .darl-compare-media-stage video { width:100%; height:100%; object-fit:contain; background:var(--darl-background); }
+.darl-compare-media-note { margin:14px 0 0; color:var(--darl-muted); font-size:12px; }
 .darl-compare-overlay { position:absolute; inset:0; display:grid; place-items:center; text-align:center; padding:14px; background:#111827dd; color:#d1d5db; font-size:12px; }
 .darl-compare-overlay--error { color:#fecaca; }
 .darl-compare-card-foot { padding:9px 11px; min-height:47px; display:flex; align-items:center; justify-content:space-between; gap:5px; }

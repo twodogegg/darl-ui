@@ -2,15 +2,16 @@ import { useId, useRef, useState, type KeyboardEvent } from 'react';
 import { Button } from '../ui/Button';
 import { StyleSelector, type StyleCreateRequest } from '../style-selector/StyleSelector';
 import { Alert, Choice, Popover } from './WorkspaceUI';
-import { durations, filterReferences, generationModeLabels, generationModes, outputLimit, referenceLimit, selectedGenerationMode, supportsFrames, type MediaInputMode } from './model';
+import { durations, filterReferences, GENERATION_COUNTS, generationModeLabels, generationModes, outputLimit, referenceLimit, selectedGenerationMode, supportsFrames, type MediaInputMode } from './model';
 import type { GenerateRequest, MediaGenerationMode, MediaModel, MediaStyleOption } from './types';
 import type { ReferenceDraft } from './useReferences';
 
 const labels = { images: '参考图片', videos: '参考视频', audios: '参考音频' };
 const typeLabels = { image: '图片', video: '视频' };
-export function MediaComposer({ models, model, mediaType, onMediaTypeChange, options, onModelChange, onOptionsChange, prompt, onPromptChange, draft, inputMode, onInputModeChange, generationMode, onGenerationModeChange, styles, styleId, onStyleChange, onCreateStyle, error, onError, pending, canGenerate, onGenerate }: {
+export function MediaComposer({ models, model, mediaType, onMediaTypeChange, options, generationCount, onGenerationCountChange, onModelChange, onOptionsChange, prompt, onPromptChange, draft, inputMode, onInputModeChange, generationMode, onGenerationModeChange, styles, styleId, onStyleChange, onCreateStyle, error, onError, pending, canGenerate, onGenerate }: {
   models: MediaModel[]; model?: MediaModel; mediaType: MediaModel['type']; onMediaTypeChange: (type: MediaModel['type']) => void;
   options: GenerateRequest['options'];
+  generationCount: number; onGenerationCountChange: (count: number) => void;
   onModelChange: (id: string) => void; onOptionsChange: (options: GenerateRequest['options']) => void;
   prompt: string; onPromptChange: (prompt: string) => void; draft: ReferenceDraft;
   inputMode: MediaInputMode; onInputModeChange: (mode: MediaInputMode) => void;
@@ -68,6 +69,8 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
     {modelTypes.length > 1 && <div className="darl-mw-type" role="radiogroup" aria-label="生成类型">{modelTypes.map((type) => <Button key={type} variant={type === mediaType ? 'secondary' : 'ghost'} size="sm" role="radio" aria-checked={type === mediaType} aria-label={`生成${typeLabels[type]}`} onClick={() => onMediaTypeChange(type)}>{type === 'image' ? '▧' : '▷'} {typeLabels[type]}</Button>)}</div>}
     <div className="darl-mw-references">{inputMode === 'references' && (['images', 'videos', 'audios'] as const).map((kind) => draft.previews(kind).map((item) => <div key={item.key} className="darl-mw-reference" data-unsupported={!model || !referenceLimit(model, kind)} title={`${labels[kind]}：${item.name}`}>
       {kind === 'images' && item.url ? <img src={item.url} alt={item.name}/> : <span>{kind === 'videos' ? '视频' : kind === 'audios' ? '音频' : '图片'}</span>}
+      {item.status === 'uploading' && <span className="darl-mw-reference-progress">{item.progress == null ? '上传中' : `${item.progress}%`}</span>}
+      {item.status === 'error' && <span className="darl-mw-reference-error" title={item.error}>失败</span>}
       <Button variant="secondary" size="icon" onClick={item.remove} aria-label={`移除${labels[kind]} ${item.name}`}>×</Button>
     </div>))}
     {inputMode === 'frames' && supportsFrames(model) && (['firstFrame', 'lastFrame'] as const).map((role) => {
@@ -90,7 +93,8 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
       {!!model?.capabilities.aspectRatios?.length && <Choice label={model.type === 'image' ? '画幅' : '比例'} choices={model.capabilities.aspectRatios} value={options.aspectRatio} onChange={(aspectRatio) => onOptionsChange({ ...options, aspectRatio: String(aspectRatio) })}/>}
       {!!model?.capabilities.resolutions?.length && <Choice label={model.type === 'image' ? '清晰度' : '分辨率'} choices={model.capabilities.resolutions} value={options.resolution} onChange={(resolution) => onOptionsChange({ ...options, resolution: String(resolution) })}/>}
       {model && durations(model).length > 0 && <Choice label="时长" choices={durations(model)} value={options.duration} format={(value) => `${value}秒`} onChange={(duration) => onOptionsChange({ ...options, duration: Number(duration) })}/>}
-      {model && outputLimit(model) > 1 && <Choice label="数量" choices={Array.from({ length: outputLimit(model) }, (_, i) => i + 1)} value={options.count} onChange={(count) => onOptionsChange({ ...options, count: Number(count) })}/>}
+      {model && outputLimit(model) > 1 && <Choice label="单次输出" choices={Array.from({ length: outputLimit(model) }, (_, i) => i + 1)} value={options.count} onChange={(count) => onOptionsChange({ ...options, count: Number(count) })}/>}
+      <Choice label="生成数量" choices={[...GENERATION_COUNTS]} value={generationCount} onChange={(count) => onGenerationCountChange(Number(count))}/>
       {model?.type === 'video' && model.capabilities.generateAudio === true && <Button variant="secondary" size="sm" role="switch" aria-label="生成声音" aria-checked={options.generateAudio ?? false} onClick={() => onOptionsChange({ ...options, generateAudio: !options.generateAudio })}>生成声音 {options.generateAudio ? '开' : '关'}</Button>}
       <Button className="darl-mw-generate" size="sm" disabled={!canGenerate} onClick={onGenerate}>{pending ? '提交中…' : '✧ 生成'}</Button>
     </div>

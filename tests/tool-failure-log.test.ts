@@ -22,10 +22,13 @@ describe('media task result for the model and UI', () => {
     expect(JSON.parse(result.body)).toMatchObject({ isError: true, status: 'uncertain', error: '渠道未返回 b64_json；URL 结果需要先经网关验收再开放' });
   });
 
-  it('keeps a completed job successful and exposes the result path', () => {
-    const result = mediaTaskResult(job({ status: 'completed', resultPath: '/tmp/a69427d4.png' }));
+  it('keeps a completed job successful and exposes every stored result', () => {
+    const result = mediaTaskResult(job({ status: 'completed', resultFileIds: ['file-a', 'file-b'] }));
     expect(result.failed).toBe(false);
-    expect(JSON.parse(result.body)).toMatchObject({ status: 'completed', resultUrls: ['/api/media-generation/jobs/a69427d4-e93b-47f0-986e-065a01e8d140/file'] });
+    expect(JSON.parse(result.body)).toMatchObject({ status: 'completed', resultUrls: [
+      '/api/media-generation/jobs/a69427d4-e93b-47f0-986e-065a01e8d140/file',
+      '/api/media-generation/jobs/a69427d4-e93b-47f0-986e-065a01e8d140/file?index=1',
+    ] });
     expect(JSON.parse(result.body).isError).toBeUndefined();
   });
 

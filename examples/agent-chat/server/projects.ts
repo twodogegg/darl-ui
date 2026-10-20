@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import sharp from 'sharp';
 import { ProjectStore } from './project-store';
 import { isLocalOrLanAddress } from './local-access';
 
@@ -32,13 +33,15 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   }
 }
 
-function checkImage(type: string, bytes: Buffer) {
+async function checkImage(type: string, bytes: Buffer) {
   if (!allowedTypes.has(type) || !bytes.length || bytes.length > MAX_IMAGE_BYTES)
     throw new RequestError(422, '只接受不超过 10MB 的 PNG、JPG 或 WebP 图片');
   const valid = type === 'image/png' ? bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))
     : type === 'image/jpeg' ? bytes.subarray(0, 3).equals(Buffer.from('ffd8ff', 'hex'))
     : bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP';
   if (!valid) throw new RequestError(422, '图片文件与格式不一致');
+  try { await sharp(bytes).stats(); }
+  catch { throw new RequestError(422, '图片内容损坏，无法读取'); }
 }
 
 async function readUpload(request: IncomingMessage, field: string, required: boolean) {
@@ -57,7 +60,7 @@ async function readUpload(request: IncomingMessage, field: string, required: boo
   if ((!file || typeof file === 'string') && required) throw new RequestError(422, '请选择图片');
   if (!file || typeof file === 'string') return { form };
   const bytes = Buffer.from(await file.arrayBuffer());
-  checkImage(file.type, bytes);
+  await checkImage(file.type, bytes);
   return { form, image: { type: file.type, bytes } };
 }
 
@@ -87,15 +90,6 @@ export async function handleWorkspaceProjectRequest(
 
   const method = request.method || 'GET';
   try {
-    const image = path.match(/^\/api\/workspace\/storage\/(covers|styles)\/(\d+)$/);
-    if (image && method === 'GET') {
-      const file = store.image(image[1] as 'covers' | 'styles', numeric(image[2]));
-      if (!file) throw new RequestError(404, '图片不存在');
-      response.writeHead(200, { 'Content-Type': file.mime,
-        'Cache-Control': 'private, max-age=120', 'X-Content-Type-Options': 'nosniff' });
-      response.end(Buffer.from(file.data));
-      return true;
-    }
     if (path === '/api/workspace/styles' && method === 'GET') {
       send(200, { code: 'OK', data: store.styles() }); return true;
     }
@@ -104,7 +98,7 @@ export async function handleWorkspaceProjectRequest(
       const name = form.get('name'), prompt = form.get('prompt');
       if (typeof name !== 'string' || typeof prompt !== 'string')
         throw new RequestError(422, '请填写风格名称和描述');
-      const style = store.createStyle({ name, prompt, image: file?.bytes, mimeType: file?.type });
+      const style = await store.createStyle({ name, prompt, image: file?.bytes, mimeType: file?.type });
       send(201, { code: 'CREATED', data: style }); return true;
     }
     const styleRoute = path.match(/^\/api\/workspace\/styles\/(\d+)$/);
@@ -113,7 +107,7 @@ export async function handleWorkspaceProjectRequest(
       const name = form.get('name'), prompt = form.get('prompt');
       if (typeof name !== 'string' || typeof prompt !== 'string')
         throw new RequestError(422, '请填写风格名称和描述');
-      const style = store.updateStyle(numeric(styleRoute[1]), { name, prompt, image: file?.bytes, mimeType: file?.type });
+      const style = await store.updateStyle(numeric(styleRoute[1]), { name, prompt, image: file?.bytes, mimeType: file?.type });
       if (!style) throw new RequestError(404, '只能编辑自己的风格');
       send(200, { code: 'OK', data: style }); return true;
     }
@@ -147,14 +141,16 @@ export async function handleWorkspaceProjectRequest(
     if (upload && method === 'POST') {
       const file = (await readUpload(request, 'image', true)).image;
       if (!file) throw new RequestError(422, '请选择图片');
-      const value = store.uploadCover(numeric(upload[1]), file.type, file.bytes);
+      const value = await store.uploadCover(numeric(upload[1]), file.type, file.bytes);
       if (!value) throw new RequestError(404, '项目不存在');
       send(201, { code: 'CREATED', data: value }); return true;
     }
-    const select = path.match(/^\/api\/workspace\/projects\/(\d+)\/covers\/(\d+)\/select$/);
-    if (select && method === 'POST') {
-      const value = store.selectCover(numeric(select[1]), numeric(select[2]));
-      if (!value) throw new RequestError(404, '项目或封面不存在');
+    const selectFile = path.match(/^\/api\/workspace\/projects\/(\d+)\/covers\/files\/([a-f0-9-]+)\/select$/);
+    if (selectFile && method === 'POST') {
+      const file = store.files?.get(selectFile[2]);
+      if (!file) throw new RequestError(404, '封面文件不存在');
+      const value = await store.selectCoverFile(numeric(selectFile[1]), file);
+      if (!value) throw new RequestError(404, '项目不存在');
       send(200, { code: 'OK', data: value }); return true;
     }
     send(404, { error: '未提供该项目接口' });

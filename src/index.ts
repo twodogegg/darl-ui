@@ -4,7 +4,7 @@ export { DarlUIProvider, useDarlTheme } from './theme/DarlUIProvider';
 export type { DarlTheme, ThemeMode, DarlUIProviderProps } from './theme/DarlUIProvider';
 export type { FileUploaderProps, UploadFn, UploadContext, UploadItem, UploadStatus, RejectedFile, RejectCode } from './components/file-uploader/types';
 export { VideoCompare } from './components/video-compare/VideoCompare';
-export type { CompareVideo, VideoCompareLayout, VideoCompareProps } from './components/video-compare/VideoCompare';
+export type { CompareVideo, CompareMedia, VideoCompareLayout, VideoCompareProps } from './components/video-compare/VideoCompare';
 export { MediaWorkspace } from './components/media-workspace/MediaWorkspace';
 export type { BaseCapabilities, BaseDefaults, ImageModel, VideoModel, MediaModel, MediaInput, MediaStyleOption, MediaReferences, MediaGenerationMode, MediaRoute, MediaRouteStrategy, GenerateRequest, MediaResult, MediaBatch, MediaTask, MediaWorkspaceProps } from './components/media-workspace/types';
 export { AgentSidebar } from './components/agent-sidebar/AgentSidebar';

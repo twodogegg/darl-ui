@@ -130,6 +130,8 @@ export interface AgentAttachment {
   type?: string;
   url?: string;
   size?: number;
+  /** Host-stored file identity; stable after refresh and safe to resend. */
+  fileId?: string;
 }
 
 export interface AgentImageAttachment {
@@ -137,6 +139,8 @@ export interface AgentImageAttachment {
   type: string;
   data: string;
   size?: number;
+  /** Host-stored file identity. When present, data may be omitted by hosts that persist attachments. */
+  fileId?: string;
 }
 
 export interface AgentMessage {
@@ -165,6 +169,8 @@ export interface AgentSession {
 export interface AgentSendRequest {
   files?: File[];
   attachments?: AgentImageAttachment[];
+  /** Uploaded non-image attachments. Hosts may persist these without pretending the model can read them. */
+  uploadedAttachments?: AgentAttachment[];
   sessionId: string;
   content: string;
   applicationIds: string[];
@@ -195,6 +201,8 @@ export interface AgentSidebarProps {
   onSkillUpload?: (file: File) => void | Promise<void>;
   onSkillImport?: (skill: AgentSkill) => void | Promise<void>;
   onFileUpload?: (files: File[]) => void | Promise<void>;
+  /** Host stores attachment bytes and returns a stable reference for the message. */
+  uploadAttachment?: (file: File) => Promise<AgentAttachment>;
   models?: AgentModel[];
   selectedApplicationIds?: string[];
   onSelectedApplicationIdsChange?: (ids: string[]) => void;

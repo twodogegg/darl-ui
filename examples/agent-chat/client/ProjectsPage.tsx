@@ -7,8 +7,8 @@ import './projects.css';
 
 type Project = {
   id: number; name: string; description?: string | null; aspect_ratio: string;
-  style_catalog_id?: number | null; cover_asset_id?: number | null;
-  cover_url?: string | null; cover?: { url?: string | null } | null; cover_asset?: { storage_key?: string | null } | null;
+  style_catalog_id?: number | null;
+  cover_asset?: { storage_key?: string | null; file_id?: string; thumbnail_url?: string; preview_url?: string } | null;
   style?: { name?: string; id?: number } | null;
   episode_count?: number;
 };
@@ -29,7 +29,7 @@ const json = (method: string, body: unknown): RequestInit => ({
   method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
 const projectCover = (project: Project): string | undefined =>
-  storageImage(project.cover_asset?.storage_key) || storageImage(project.cover_url) || storageImage(project.cover?.url) || undefined;
+  storageImage(project.cover_asset?.thumbnail_url) || storageImage(project.cover_asset?.storage_key);
 
 export function ProjectsPage({ onBack, agents, onEditAgent, hidden = false }: { onBack: () => void; agents: AgentConfig[]; onEditAgent: (agentId: string) => void; hidden?: boolean }) {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -100,8 +100,8 @@ export function ProjectsPage({ onBack, agents, onEditAgent, hidden = false }: { 
       throw new Error('封面只支持 PNG、JPG、WebP，最大 10MB');
     const form = new FormData();
     form.append('image', file);
-    const cover = await backend<{ id: number }>(`projects/${projectId}/covers/upload`, { method: 'POST', body: form });
-    await backend(`projects/${projectId}/covers/${cover.id}/select`, { method: 'POST' });
+    const cover = await backend<{ file_id: string }>(`projects/${projectId}/covers/upload`, { method: 'POST', body: form });
+    await backend(`projects/${projectId}/covers/files/${cover.file_id}/select`, { method: 'POST' });
   };
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -170,7 +170,7 @@ export function ProjectsPage({ onBack, agents, onEditAgent, hidden = false }: { 
     </section><EpisodeWorkspace key={detail.id} projectId={detail.id} agents={agents} onEditAgent={onEditAgent} /></> : projects.length ? <div className="workspace-project-grid">
       {projects.map((item) => <article className="workspace-project-card" key={item.id}>
         <button className="workspace-card-open" type="button" onClick={() => void backend<Project>(`projects/${item.id}`).then(setDetail).catch((failure) => setError(failure.message))}>
-          {projectCover(item) ? <img className="workspace-card-image" src={projectCover(item)} alt="" /> : <div className="workspace-card-placeholder">未上传封面</div>}
+          {projectCover(item) ? <img className="workspace-card-image" src={projectCover(item)} alt="" loading="lazy" /> : <div className="workspace-card-placeholder">未上传封面</div>}
           <h2>{item.name}</h2><p>{item.description || '暂无简介'}</p>
           <small>{item.aspect_ratio} · {styles.find((s) => s.id === String(item.style_catalog_id))?.name || '风格待加载'}</small>
         </button><div className="workspace-project-actions">

@@ -49,7 +49,7 @@ describe('StyleSelector', () => {
   });
 
   it('exposes edit controls for owned styles and submits updates', async () => {
-    const owned = { ...styles[0], isOwned: true, image: '/api/workspace/storage/styles/8' };
+    const owned = { ...styles[0], isOwned: true, image: '/api/files/123e4567-e89b-12d3-a456-426614174000' };
     const onEdit = vi.fn();
     const onUpdate = vi.fn().mockResolvedValue(undefined);
     const { rerender } = render(<StyleSelector open styles={[owned]} defaultCollection="mine" onEdit={onEdit} onUpdate={onUpdate} />);

@@ -23,6 +23,16 @@ npm run dev
 
 `npm run dev` 同时启动组件演示站（5288）和真实模型示例（5297），端口被占用时直接报错。两个服务都监听 `0.0.0.0`，同一局域网内的其他设备可通过 `http://<本机局域网 IP>:5288` / `:5297` 访问。
 
+### 业务文件存储（COS / 本地）
+
+Agent Chat 的素材上传、命名字体、项目封面和媒体结果统一通过宿主文件服务保存。默认是本地模式，文件写入 `.local/agent-chat/files/`；配置 COS 后新文件写入 `COS_OBJECT_PREFIX` 指定的目录（默认 `darl-ui`），历史文件仍按各自记录的后端读取。
+
+- 「设置 → 存储」可配置本地 / COS 并测试真实写入和删除；配置保存在服务端 SQLite，SecretKey 不返回浏览器，且配置接口只接受本机回环地址。首次运行也支持用环境变量提供默认值：`STORAGE_MODE`、`LOCAL_STORAGE_ROOT`、`COS_SECRET_ID`、`COS_SECRET_KEY`、`COS_REGION`、`COS_BUCKET`、`COS_SCHEME`、`COS_PUBLIC_BASE_URL`、`COS_OBJECT_PREFIX`。
+- 文件按 SHA-256 内容去重，数据库只保存文件元数据和业务引用，不把大 Base64 写入任务行或项目封面 BLOB。
+- 原图接口为 `/api/files/:fileId`；缩略图通过 `?width=160|320|1024` 实时生成。COS 使用 `imageMogr2`，本地使用 `sharp` 生成等价 WebP。
+- 媒体图片卡片使用 320px 缩略图，点击详情才加载原图；视频卡片首次渲染不挂视频源，点击播放后才请求并支持 Range。
+- 删除生成批次或任务会真实删除其专属结果文件；仍被其他任务引用的文件会阻止删除。旧 `generated-media/`、旧参考图路径和旧 BLOB 数据不做兼容读取或迁移，已失效的历史供应商 URL 无法恢复。
+
 ### 项目工作台（开发分支）
 
 在 Agent Chat 示例（默认 http://localhost:5297）顶部点击「项目」，可进行项目列表、创建、详情、编辑和归档。创建时仅需填写项目标题、视觉风格和画面比例；简介和封面可以留空。封面只允许手动上传。风格选择直接复用 #styles 演示页的 StyleSelector 组件，基础预设和自定义风格均保存在本地 SQLite。
@@ -231,13 +241,15 @@ const videos = [
 <VideoCompare videos={videos} bestVideoId={bestId} onBestChange={setBestId} />
 ```
 
-`VideoCompare` 支持 `videos`（2–3 项、至少 2 项可比较）、`layout: 'auto' | 'vertical' | 'horizontal'`、`audioSourceId/defaultAudioSourceId/onAudioSourceChange`、`bestVideoId/defaultBestVideoId/onBestChange`、`onRemove`、`onError`、`loop`、`accentColor` 与 `className`。
+`VideoCompare` 支持 `videos`（2–3 项、至少 2 项可比较），也支持通过 `media` 传入图片 / 视频素材；另有 `layout: 'auto' | 'vertical' | 'horizontal'`、`audioSourceId/defaultAudioSourceId/onAudioSourceChange`、`bestVideoId/defaultBestVideoId/onBestChange`、`onRemove`、`onError`、`loop`、`accentColor` 与 `className`。
 
 **边界**：所有视频从各自 0 秒同步；全局时长取最长视频，短视频停留末帧，切换声音不重置时间轴，选为最佳不修改音源。播放依赖浏览器解码能力，并做适度时间轴纠偏，不承诺专业软件级逐帧锁定。不会合成视频、管理资产或保存最佳记录；业务网站可通过 `onBestChange(id)` 持久化选择。组件不会上传视频，演示页面中的本地文件仅通过浏览器 Blob URL 使用。
 
+`MediaWorkspace` 已在每个成功结果上提供「加入对比」，选中 2–3 个图片或视频后点击「打开对比」即可直接复用 `VideoCompare`；组件只消费宿主传入的 URL，不上传或持久化媒体。
+
 ## MediaWorkspace｜图片 / 视频生成工作台
 
-一个可复用的统一工作台：左侧任务列表、按批次展示结果、底部提示词与紧凑参数面板。输入区顶部先选择生成类型（图片 / 视频，默认图片），模型列表只显示当前类型的模型；支持模型能力驱动的参考图片 / 视频 / 音频、首尾帧、生成模式、逻辑模型与渠道绑定路由、参数默认值、历史复用、重新生成、收藏、重试和取消。
+一个可复用的统一工作台：左侧任务列表、按批次展示结果、底部提示词与紧凑参数面板。输入区顶部先选择生成类型（图片 / 视频，默认图片），模型列表只显示当前类型的模型；支持模型能力驱动的参考图片 / 视频 / 音频、首尾帧、生成模式、逻辑模型与渠道绑定路由、参数默认值、独立生成数量、历史复用、重新生成、收藏、重试和取消。生成数量会作为 `generationCount` 交给宿主拆分调用，不复用供应商的 `n` 参数。
 
 ```tsx
 import { MediaWorkspace, type MediaModel, type MediaTask } from '@darl/ui';

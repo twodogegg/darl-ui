@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LocalStorage } from '../examples/agent-chat/server/storage';
 import { ProjectStore } from '../examples/agent-chat/server/project-store';
+import { FileStore } from '../examples/agent-chat/server/file-storage';
 import { EpisodeStore, assetMentions, parseAgentBreakdown, validateBreakdown } from '../examples/agent-chat/server/episode-store';
 
 let root: string;
@@ -14,7 +15,7 @@ let projectId: number;
 beforeEach(() => {
   root=mkdtempSync(join(tmpdir(),'darl-episodes-'));
   path=new LocalStorage(root).path;
-  const projects=new ProjectStore(path);
+  const projects=new ProjectStore(path, new FileStore(path));
   projectId=projects.create({name:'剧本原稿',description:null,aspect_ratio:'9:16',style_catalog_id:4}).project_id;
   store=new EpisodeStore(path);
 });
@@ -39,7 +40,7 @@ describe('episode screenplay + shot and asset planning',()=>{
     expect(store.saveScript(episode.id,script,0)?.script).toBe(script);
     expect(store.get(episode.id)?.scriptRevision).toBe(1);
     expect(new EpisodeStore(path).get(episode.id)?.script).toBe(script);
-    expect(new ProjectStore(path).get(projectId)?.episode_count).toBe(1);
+    expect(new ProjectStore(path, new FileStore(path)).get(projectId)?.episode_count).toBe(1);
     expect(()=>store.saveScript(episode.id,'被旧页面覆盖',0)).toThrow('更新');
     expect(store.get(episode.id)?.script).toBe(script);
   });

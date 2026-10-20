@@ -9,15 +9,19 @@ export interface CompareVideo {
   src: string;
   poster?: string;
 }
+export interface CompareMedia extends CompareVideo { type: 'image' | 'video' }
 
 export type VideoCompareLayout = 'auto' | 'vertical' | 'horizontal';
 export interface VideoCompareProps {
-  videos: CompareVideo[];
+  videos?: CompareVideo[];
+  media?: CompareMedia[];
   audioSourceId?: string | null;
   defaultAudioSourceId?: string | null;
   onAudioSourceChange?: (id: string | null) => void;
   bestVideoId?: string | null;
+  bestMediaId?: string | null;
   defaultBestVideoId?: string | null;
+  defaultBestMediaId?: string | null;
   onBestChange?: (id: string | null) => void;
   onRemove?: (id: string) => void;
   onError?: (id: string, error: Error) => void;
@@ -39,11 +43,19 @@ const formatTime = (seconds: number) => {
 };
 
 /** All comparison media elements share one logical clock; none owns the timeline. */
-export function VideoCompare({
+export function VideoCompare(props: VideoCompareProps) {
+  const media = props.media ?? (props.videos ?? []).map((video) => ({ ...video, type: 'video' as const }));
+  if (!media.length) return null;
+  if (media.some((item) => item.type === 'image')) return <MediaComparisonSurface {...props} media={media} />;
+  return <VideoComparePlayer {...props} videos={media.map(({ id, name, src, poster }) => ({ id, name, src, poster }))} bestVideoId={props.bestMediaId ?? props.bestVideoId} defaultBestVideoId={props.defaultBestMediaId ?? props.defaultBestVideoId} />;
+}
+
+function VideoComparePlayer({
   videos, audioSourceId, defaultAudioSourceId, onAudioSourceChange,
   bestVideoId, defaultBestVideoId, onBestChange, onRemove, onError,
   layout = 'auto', loop = false, accentColor, className = ''
 }: VideoCompareProps) {
+  videos = videos ?? [];
   const items = useMemo(() => videos.slice(0, MAX_VIDEOS), [videos]);
   const signature = items.map((item) => `${item.id}\u0000${item.src}`).join('\u0001');
   const ids = items.map((item) => item.id);
@@ -323,4 +335,44 @@ export function VideoCompare({
       </div>}
     </section>
   );
+}
+
+function MediaComparisonSurface({ media, layout = 'auto', bestMediaId, defaultBestMediaId, onBestChange, onRemove, onError, accentColor, className = '' }: VideoCompareProps & { media: CompareMedia[] }) {
+  const items = useMemo(() => media.slice(0, MAX_VIDEOS), [media]);
+  const [dimensions, setDimensions] = useState<Record<string, { width: number; height: number }>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [internalBest, setInternalBest] = useState<string | null>(defaultBestMediaId ?? null);
+  const ids = items.map((item) => item.id);
+  const best = bestMediaId !== undefined ? bestMediaId : internalBest;
+  const activeBest = best && ids.includes(best) ? best : null;
+  const first = items[0] ? dimensions[items[0].id] : undefined;
+  const resolvedLayout = layout === 'auto' ? (first && first.width < first.height ? 'horizontal' : 'vertical') : layout;
+  const signature = items.map((item) => `${item.id}\u0000${item.src}`).join('\u0001');
+  useEffect(() => { setDimensions({}); setErrors({}); }, [signature]);
+  useEffect(() => {
+    if (best && items.length > 0 && !ids.includes(best)) { if (bestMediaId === undefined) setInternalBest(null); onBestChange?.(null); }
+  }, [best, bestMediaId, ids.join('\u0001'), onBestChange]);
+  const chooseBest = (id: string) => {
+    const next = activeBest === id ? null : id;
+    if (bestMediaId === undefined) setInternalBest(next);
+    onBestChange?.(next);
+  };
+  const reportError = (item: CompareMedia) => {
+    const error = new Error('媒体加载失败或格式不受支持');
+    setErrors((current) => ({ ...current, [item.id]: error.message }));
+    onError?.(item.id, error);
+  };
+  const style = accentColor ? { '--darl-primary': accentColor } as CSSProperties : undefined;
+  return <section className={`darl-compare ${className}`} style={style} aria-label="媒体对比">
+    <header className="darl-compare-header"><div><strong>{items.some((item) => item.type === 'video') ? '媒体对比' : '图片对比'}</strong><span>{items.length} / {MAX_VIDEOS} 个素材</span></div>{media.length > MAX_VIDEOS && <small role="alert">最多支持 3 个素材，后续素材未显示</small>}</header>
+    <div className={`darl-compare-grid darl-compare-grid--${resolvedLayout}`}>
+      {items.map((item, index) => { const error = errors[item.id]; const isBest = item.id === activeBest; return <article key={`${item.id}:${item.src}`} className={`darl-compare-card ${isBest ? 'darl-compare-card--best' : ''}`}>
+        <div className="darl-compare-card-head"><div className="darl-compare-title"><span className="darl-compare-letter">{String.fromCharCode(65 + index)}</span><strong title={item.name}>{item.name}</strong>{isBest && <span className="darl-compare-best-label"><Star size={12} fill="currentColor"/> 最佳</span>}</div>{onRemove && <Button size="icon" variant="ghost" aria-label={`移除 ${item.name}`} onClick={() => onRemove(item.id)}><X size={16}/></Button>}</div>
+        <div className="darl-compare-stage darl-compare-media-stage">{item.type === 'image' ? <img src={item.src} alt={item.name} onLoad={(event) => { const { naturalWidth: width, naturalHeight: height } = event.currentTarget; setDimensions((current) => ({ ...current, [item.id]: { width, height } })); }} onError={() => reportError(item)}/> : <video src={item.src} poster={item.poster} controls muted playsInline preload="metadata" aria-label={item.name} onLoadedMetadata={(event) => { const { videoWidth: width, videoHeight: height } = event.currentTarget; setDimensions((current) => ({ ...current, [item.id]: { width, height } })); }} onError={() => reportError(item)}/>} {error && <div className="darl-compare-overlay darl-compare-overlay--error" role="alert">{error}</div>}</div>
+        <div className="darl-compare-card-foot"><span>{error ? '不可加载' : item.type === 'video' ? '视频' : '图片'}</span><Button variant={isBest ? 'default' : 'outline'} size="sm" aria-pressed={isBest} onClick={() => chooseBest(item.id)}>{isBest ? <Check size={14}/> : <Star size={14}/>} {isBest ? '已选最佳' : '选为最佳'}</Button></div>
+      </article>; })}
+    </div>
+    {items.length < 2 && <p className="darl-compare-empty">至少添加 2 个素材才能开始对比。</p>}
+    {items.some((item) => item.type === 'image') && items.some((item) => item.type === 'video') && <p className="darl-compare-media-note">图片与视频混合时使用独立播放，仅用于画面并排查看。</p>}
+  </section>;
 }

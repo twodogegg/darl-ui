@@ -1,17 +1,16 @@
 import type { MediaStyleOption } from '@darl/ui';
 
 export type StyleRecord = {
-  id: number; name: string; image_url?: string; category?: string; prompt?: string;
+  id: number; name: string; image_url?: string; thumbnail_url?: string; category?: string; prompt?: string;
 };
 export type StyleCatalog = { items?: StyleRecord[]; official_items?: StyleRecord[] };
 
-/** Built-in presets ship with the demo; uploaded styles are served by the local workspace API. */
+/** Accept only shipping presets and unified file URLs; legacy storage paths are intentionally unsupported. */
 export function storageImage(key?: string | null): string | undefined {
   if (!key) return undefined;
+  if (/^https?:\/\//i.test(key) || /^\/api\/files\/[a-f0-9-]+(?:\?width=\d+)?$/.test(key)) return key;
   if (/^\/media-workspace\/scene-[1-6]\.svg$/.test(key)) return key;
-  const clean = key.replace(/^\/storage\//, '');
-  return clean.split('/').every((part) => /^[a-zA-Z0-9_.-]+$/.test(part) && part !== '..' && part !== '.') ?
-    '/api/workspace/storage/' + clean.split('/').map(encodeURIComponent).join('/') : undefined;
+  return undefined;
 }
 
 /**
@@ -22,6 +21,6 @@ export function styleOptionsFromCatalog(catalog: StyleCatalog): MediaStyleOption
   const owned = new Set((catalog.items || []).map((item) => item.id));
   return [...(catalog.official_items || []), ...(catalog.items || [])].map((style) => ({
     id: String(style.id), name: style.name, category: style.category, description: style.prompt,
-    image: storageImage(style.image_url), isOwned: owned.has(style.id),
+    image: storageImage(style.thumbnail_url || style.image_url), isOwned: owned.has(style.id),
   }));
 }

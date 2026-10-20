@@ -124,12 +124,12 @@ describe('MediaWorkspace', () => {
     prompt(); submit(); await waitFor(() => expect(onGenerate).toHaveBeenCalled());
     expect(onGenerate.mock.calls[0][0]).not.toHaveProperty('references');
     expect(onGenerate.mock.calls[0][0].options).toEqual({ aspectRatio: '16:9', resolution: '2K', count: 2 });
-    await waitFor(() => expect(screen.getByRole('button', { name: '✧ 生成' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: '✧ 生成' })).toBeInTheDocument());
     switchType('视频');
-    submit(); await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(2));
+    prompt(); submit(); await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(2));
     expect(onGenerate.mock.calls[1][0].references).toEqual({ firstFrame: expect.any(File) });
-    await waitFor(() => expect(screen.getByRole('button', { name: '✧ 生成' })).toBeEnabled());
-    switchInput('参考素材'); submit(); await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.getByRole('button', { name: '✧ 生成' })).toBeInTheDocument());
+    switchInput('参考素材'); prompt(); submit(); await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(3));
     expect(onGenerate.mock.calls[2][0].references).toEqual({ videos: [expect.any(File)], audios: [expect.any(File)] });
   });
   it('复用历史模型、参数、提示词和参考素材，宿主重渲染不重置参数', async () => {
@@ -181,6 +181,41 @@ describe('MediaWorkspace', () => {
     expect(callbacks.onRenameTask).toHaveBeenCalledWith('t1', '新标题');
     expect(screen.queryByRole('dialog')).toBeNull();
   });
+  it('图片卡片使用缩略图，详情才使用原图；视频点击前不创建 src', () => {
+    const history: MediaTask[] = [{ ...tasks[0], batches: [
+      { id: 'image-batch', createdAt: '2026-10-21T00:00:02.000Z', modelId: 'image', type: 'image', prompt: '图片', options: { count: 1 }, references: { images: [{ id: 'ref-image', url: '/ref.png' }], firstFrame: { id: 'frame', url: '/frame.png' } }, results: [{ id: 'image-result', status: 'completed', url: '/original.png', thumbnailUrl: '/thumb.webp' }] },
+      { id: 'video-batch', createdAt: '2026-10-21T00:00:01.000Z', modelId: 'video', type: 'video', prompt: '视频', options: { count: 1 }, results: [{ id: 'video-result', status: 'completed', url: '/video.mp4' }] },
+    ] }];
+    render(<MediaWorkspace models={models} tasks={history} onGenerate={vi.fn()} onDeleteBatch={vi.fn()}/>);
+    expect(screen.getByAltText('图片')).toHaveAttribute('src', '/thumb.webp');
+    expect(screen.getByAltText('参考图片 1')).toHaveAttribute('src', '/ref.png');
+    expect(screen.getByAltText('首帧 2')).toHaveAttribute('src', '/frame.png');
+    expect(screen.getAllByRole('region', { name: /批次/ }).map((item) => item.getAttribute('aria-label'))).toEqual(['批次 1', '批次 2']);
+    expect(screen.getByRole('region', { name: '批次 1' })).toHaveTextContent('视频');
+    expect(document.querySelector('video')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '播放视频 video-result' }));
+    expect(document.querySelector('video')).toHaveAttribute('src', '/video.mp4');
+    fireEvent.click(screen.getByRole('button', { name: '预览图片 image-result' }));
+    expect(document.querySelector('.darl-mw-preview img')).toHaveAttribute('src', '/original.png');
+  });
+  it('记录超出滚动区域时显示顶部和底部跳转按钮', () => {
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: scrollTo });
+    const history: MediaTask[] = [{ ...tasks[0], batches: Array.from({ length: 8 }, (_, index) => ({ id: `batch-${index}`, createdAt: new Date(2026, 9, 21, 0, 0, index).toISOString(), modelId: 'image', type: 'image' as const, prompt: `批次 ${index}`, options: { count: 1 }, results: [{ id: `result-${index}`, status: 'completed' as const, url: `/image-${index}.png` }] })) }];
+    render(<MediaWorkspace models={models} tasks={history} onGenerate={vi.fn()}/>);
+    const scroll = document.querySelector('.darl-mw-scroll') as HTMLElement;
+    Object.defineProperty(scroll, 'scrollHeight', { configurable: true, value: 1200 });
+    Object.defineProperty(scroll, 'clientHeight', { configurable: true, value: 300 });
+    fireEvent.scroll(scroll);
+    expect(screen.queryByRole('button', { name: '滚动到顶部' })).toBeNull();
+    expect(screen.getByRole('button', { name: '滚动到底部' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '滚动到底部' }));
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1200, behavior: 'smooth' });
+    scroll.scrollTop = 900;
+    fireEvent.scroll(scroll);
+    expect(screen.getByRole('button', { name: '滚动到顶部' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '滚动到底部' })).toBeNull();
+  });
   it('图片和视频都可用作参考，且不带回源批次提示词或参数', async () => {
     const history: MediaTask[] = [{ ...tasks[0], batches: [
       { id: 'image-batch', modelId: 'image', type: 'image', prompt: '图片源提示词', options: { aspectRatio: '1:1', resolution: '1K', count: 4 }, results: [{ id: 'image-result', status: 'completed', url: '/image.png' }] },
@@ -201,6 +236,41 @@ describe('MediaWorkspace', () => {
     await waitFor(() => expect(onGenerate).toHaveBeenCalled());
     expect(onGenerate.mock.calls[0][0]).toMatchObject({ prompt: '生成测试画面', references: { images: [{ id: 'image-result', url: '/image.png' }], videos: [{ id: 'video-result', url: '/video.mp4' }] } });
     expect(onGenerate.mock.calls[0][0].options).toEqual({ count: 1, duration: 8, generateAudio: true });
+  });
+  it('图片和视频结果都可以加入统一对比并在面板中移除', async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const history: MediaTask[] = [{ ...tasks[0], batches: [
+      { id: 'compare-image', modelId: 'image', type: 'image', prompt: '图片', options: { count: 1 }, results: [{ id: 'compare-image-result', status: 'completed', url: '/image.png' }] },
+      { id: 'compare-video', modelId: 'video', type: 'video', prompt: '视频', options: { count: 1 }, results: [{ id: 'compare-video-result', status: 'completed', url: '/video.mp4' }] },
+    ] }];
+    render(<MediaWorkspace models={models} tasks={history} onGenerate={vi.fn()}/>);
+    fireEvent.click(screen.getAllByRole('button', { name: '加入对比' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: '加入对比' })[0]);
+    expect(screen.getByRole('dialog')).toHaveTextContent('媒体对比');
+    expect(screen.getByRole('img', { name: '图片 1' })).toBeInTheDocument();
+    expect(document.querySelector('.darl-compare-media-stage video')).toHaveAttribute('src', '/video.mp4');
+    fireEvent.click(screen.getAllByRole('button', { name: '选为最佳' })[1]);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getAllByRole('article').find((article) => article.textContent?.includes('最佳'))).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '移出对比' })).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: '加入对比' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: '加入对比' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: '移除 图片 1' }));
+    expect(screen.queryByRole('img', { name: '图片 1' })).toBeNull();
+  });
+  it('用作参考时提交统一文件存储的真实 fileId 而非结果卡片展示 ID', async () => {
+    const history: MediaTask[] = [{ ...tasks[0], batches: [
+      { id: 'image-batch', modelId: 'image', type: 'image', prompt: '图片源提示词', options: { count: 1 }, results: [{ id: 'job-1-0', fileId: 'file-1', status: 'completed', url: '/api/media-generation/jobs/job-1/file', thumbnailUrl: '/api/files/file-1?width=320' }] },
+    ] }];
+    const onGenerate = vi.fn();
+    render(<MediaWorkspace models={models} tasks={history} onGenerate={onGenerate}/>);
+    prompt();
+    fireEvent.click(screen.getByRole('button', { name: '用作参考' }));
+    // The reference chip carries the stable file ID, while the result card keeps its display key.
+    expect(screen.getByAltText('file-1')).toHaveAttribute('src', '/api/files/file-1?width=320');
+    submit();
+    await waitFor(() => expect(onGenerate).toHaveBeenCalled());
+    expect(onGenerate.mock.calls[0][0]).toMatchObject({ references: { images: [{ id: 'file-1', fileId: 'file-1', url: '/api/media-generation/jobs/job-1/file', thumbnailUrl: '/api/files/file-1?width=320' }] } });
   });
   it('视频生成时点击图片结果用作参考，保持视频模型并加入参考图', async () => {
     const history: MediaTask[] = [{ ...tasks[0], batches: [{ id: 'image-batch', modelId: 'image', type: 'image', prompt: '图片源', options: { count: 1 }, results: [{ id: 'image-result', status: 'completed', url: '/image.png' }] }] }];
@@ -239,11 +309,11 @@ describe('MediaWorkspace', () => {
     expect(screen.getByAltText('首帧')).toHaveAttribute('src', firstUrl);
     prompt(); submit(); await waitFor(() => expect(onGenerate).toHaveBeenCalled());
     expect(onGenerate.mock.calls[0][0].references).toEqual({ firstFrame: first, lastFrame: last });
-    await waitFor(() => expect(screen.getByRole('button', { name: '✧ 生成' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: '✧ 生成' })).toBeInTheDocument());
     switchInput('参考素材');
     expect(screen.getByAltText('reference.png')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '添加首帧' })).toBeNull();
-    submit(); await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(2));
+    prompt(); submit(); await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(2));
     expect(onGenerate.mock.calls[1][0].references).toEqual({ images: [expect.any(File)] });
     switchInput('首尾帧');
     expect(screen.getByAltText('首帧')).toHaveAttribute('src', firstUrl);
@@ -270,6 +340,15 @@ describe('MediaWorkspace', () => {
     reject(new Error('接口不可用'));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('接口不可用'));
     expect(screen.getByRole('button', { name: '✧ 生成' })).toBeEnabled();
+  });
+  it('提交成功后清空提示词，生成数量作为独立调用参数而不是供应商 count', async () => {
+    const onGenerate = vi.fn().mockResolvedValue(undefined);
+    render(<MediaWorkspace models={models} tasks={tasks} onGenerate={onGenerate}/>);
+    fireEvent.click(screen.getByRole('button', { name: '生成数量' }));
+    fireEvent.click(screen.getByRole('radio', { name: '3' }));
+    prompt(); submit();
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith(expect.objectContaining({ modelId: 'image', generationCount: 3, options: { aspectRatio: '16:9', resolution: '2K', count: 2 } })));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '生成提示词' })).toHaveValue(''));
   });
   it('拖入混合文件时分别校验，拒绝文件不影响正常素材和生成', async () => {
     const onGenerate = vi.fn();

@@ -1,6 +1,6 @@
 # VideoCompare｜多视频同步对比（规划草案 v0.1）
 
-状态：**仅规划，尚未开发**。所属仓库：`darl-ui`。组件名：`VideoCompare`。
+状态：`VideoCompare` 已实现，并支持图片 / 视频素材。所属仓库：`darl-ui`。
 
 ## 1. 为什么要做
 

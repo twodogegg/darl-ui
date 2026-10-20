@@ -16,9 +16,12 @@ import { ProjectStore } from './project-store';
 import { EpisodeStore } from './episode-store';
 import { createEpisodeApi } from './episode-api';
 import { createMediaJobsApi } from './media-jobs-api';
-import { persistMediaReferences } from './media-references';
+import { persistMediaReferencesInStore } from './media-references';
 import { mediaTaskResult } from './media-job-store';
 import { createFailureLog } from './failure-log';
+import { FileStore } from './file-storage';
+import { StorageSettings, fileOptions, storageConfigFromEnv, validateStorageConfig } from './storage-config';
+import { isLocalOrLanAddress } from './local-access';
 import { DEFAULT_AUTO_CONFIRM, validateAutoConfirmSettings, shouldConfirmMcp, type AutoConfirmSettings } from './approval-settings';
 
 /** Resolve the model selected in the current chat against an enabled text binding. */
@@ -75,6 +78,15 @@ const defaultMediaSelection: DefaultMediaSelection = {
   video: { modelId: 'minimax-h3-flash', resolution: '480', aspectRatio: '16:9' },
 };
 
+/** H3 统一协议只接受 480/768；旧版本保存过 480P/720P/1080P，读取时就地归一化。 */
+function normalizeVideoResolution(value: unknown): '480' | '768' | undefined {
+  const raw = String(value ?? '').trim().toUpperCase();
+  if (!raw) return undefined;
+  if (raw === '480' || raw === '480P') return '480';
+  if (raw === '768' || raw === '768P' || raw === '720' || raw === '720P' || raw === '1080' || raw === '1080P') return '768';
+  return undefined;
+}
+
 function validateDefaultMediaSelection(value: unknown): DefaultMediaSelection {
   if (!value || typeof value !== 'object') throw new Error('默认媒体模型配置无效');
   const input = value as Record<string, unknown>;
@@ -85,12 +97,13 @@ function validateDefaultMediaSelection(value: unknown): DefaultMediaSelection {
   const videoChoice = video as Record<string, unknown>;
   const imageResolutions = ['1K', '2K', '4K'];
   if (!IMAGE_MODEL_IDS.includes(String(imageChoice.modelId)) || !imageResolutions.includes(String(imageChoice.resolution)) || !IMAGE_ASPECT_RATIOS.includes(String(imageChoice.aspectRatio))) throw new Error('默认图片模型参数不受支持');
-  if (videoChoice.modelId !== 'minimax-h3-flash' || !['480', '768'].includes(String(videoChoice.resolution)) || !['16:9', '9:16'].includes(String(videoChoice.aspectRatio))) throw new Error('默认视频模型参数不受支持');
+  const videoResolution = normalizeVideoResolution(videoChoice.resolution);
+  if (videoChoice.modelId !== 'minimax-h3-flash' || !videoResolution || !['16:9', '9:16'].includes(String(videoChoice.aspectRatio))) throw new Error('默认视频模型参数不受支持');
   return {
     image: { modelId: String(imageChoice.modelId), resolution: imageChoice.resolution as DefaultMediaSelection['image']['resolution'], aspectRatio: imageChoice.aspectRatio as DefaultMediaSelection['image']['aspectRatio'] },
     video: {
       modelId: 'minimax-h3-flash',
-      resolution: videoChoice.resolution as DefaultMediaSelection['video']['resolution'],
+      resolution: videoResolution,
       aspectRatio: videoChoice.aspectRatio as DefaultMediaSelection['video']['aspectRatio'],
     },
   };
@@ -221,9 +234,12 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const storage = new LocalStorage(directory);
   const logFailure = createFailureLog(join(directory, 'logs'));
   const subAgentLocks = new SubAgentThreadLocks();
-  const projectStore = new ProjectStore(storage.path);
+  const fileConfig = validateStorageConfig(storage.getConfig<unknown>('storageConfiguration') || storageConfigFromEnv(env, storage.path));
+  const files = new FileStore(storage.path, fileOptions(fileConfig));
+  const storageSettings = new StorageSettings(storage, files, fileConfig);
+  const projectStore = new ProjectStore(storage.path, files);
   const episodeStore = new EpisodeStore(storage.path);
-  const mediaJobs = createMediaJobsApi(storage.path, () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), () => storage.getConfig<StoredProvider[]>('providers') || []);
+  const mediaJobs = createMediaJobsApi(storage.path, () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), () => storage.getConfig<StoredProvider[]>('providers') || [], files);
   const confirmations = new ToolConfirmations();
   if (!Number.isInteger(allowedPort) || allowedPort < 1 || allowedPort > 65535) throw new Error('Agent Chat 端口无效');
   const callbackUrl = mcpOAuthCallbackUrl(allowedPort);
@@ -242,7 +258,17 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     const upgraded = upgradeModelConfiguration(storedConfiguration);
     if (JSON.stringify(upgraded) !== JSON.stringify(storedConfiguration)) storage.setConfig('modelConfiguration', upgraded);
   }
-  if (!storage.getConfig<DefaultMediaSelection>('defaultMediaModels')) storage.setConfig('defaultMediaModels', defaultMediaSelection);
+  const storedMediaSelection = storage.getConfig<unknown>('defaultMediaModels');
+  if (!storedMediaSelection) storage.setConfig('defaultMediaModels', defaultMediaSelection);
+  else {
+    // 旧版本可能存过 '480P' 等协议外取值，启动时按当前 H3 协议写入规范化结果。
+    try {
+      const normalized = validateDefaultMediaSelection(storedMediaSelection);
+      if (JSON.stringify(normalized) !== JSON.stringify(storedMediaSelection)) storage.setConfig('defaultMediaModels', normalized);
+    } catch {
+      storage.setConfig('defaultMediaModels', defaultMediaSelection);
+    }
+  }
   if (!storage.getConfig<string>('systemPrompt')) {
     storage.setConfig('systemPrompt', validatePrompt(readFileSync(promptFile, 'utf8')));
   }
@@ -312,6 +338,52 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     const host = request.headers.host || '';
     const origin = request.headers.origin;
     if (portOf(host) !== String(allowedPort) || (origin && portOf(origin) !== String(allowedPort))) return send(403, { error: '仅允许本服务端口同源访问' });
+    if (request.url.split('?')[0] === '/api/files' && request.method === 'POST') {
+      if (!isLocalOrLanAddress(request.socket.remoteAddress)) return send(403, { error: '上传仅允许本机或同一局域网' });
+      const type = request.headers['content-type'] || '';
+      if (!type.startsWith('multipart/form-data;')) return send(415, { error: '请使用表单上传' });
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const chunk of request) {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        size += bytes.length;
+        if (size > 80 * 1024 * 1024) return send(413, { error: '上传内容超过 80MB' });
+        chunks.push(bytes);
+      }
+      const form = await new Request('http://localhost/upload', { method: 'POST', headers: { 'Content-Type': type }, body: Uint8Array.from(Buffer.concat(chunks)).buffer as ArrayBuffer }).formData();
+      const file = form.get('file');
+      if (!file || typeof file === 'string') return send(422, { error: '请选择文件' });
+      if (!file.type || file.size <= 0) return send(422, { error: '文件为空或类型不明' });
+      const bytes = Buffer.from(await file.arrayBuffer());
+      const saved = await files.put(bytes, file.type === 'image/jpg' ? 'image/jpeg' : file.type, file.name);
+      return send(201, { fileId: saved.id, url: files.originalUrl(saved), thumbnailUrl: files.thumbnailUrl(saved, 320), mimeType: saved.mimeType, size: saved.size });
+    }
+    const filePath = request.url.split('?')[0].match(/^\/api\/files\/([a-f0-9-]+)$/);
+    if (filePath && request.method === 'GET') {
+      const width = Number(new URL(request.url, 'http://localhost').searchParams.get('width') || 0) || undefined;
+      const fileRecord = files.get(filePath[1]);
+      if (!fileRecord) return send(404, { error: '文件不存在' });
+      const range = request.headers.range?.match(/^bytes=(\d*)-(\d*)$/);
+      if (range && fileRecord.mimeType === 'video/mp4') {
+        const start = range[1] ? Number(range[1]) : 0;
+        const end = range[2] ? Math.min(Number(range[2]), fileRecord.size - 1) : fileRecord.size - 1;
+        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= fileRecord.size) {
+          response.writeHead(416, { 'Content-Range': `bytes */${fileRecord.size}` }); response.end(); return;
+        }
+        const part = await files.getRange(filePath[1], start, end);
+        if (!part) return send(404, { error: '文件不存在' });
+        response.writeHead(206, { 'Content-Type': fileRecord.mimeType, 'Content-Length': part.bytes.length, 'Content-Range': `bytes ${start}-${end}/${fileRecord.size}`, 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=3600' });
+        response.end(part.bytes); return;
+      }
+      let output: Awaited<ReturnType<FileStore['output']>>;
+      try { output = await files.output(filePath[1], width); }
+      catch (error) { return send(422, { error: error instanceof Error ? error.message : '文件读取失败' }); }
+      const file = output;
+      if (!file) return send(404, { error: '文件不存在' });
+      response.writeHead(200, { 'Content-Type': file.mimeType, 'Content-Length': file.bytes.length, 'Cache-Control': width ? 'public, max-age=31536000, immutable' : 'private, max-age=3600', 'Accept-Ranges': file.mimeType === 'video/mp4' ? 'bytes' : 'none', 'X-Content-Type-Options': 'nosniff' });
+      response.end(file.bytes);
+      return;
+    }
     if (await handleEpisodes(request, response)) return;
     if (await handleWorkspaceProjectRequest(request, response, projectStore)) return;
     if (await mediaJobs.handle(request, response)) return;
@@ -472,6 +544,16 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         storage.setConfig('defaultMediaModels', selection);
         return send(200, selection);
       }
+      const storageRequest = path === '/api/storage' || path === '/api/storage/test';
+      if (storageRequest && request.socket.remoteAddress !== '127.0.0.1' && request.socket.remoteAddress !== '::1') return send(403, { error: '存储配置只允许本机访问' });
+      if (path === '/api/storage' && request.method === 'GET') return send(200, storageSettings.public());
+      if (path === '/api/storage/test' && request.method === 'POST') {
+        await storageSettings.test((await readBody(request))?.configuration);
+        return send(200, { ok: true });
+      }
+      if (path === '/api/storage' && request.method === 'POST') {
+        return send(200, await storageSettings.save((await readBody(request))?.configuration));
+      }
       if (path === '/api/model-config' && request.method === 'GET') return send(200, await loadModelConfiguration());
       if (path === '/api/model-config' && request.method === 'POST') {
         const incoming = (await readBody(request))?.configuration;
@@ -558,26 +640,33 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const effort = typeof body.effort === 'string' && body.effort.trim() ? body.effort.trim() : undefined;
         if (effort && !model.reasoningEfforts?.includes(effort)) throw new Error('模型不支持此推理强度');
         if (!Array.isArray(body.messages) || !body.messages.length || body.messages.length > 200) throw new Error('对话消息数量无效');
-        const messages: ChatMessage[] = body.messages.map((message: ChatMessage) => {
+        const messages: ChatMessage[] = [];
+        for (const message of body.messages as ChatMessage[]) {
           if (!message || !['user', 'assistant'].includes(message.role)) throw new Error('消息格式无效');
           if (typeof message.content === 'string') {
             if (message.content.length > contextCharBudget(model.capabilities?.contextWindow)) throw new Error('消息超过当前模型的上下文窗口');
-            return { role: message.role, content: message.content };
+            messages.push({ role: message.role, content: message.content });
+            continue;
           }
           if (!Array.isArray(message.content) || message.content.length > 20) throw new Error('图片消息格式无效');
-          const content = message.content.map((item) => {
+          const content = (await Promise.all(message.content.map(async (item) => {
             if (item?.type === 'text' && typeof item.text === 'string' && item.text.length <= contextCharBudget(model.capabilities?.contextWindow)) return { type: 'text' as const, text: item.text };
-            if (item?.type === 'image' && typeof item.name === 'string' && typeof item.mimeType === 'string' && /^image\/(png|jpe?g|webp|gif)$/i.test(item.mimeType) && typeof item.data === 'string' && item.data.startsWith('data:')) {
+            if (item?.type === 'image' && typeof item.name === 'string' && typeof item.mimeType === 'string' && /^image\/(png|jpe?g|webp|gif)$/i.test(item.mimeType) && ((typeof item.data === 'string' && item.data.startsWith('data:')) || (typeof item.fileId === 'string' && files.get(item.fileId)))) {
+              if (typeof item.fileId === 'string' && files.get(item.fileId)) {
+                const stored = await files.getBytes(item.fileId);
+                if (!stored || stored.bytes.length > MAX_IMAGE_BYTES) throw new Error('图片附件为空或超过 50 MiB');
+                return { type: 'image' as const, name: item.name.slice(0, 200), mimeType: stored.file.mimeType, data: stored.bytes.toString('base64'), size: stored.bytes.length, fileId: item.fileId } satisfies ChatImage;
+              }
               const [, encoded = ''] = item.data.split(',', 2);
               const data = encoded.replace(/\s/g, '');
               if (!data || data.length > MAX_IMAGE_DATA_URL_LENGTH || Buffer.from(data, 'base64').length > MAX_IMAGE_BYTES || Buffer.from(data, 'base64').toString('base64') !== data) throw new Error('图片附件过大或不是规范 Base64，请压缩后重试');
-              return { type: 'image' as const, name: item.name.slice(0, 200), mimeType: item.mimeType, data, size: item.size } satisfies ChatImage;
+              return { type: 'image' as const, name: item.name.slice(0, 200), mimeType: item.mimeType, data, size: item.size, ...(typeof item.fileId === 'string' ? { fileId: item.fileId } : {}) } satisfies ChatImage;
             }
             throw new Error('图片消息格式无效');
-          });
+          })));
           if (!content.some((item) => item.type === 'image')) throw new Error('图片消息不能为空');
-          return { role: message.role, content };
-        });
+          messages.push({ role: message.role, content });
+        }
         if (!Array.isArray(body.skills) || body.skills.length > 30) throw new Error('Skills 格式无效');
         const requestedSkillIds = body.skillIds ?? [];
         if (!Array.isArray(requestedSkillIds) || requestedSkillIds.length > 30 || requestedSkillIds.some((id: unknown) => typeof id !== 'string')) throw new Error('Skills 格式无效');
@@ -611,14 +700,15 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const emitTool = (call: AgentToolCall) => {
           if (!signal.aborted) response.write(`${JSON.stringify({ type: 'tool', call: { ...call, requestId, input: call.appId.startsWith('agent:') || call.status === 'confirmation' ? call.input : undefined } })}\n`);
         };
-        const emitImages = (value: unknown) => {
+        const emitImages = async (value: unknown) => {
           if (!Array.isArray(value)) return;
-          value.forEach((item, index) => {
-            if (!item || typeof item !== 'object' || (item as { type?: unknown }).type !== 'image') return;
+          for (const [index, item] of value.entries()) {
+            if (!item || typeof item !== 'object' || (item as { type?: unknown }).type !== 'image') continue;
             const image = item as { data?: unknown; mimeType?: unknown };
-            if (typeof image.data !== 'string' || image.data.length > 12_000_000 || typeof image.mimeType !== 'string' || !/^image\/(png|jpe?g|webp|gif)$/i.test(image.mimeType)) return;
-            response.write(`${JSON.stringify({ type: 'image', image: { name: `工具图片-${index + 1}`, type: image.mimeType, url: `data:${image.mimeType};base64,${image.data}` } })}\n`);
-          });
+            if (typeof image.data !== 'string' || image.data.length > 12_000_000 || typeof image.mimeType !== 'string' || !/^image\/(png|jpe?g|webp|gif)$/i.test(image.mimeType)) continue;
+            const stored = await files.put(Buffer.from(image.data, 'base64'), image.mimeType, `tool-image-${index + 1}`);
+            response.write(`${JSON.stringify({ type: 'image', image: { name: `工具图片-${index + 1}`, type: stored.mimeType, fileId: stored.id, url: files.originalUrl(stored), thumbnailUrl: files.thumbnailUrl(stored, 320) } })}\n`);
+          }
         };
         const createExecution = async (apps: typeof scopedApps, ownerAgentId?: string, images: ChatImage[] = [], executionRunId = runId, parentRunId?: string) => {
           const ownedConnections: Awaited<ReturnType<typeof connectApplication>>[] = [];
@@ -701,7 +791,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
               if (typeof options.aspectRatio === 'string' && imageOrVideo?.aspectRatios && !imageOrVideo.aspectRatios.includes(options.aspectRatio))
                 return mediaFailure(`该模型不支持画幅 ${options.aspectRatio}`, 'MEDIA_ARGUMENT_INVALID', args, 'generate_media');
               let storedOptions: Record<string, unknown>;
-              try { storedOptions = persistMediaReferences(mediaJobs.store.mediaRoot, options); }
+              try { storedOptions = await persistMediaReferencesInStore(options, files); }
               catch (reason) { return mediaFailure(reason instanceof Error ? reason.message : '参考图片无效', 'MEDIA_ARGUMENT_INVALID', args, 'generate_media'); }
               const job = mediaJobs.store.create({ modelId: model.id,
                 type: model.type, prompt: args.prompt.trim(), options: storedOptions, protocolKey: binding.protocolKey,
@@ -768,7 +858,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
                 call.errorInfo = createAgentError('mcp-tool', new Error(call.error), { requestId, runId: executionRunId, parentRunId, key: connection.app.apiKey, code: 'MCP_TOOL_FAILED', message: call.error });
                 logFailure({ requestId, runId: executionRunId, parentRunId, agentId: ownerAgentId, toolCallId: call.id, appId: connection.app.id, appName: connection.app.name, toolName: call.toolName, attempt: call.attempt, stage: 'mcp-tool', code: call.errorInfo.code, message: call.error, durationMs: call.durationMs, secret: connection.app.apiKey });
               }
-              emitImages(result.images);
+              await emitImages(result.images);
               emitToolExecution(result.isError ? 'error' : 'success', { endedAt: call.endedAt, durationMs: call.durationMs, ...(call.errorInfo ? { error: call.errorInfo } : {}) });
               emitTool(call);
               return JSON.stringify({ ...result, images: undefined });

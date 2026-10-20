@@ -1,5 +1,7 @@
 import type { GenerateRequest, MediaGenerationMode, MediaModel, MediaReferences } from './types';
 
+export const GENERATION_COUNTS = [1, 2, 3, 4] as const;
+
 export function outputLimit(model: MediaModel): number {
   const value = model.capabilities.maxOutputs;
   return value && Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 1;

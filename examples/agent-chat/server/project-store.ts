@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import type { FileStore, StoredFile } from './file-storage';
 
 export type ProjectInput = {
   name: string;
@@ -8,6 +9,7 @@ export type ProjectInput = {
 };
 
 export type StyleInput = { name: string; prompt: string; image?: Buffer; mimeType?: string };
+type StyleRow = StoredRow & { file_id?: string | null };
 
 type StoredRow = Record<string, string | number | Uint8Array | null>;
 
@@ -34,25 +36,28 @@ const builtinStyles: Array<[string, string, string, number]> = [
 
 export class ProjectStore {
   private readonly db: DatabaseSync;
+  readonly files: FileStore;
 
-  constructor(path: string) {
+  constructor(path: string, files: FileStore) {
     this.db = new DatabaseSync(path);
+    this.files = files;
     this.db.exec('PRAGMA foreign_keys = ON');
+    this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec([
       'CREATE TABLE IF NOT EXISTS workspace_styles (',
       'id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, category TEXT NOT NULL,',
       'prompt TEXT NOT NULL, preset_image TEXT, is_owned INTEGER NOT NULL DEFAULT 0,',
-      'image_mime TEXT, image_data BLOB, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);',
+      'created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);',
+      'CREATE TABLE IF NOT EXISTS workspace_style_files (style_id INTEGER PRIMARY KEY REFERENCES workspace_styles(id), file_id TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);',
       'CREATE TABLE IF NOT EXISTS workspace_projects (',
       'id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, description TEXT,',
       'aspect_ratio TEXT NOT NULL, style_catalog_id INTEGER NOT NULL REFERENCES workspace_styles(id),',
-      'cover_asset_id INTEGER, status TEXT NOT NULL DEFAULT \'active\',',
+      'cover_file_id TEXT, status TEXT NOT NULL DEFAULT \'active\',',
       'created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);',
-      'CREATE TABLE IF NOT EXISTS workspace_covers (',
-      'id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL REFERENCES workspace_projects(id),',
-      'mime_type TEXT NOT NULL, image_data BLOB NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);',
       'CREATE INDEX IF NOT EXISTS workspace_projects_status_idx ON workspace_projects(status, id);',
     ].join('\n'));
+    const projectColumns = this.db.prepare('PRAGMA table_info(workspace_projects)').all() as Array<{ name: string }>;
+    if (!projectColumns.some((column) => column.name === 'cover_file_id')) this.db.exec('ALTER TABLE workspace_projects ADD COLUMN cover_file_id TEXT');
     const insert = this.db.prepare(
       'INSERT OR IGNORE INTO workspace_styles (id, name, category, prompt, preset_image) VALUES (?, ?, ?, ?, ?)',
     );
@@ -62,11 +67,13 @@ export class ProjectStore {
 
   styles() {
     const rows = this.db.prepare(
-      'SELECT id, name, category, prompt, preset_image, is_owned, image_mime FROM workspace_styles ORDER BY id',
-    ).all() as StoredRow[];
-    const serialize = (row: StoredRow) => ({
+      'SELECT s.id, s.name, s.category, s.prompt, s.preset_image, s.is_owned, f.file_id FROM workspace_styles s LEFT JOIN workspace_style_files f ON f.style_id = s.id ORDER BY s.id',
+    ).all() as StyleRow[];
+    const serialize = (row: StyleRow) => ({
       id: Number(row.id), name: String(row.name), category: String(row.category),
-      prompt: String(row.prompt), image_url: row.image_mime ? '/storage/styles/' + row.id : (row.preset_image || ''),
+      prompt: String(row.prompt),
+      image_url: row.file_id && this.files ? this.files.originalUrl(String(row.file_id)) || '' : String(row.preset_image || ''),
+      thumbnail_url: row.file_id && this.files ? this.files.thumbnailUrl(String(row.file_id), 320) || undefined : undefined,
     });
     return { items: rows.filter((row) => Number(row.is_owned) === 1).map(serialize),
       official_items: rows.filter((row) => Number(row.is_owned) !== 1).map(serialize) };
@@ -76,36 +83,47 @@ export class ProjectStore {
     return Boolean(this.db.prepare('SELECT 1 FROM workspace_styles WHERE id = ?').get(id));
   }
 
-  createStyle(value: StyleInput) {
+  async createStyle(value: StyleInput) {
     if (!value.name.trim() || value.name.trim().length > 80 ||
       !value.prompt.trim() || value.prompt.trim().length > 500) throw new Error('风格名称或描述无效');
+    const files = this.requiredFiles();
+    const file = value.image && value.mimeType ? await files.put(value.image, value.mimeType, `${value.name.trim()}-reference`) : undefined;
     const result = this.db.prepare(
-      'INSERT INTO workspace_styles (name, category, prompt, is_owned, image_mime, image_data) VALUES (?, ?, ?, 1, ?, ?)',
-    ).run(value.name.trim(), '我的风格', value.prompt.trim(), value.mimeType || null, value.image || null);
+      'INSERT INTO workspace_styles (name, category, prompt, is_owned) VALUES (?, ?, ?, 1)',
+    ).run(value.name.trim(), '我的风格', value.prompt.trim());
+    try {
+      if (file) this.db.prepare('INSERT INTO workspace_style_files (style_id, file_id) VALUES (?, ?)').run(Number(result.lastInsertRowid), file.id);
+    } catch (error) {
+      this.db.prepare('DELETE FROM workspace_styles WHERE id = ?').run(Number(result.lastInsertRowid));
+      if (file && !files.references(file.id)) await files.remove(file.id);
+      throw error;
+    }
     return { id: Number(result.lastInsertRowid) };
   }
 
-  updateStyle(id: number, value: StyleInput) {
+  async updateStyle(id: number, value: StyleInput) {
     const existing = this.db.prepare('SELECT id FROM workspace_styles WHERE id = ? AND is_owned = 1').get(id);
     if (!existing) return null;
     if (!value.name.trim() || value.name.trim().length > 80 || !value.prompt.trim() || value.prompt.trim().length > 500)
       throw new Error('风格名称或描述无效');
     if (value.image && value.mimeType) {
-      this.db.prepare('UPDATE workspace_styles SET name = ?, prompt = ?, image_mime = ?, image_data = ? WHERE id = ?')
-        .run(value.name.trim(), value.prompt.trim(), value.mimeType, value.image, id);
+      const previous = this.db.prepare('SELECT file_id FROM workspace_style_files WHERE style_id = ?').get(id) as { file_id?: string } | undefined;
+      const files = this.requiredFiles();
+      const file = await files.put(value.image, value.mimeType, `${value.name.trim()}-reference`);
+      try {
+        this.db.prepare('UPDATE workspace_styles SET name = ?, prompt = ? WHERE id = ?')
+          .run(value.name.trim(), value.prompt.trim(), id);
+        this.db.prepare('INSERT INTO workspace_style_files (style_id, file_id) VALUES (?, ?) ON CONFLICT(style_id) DO UPDATE SET file_id = excluded.file_id').run(id, file.id);
+      } catch (error) {
+        if (file.id !== previous?.file_id && !files.references(file.id)) await files.remove(file.id);
+        throw error;
+      }
+      if (previous?.file_id && previous.file_id !== file.id) await files.removeUnreferenced(previous.file_id);
     } else {
       this.db.prepare('UPDATE workspace_styles SET name = ?, prompt = ? WHERE id = ?')
         .run(value.name.trim(), value.prompt.trim(), id);
     }
     return { id };
-  }
-
-  image(kind: 'covers' | 'styles', id: number): { mime: string; data: Uint8Array } | null {
-    const sql = kind === 'covers'
-      ? 'SELECT mime_type AS mime, image_data AS data FROM workspace_covers WHERE id = ?'
-      : 'SELECT image_mime AS mime, image_data AS data FROM workspace_styles WHERE id = ? AND image_data IS NOT NULL';
-    const row = this.db.prepare(sql).get(id) as { mime: string; data: Uint8Array } | undefined;
-    return row ? { mime: row.mime, data: row.data } : null;
   }
 
   list() {
@@ -127,13 +145,16 @@ export class ProjectStore {
     return Number((this.db.prepare('SELECT COUNT(*) AS count FROM workspace_episodes WHERE project_id=?').get(projectId) as { count:number }).count);
   }
   private serialize(row: StoredRow) {
-    const coverId = row.cover_asset_id ? Number(row.cover_asset_id) : null;
+    const coverFile = row.cover_file_id && this.files ? this.files.get(String(row.cover_file_id)) : undefined;
+    const coverUrl = coverFile && this.files ? this.files.originalUrl(coverFile) : undefined;
+    const coverThumbnail = coverFile && this.files ? this.files.thumbnailUrl(coverFile, 320) : undefined;
+    const coverPreview = coverFile && this.files ? this.files.thumbnailUrl(coverFile, 1024) : undefined;
     const style = this.db.prepare('SELECT id, name FROM workspace_styles WHERE id = ?')
       .get(Number(row.style_catalog_id)) as { id: number; name: string } | undefined;
     return {
       id: Number(row.id), name: String(row.name), description: row.description ?? null,
       aspect_ratio: String(row.aspect_ratio), style_catalog_id: Number(row.style_catalog_id),
-      cover_asset_id: coverId, cover_asset: coverId ? { storage_key: 'covers/' + coverId } : null,
+      cover_asset: coverFile && coverUrl && coverThumbnail ? { file_id: coverFile.id, storage_key: coverUrl, thumbnail_url: coverThumbnail, ...(coverPreview ? { preview_url: coverPreview } : {}) } : null,
       style: style || null, episode_count: this.episodeCount(Number(row.id)),
       created_at: row.created_at, updated_at: row.updated_at,
     };
@@ -178,21 +199,24 @@ export class ProjectStore {
     ).run(id).changes > 0;
   }
 
-  uploadCover(projectId: number, mimeType: string, data: Buffer) {
+  async uploadCover(projectId: number, mimeType: string, data: Buffer) {
     if (!this.get(projectId)) return null;
-    const result = this.db.prepare(
-      'INSERT INTO workspace_covers (project_id, mime_type, image_data) VALUES (?, ?, ?)',
-    ).run(projectId, mimeType, data);
-    return { id: Number(result.lastInsertRowid) };
+    const files = this.requiredFiles();
+    const file = await files.put(data, mimeType, `project-${projectId}-cover`);
+    return { file_id: file.id, url: files.originalUrl(file) };
   }
 
-  selectCover(projectId: number, coverId: number) {
-    const exists = this.db.prepare('SELECT 1 FROM workspace_covers WHERE id = ? AND project_id = ?')
-      .get(coverId, projectId);
-    if (!exists) return null;
-    this.db.prepare(
-      "UPDATE workspace_projects SET cover_asset_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'active'",
-    ).run(coverId, projectId);
+  async selectCoverFile(projectId: number, file: StoredFile) {
+    if (!this.get(projectId)) return null;
+    const files = this.requiredFiles();
+    const previous = this.db.prepare('SELECT cover_file_id FROM workspace_projects WHERE id = ?').get(projectId) as { cover_file_id?: string } | undefined;
+    this.db.prepare("UPDATE workspace_projects SET cover_file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'active'").run(file.id, projectId);
+    if (previous?.cover_file_id && previous.cover_file_id !== file.id) await files.removeUnreferenced(previous.cover_file_id);
     return this.get(projectId);
+  }
+
+  private requiredFiles() {
+    if (!this.files) throw new Error('文件存储不可用');
+    return this.files;
   }
 }
