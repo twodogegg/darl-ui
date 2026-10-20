@@ -45,8 +45,9 @@ const formatTime = (seconds: number) => {
 /** All comparison media elements share one logical clock; none owns the timeline. */
 export function VideoCompare(props: VideoCompareProps) {
   const media = props.media ?? (props.videos ?? []).map((video) => ({ ...video, type: 'video' as const }));
+  if (!media.length) return null;
   if (media.some((item) => item.type === 'image')) return <MediaComparisonSurface {...props} media={media} />;
-  return <VideoComparePlayer {...props} videos={media.map(({ id, name, src, poster }) => ({ id, name, src, poster }))} />;
+  return <VideoComparePlayer {...props} videos={media.map(({ id, name, src, poster }) => ({ id, name, src, poster }))} bestVideoId={props.bestMediaId ?? props.bestVideoId} defaultBestVideoId={props.defaultBestMediaId ?? props.defaultBestVideoId} />;
 }
 
 function VideoComparePlayer({
@@ -349,7 +350,7 @@ function MediaComparisonSurface({ media, layout = 'auto', bestMediaId, defaultBe
   const signature = items.map((item) => `${item.id}\u0000${item.src}`).join('\u0001');
   useEffect(() => { setDimensions({}); setErrors({}); }, [signature]);
   useEffect(() => {
-    if (best && !ids.includes(best)) { if (bestMediaId === undefined) setInternalBest(null); onBestChange?.(null); }
+    if (best && items.length > 0 && !ids.includes(best)) { if (bestMediaId === undefined) setInternalBest(null); onBestChange?.(null); }
   }, [best, bestMediaId, ids.join('\u0001'), onBestChange]);
   const chooseBest = (id: string) => {
     const next = activeBest === id ? null : id;

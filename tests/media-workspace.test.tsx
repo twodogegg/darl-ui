@@ -237,7 +237,7 @@ describe('MediaWorkspace', () => {
     expect(onGenerate.mock.calls[0][0]).toMatchObject({ prompt: '生成测试画面', references: { images: [{ id: 'image-result', url: '/image.png' }], videos: [{ id: 'video-result', url: '/video.mp4' }] } });
     expect(onGenerate.mock.calls[0][0].options).toEqual({ count: 1, duration: 8, generateAudio: true });
   });
-  it('图片和视频结果都可以加入统一对比并在面板中移除', () => {
+  it('图片和视频结果都可以加入统一对比并在面板中移除', async () => {
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
     const history: MediaTask[] = [{ ...tasks[0], batches: [
       { id: 'compare-image', modelId: 'image', type: 'image', prompt: '图片', options: { count: 1 }, results: [{ id: 'compare-image-result', status: 'completed', url: '/image.png' }] },
@@ -249,6 +249,12 @@ describe('MediaWorkspace', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('媒体对比');
     expect(screen.getByRole('img', { name: '图片 1' })).toBeInTheDocument();
     expect(document.querySelector('.darl-compare-media-stage video')).toHaveAttribute('src', '/video.mp4');
+    fireEvent.click(screen.getAllByRole('button', { name: '选为最佳' })[1]);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getAllByRole('article').find((article) => article.textContent?.includes('最佳'))).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '移出对比' })).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: '加入对比' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: '加入对比' })[0]);
     fireEvent.click(screen.getByRole('button', { name: '移除 图片 1' }));
     expect(screen.queryByRole('img', { name: '图片 1' })).toBeNull();
   });
