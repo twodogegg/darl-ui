@@ -4,7 +4,7 @@ import type { MediaStyleOption } from '../../../src/components/media-workspace/t
 import { FileStore, type StoredFile } from './file-storage';
 
 export type MediaJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'uncertain';
-export type MediaJob = { id: string; taskId?: string; modelId: string; type: 'image' | 'video'; status: MediaJobStatus;
+export type MediaJob = { id: string; taskId?: string; batchId?: string; modelId: string; type: 'image' | 'video'; status: MediaJobStatus;
   prompt: string; options: Record<string, unknown>; style?: MediaStyleOption; providerId: string; upstreamModelId: string; baseUrl: string; protocolKey?: string;
   remoteTaskId?: string; error?: string; phase?: string; attempts: number;
   /** IDs in the unified file store for generated outputs. */

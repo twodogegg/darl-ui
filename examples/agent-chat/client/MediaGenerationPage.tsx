@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { MediaWorkspace, toMediaModels, type GenerateRequest, type MediaInput, type MediaModel, type MediaStyleOption, type MediaTask, type ModelConfiguration, type StyleCreateRequest } from '@darl/ui';
 import { Button } from '../../../src/components/ui/Button';
-import { jobToBatch, jobsToTasks, type MediaJob } from './media-job-view';
+import { jobGroups, jobToBatch, jobsToBatchId, jobsToTasks, type MediaJob } from './media-job-view';
 import { styleOptionsFromCatalog, type StyleCatalog } from './workspace-styles';
 import type { UploadContext } from '../../../src/components/file-uploader/types';
 
@@ -59,9 +59,10 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
 
   const mergeJobs = useCallback((jobs: MediaJob[]) => {
     setTasks((current) => {
-      const batches = new Map(jobs.map((job) => [job.id, jobToBatch(job)]));
+      const groups = jobGroups(jobs);
+      const batches = new Map(groups.map((group) => [jobsToBatchId(group), jobToBatch(group[0], group)]));
       const next = current.map((task) => {
-        const taskJobs = jobs.filter((job) => (job.taskId || job.id) === task.id);
+        const taskBatches = new Map(groups.filter((group) => (group[0].taskId || group[0].id) === task.id).map((group) => [jobsToBatchId(group), jobToBatch(group[0], group)]));
         const currentBatches = task.batches.map((batch) => {
           const updated = batches.get(batch.id);
           if (!updated) return batch;
@@ -69,7 +70,7 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
           return { ...updated, ...(batch.references ? { references: batch.references } : {}), results: updated.results.map((result) => favorites.has(result.id) ? { ...result, favorited: true } : result) };
         });
         const known = new Set(currentBatches.map((batch) => batch.id));
-        return { ...task, batches: [...currentBatches, ...taskJobs.filter((job) => !known.has(job.id)).map(jobToBatch)] };
+        return { ...task, batches: [...currentBatches, ...[...taskBatches].filter(([id]) => !known.has(id)).map(([, batch]) => batch)] };
       });
       const newTasks = jobsToTasks(jobs.filter((job) => !current.some((task) => task.id === (job.taskId || job.id))));
       return [...next, ...newTasks];
@@ -129,7 +130,7 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
   const deleteBatch = async (batchId: string) => {
     setError('');
     try {
-      await request(`media-generation/jobs/${batchId}`, undefined, 'DELETE');
+      await request(`media-generation/jobs/${encodeURIComponent(batchId)}`, undefined, 'DELETE');
       setTasks((current) => current.map((task) => ({ ...task, batches: task.batches.filter((batch) => batch.id !== batchId) })));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '删除生成批次失败');
@@ -163,14 +164,6 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
       options: { ...payload.options, ...(payload.references ? { references: payload.references.images?.map((input) => input instanceof File ? input : { ...(input.fileId ? { fileId: input.fileId } : {}), url: input.url }) } : {}) },
       ...(payload.style ? { style: payload.style } : {}),
     });
-    const batch = { ...jobToBatch(job), ...(payload.references ? { references: payload.references } : {}), ...(payload.style ? { style: payload.style } : {}) };
-    setTasks((current) => {
-      const exists = current.some((task) => task.id === taskId);
-      if (!exists) return [{ id: taskId, title: payload.prompt.slice(0, 24) || '媒体任务', batches: [batch] }, ...current];
-      return current.map((task) => task.id === taskId
-        ? { ...task, title: task.title === '新任务' ? payload.prompt.slice(0, 24) || task.title : task.title, batches: [...task.batches, batch] }
-        : task);
-    });
     return job;
   };
 
@@ -178,11 +171,17 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
     setError('');
     try {
       const count = Math.max(1, Math.min(4, Math.floor(request_.generationCount ?? 1)));
-      const requests = Array.from({ length: count }, () => ({ modelId: request_.modelId, prompt: request_.prompt, options: request_.options, ...(request_.references ? { references: request_.references } : {}), ...(request_.style ? { style: request_.style } : {}) }));
-      const results = await Promise.allSettled(requests.map((payload) => submit(request_.taskId, payload)));
-      const failed = results.filter((result) => result.status === 'rejected');
-      if (failed.length === results.length) throw (failed[0] as PromiseRejectedResult).reason;
-      if (failed.length) setError(`${results.length - failed.length} 个任务已提交，${failed.length} 个提交失败；已提交任务不会重试`);
+      const batchId = crypto.randomUUID();
+      const requests = Array.from({ length: count }, () => ({ batchId, modelId: request_.modelId, prompt: request_.prompt, options: request_.options, ...(request_.references ? { references: request_.references } : {}), ...(request_.style ? { style: request_.style } : {}) }));
+      const created = await Promise.all(requests.map((payload) => request<MediaJob>('media-generation/jobs', { ...payload, taskId: request_.taskId })));
+      const batch = { ...jobToBatch(created[0], created), ...(request_.references ? { references: request_.references } : {}), ...(request_.style ? { style: request_.style } : {}) };
+      setTasks((current) => {
+        const exists = current.some((task) => task.id === request_.taskId);
+        if (!exists) return [{ id: request_.taskId, title: request_.prompt.slice(0, 24) || '媒体任务', batches: [batch] }, ...current];
+        return current.map((task) => task.id === request_.taskId
+          ? { ...task, title: task.title === '新任务' ? request_.prompt.slice(0, 24) || task.title : task.title, batches: [...task.batches, batch] }
+          : task);
+      });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '提交生成任务失败');
       throw reason;

@@ -81,6 +81,7 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
       if(path==='/api/media-generation/jobs' && method==='POST'){
         const input=await body(req, MAX_MEDIA_BODY);
         if(typeof input.taskId!=='string'||!input.taskId.trim()||input.taskId.length>120)throw new Error('任务 ID 无效');
+        if(input.batchId!==undefined&&(typeof input.batchId!=='string'||!input.batchId.trim()||input.batchId.length>120))throw new Error('批次 ID 无效');
         if(typeof input.modelId!=='string'||!input.modelId)throw new Error('模型必填');
         if(typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>16000)throw new Error('提示词无效');
         const model=config().models.find(m=>m.id===input.modelId&&m.enabled!==false);
@@ -101,17 +102,23 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         // Large data URLs stay out of the job row; adapters read the saved files.
         const options=await resolveMediaReferencesInStore(rawOptions, files);
         const style = parseStyle(input.style);
-        const job=store.create({taskId:input.taskId.trim(),modelId:model.id,type,prompt:input.prompt.trim(),...(style ? { style } : {}),providerId:provider.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey,baseUrl:provider.baseUrl,options});
+        const job=store.create({taskId:input.taskId.trim(),...(typeof input.batchId==='string'?{batchId:input.batchId.trim()}:{}),modelId:model.id,type,prompt:input.prompt.trim(),...(style ? { style } : {}),providerId:provider.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey,baseUrl:provider.baseUrl,options});
         void runner.tick();
         reply(res,201,job);return true;
       }
       const match=path.match(/^\/api\/media-generation\/jobs\/([a-f0-9-]+)(\/file)?$/);
       if(match && !match[2] && method==='DELETE'){
-        const job=store.delete(match[1]);
-        if(!job){reply(res,404,{error:'任务不存在'});return true;}
-        try { await store.removeFiles([job]); }
-        catch(error) { store.put(job); throw error; }
-        reply(res,200,{ok:true});return true;
+        const job=store.get(match[1]);
+        let jobs=job?.batchId?store.list().filter((item)=>item.batchId===job.batchId):job?[job]:store.list().filter((item)=>item.batchId===match[1]);
+        if(job&&!job.batchId&&typeof job.options.generationCount==='number'&&job.options.generationCount>1){
+          jobs=store.list().filter((item)=>!item.batchId&&(item.taskId||item.id)===(job.taskId||job.id)&&item.prompt===job.prompt&&item.createdAt.slice(0,19)===job.createdAt.slice(0,19));
+        }
+        if(!jobs.length){reply(res,404,{error:'任务不存在'});return true;}
+        if(jobs.some((item)=>item.status==='queued'||item.status==='running'))throw new Error('任务仍在生成，请等待完成或失败后再删除');
+        store.removeMany(jobs);
+        try { await store.removeFiles(jobs); }
+        catch(error) { for(const item of jobs) store.put(item); throw error; }
+        reply(res,200,{ok:true,deleted:jobs.length});return true;
       }
       const taskMatch=path.match(/^\/api\/media-generation\/tasks\/([^/]+)$/);
       if(taskMatch && method==='DELETE'){

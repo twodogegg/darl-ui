@@ -14,6 +14,25 @@ describe('media jobs to workspace tasks', () => {
     expect(tasks[0].batches.map((batch) => batch.id)).toEqual(['job-2', 'job-1']);
   });
 
+  it('merges independent jobs from one generation into one batch', () => {
+    const first = { ...job('job-1', 'task-1', '两次生成'), batchId: 'batch-1', resultFileIds: ['file-a'] };
+    const second = { ...job('job-2', 'task-1', '两次生成'), batchId: 'batch-1', resultFileIds: ['file-b'] };
+    const tasks = jobsToTasks([second, first]);
+    expect(tasks[0].batches).toHaveLength(1);
+    expect(tasks[0].batches[0]).toMatchObject({ id: 'batch-1', results: [{ id: 'job-2-0' }, { id: 'job-1-0' }] });
+  });
+
+  it('groups legacy generation-count jobs that share a second-level launch time', () => {
+    const base = job('job-1', 'task-1', '旧的数量 2');
+    const legacy = [
+      { ...base, options: { count: 1, generationCount: 2 }, createdAt: '2026-10-20T15:55:08.642Z' },
+      { ...base, id: 'job-2', options: { count: 1, generationCount: 2 }, createdAt: '2026-10-20T15:55:08.699Z' },
+    ];
+    const tasks = jobsToTasks(legacy);
+    expect(tasks[0].batches).toHaveLength(1);
+    expect(tasks[0].batches[0].results).toHaveLength(2);
+  });
+
   it('uses the job ID as the task ID when no task ID is supplied', () => {
     const tasks = jobsToTasks([job('job-1', undefined, '独立图片'), job('job-2', undefined, '另一张图片')]);
     expect(tasks.map((task) => task.id)).toEqual(['job-1', 'job-2']);

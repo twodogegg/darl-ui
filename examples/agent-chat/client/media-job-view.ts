@@ -5,6 +5,7 @@ export type JobResultFile = { fileId: string; url: string; thumbnailUrl?: string
 export type MediaJob = {
   id: string;
   taskId?: string;
+  batchId?: string;
   modelId: string;
   type: 'image' | 'video';
   status: JobStatus;
@@ -87,10 +88,10 @@ export function jobReferences(options: Record<string, unknown>): MediaReferences
   return images.length ? { images } : undefined;
 }
 
-export function jobToBatch(job: MediaJob): MediaBatch {
+export function jobToBatch(job: MediaJob, jobs: MediaJob[] = [job]): MediaBatch {
   const references = jobReferences(job.options || {});
   return {
-    id: job.id,
+    id: job.batchId || job.id,
     createdAt: job.createdAt,
     type: job.type,
     modelId: job.modelId,
@@ -98,11 +99,28 @@ export function jobToBatch(job: MediaJob): MediaBatch {
     options: jobOptions(job),
     ...(job.style ? { style: job.style } : {}),
     ...(references ? { references } : {}),
-    results: jobResults(job),
+    results: jobs.flatMap(jobResults),
     providerId: job.providerId,
     upstreamModelId: job.upstreamModelId,
     ...(job.protocolKey ? { protocolKey: job.protocolKey } : {}),
   };
+}
+
+/** Recover groups created before batch IDs existed: same-task, same-prompt jobs launched together. */
+export function jobGroups(jobs: MediaJob[]): MediaJob[][] {
+  const groups = new Map<string, MediaJob[]>();
+  for (const job of jobs) {
+    const expected = typeof job.options.generationCount === 'number' ? Math.max(1, Math.floor(job.options.generationCount)) : 1;
+    const key = job.batchId || (expected > 1
+      ? `${job.taskId || job.id}:${job.prompt}:${job.createdAt.slice(0, 19)}`
+      : `${job.taskId || job.id}:${job.id}`);
+    groups.set(key, [...(groups.get(key) ?? []), job]);
+  }
+  return [...groups.values()];
+}
+
+export function jobsToBatchId(jobs: MediaJob[]): string {
+  return jobs[0].batchId || jobs[0].id;
 }
 
 export function jobToTask(job: MediaJob): MediaTask {
@@ -112,11 +130,14 @@ export function jobToTask(job: MediaJob): MediaTask {
 /** Group persisted jobs by their owning task. */
 export function jobsToTasks(jobs: MediaJob[]): MediaTask[] {
   const tasks = new Map<string, MediaTask>();
-  for (const job of jobs) {
+  for (const group of jobGroups(jobs)) {
+    const job = group[0];
     const id = job.taskId || job.id;
-    const task = tasks.get(id);
-    if (task) task.batches.push(jobToBatch(job));
-    else tasks.set(id, { id, title: job.prompt.trim().slice(0, 24) || '媒体任务', batches: [jobToBatch(job)] });
+    const existing = tasks.get(id);
+    const batchId = jobsToBatchId(group);
+    if (existing?.batches.some((batch) => batch.id === batchId)) continue;
+    if (existing) existing.batches.push(jobToBatch(job, group));
+    else tasks.set(id, { id, title: job.prompt.trim().slice(0, 24) || '媒体任务', batches: [jobToBatch(job, group)] });
   }
   return [...tasks.values()];
 }
