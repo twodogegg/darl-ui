@@ -55,5 +55,6 @@ describe('media jobs to workspace tasks', () => {
       { id: 'ref-1', fileId: 'ref-1', url: '/api/files/ref-1', thumbnailUrl: '/api/files/ref-1?width=160' },
       { id: 'https://cdn.example.test/remote.png', url: 'https://cdn.example.test/remote.png' },
     ]);
+    expect(restored.createdAt).toBe('2026-10-20T00:00:00.000Z');
   });
 });

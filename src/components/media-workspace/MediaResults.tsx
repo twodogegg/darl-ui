@@ -1,9 +1,25 @@
 import { useEffect, useState } from 'react';
 import { Button } from '../ui/Button';
 import { Alert, Badge, Empty, Modal } from './WorkspaceUI';
-import type { MediaBatch, MediaModel, MediaResult, MediaTask, MediaWorkspaceProps } from './types';
+import type { MediaBatch, MediaInput, MediaModel, MediaReferences, MediaResult, MediaTask, MediaWorkspaceProps } from './types';
 
 const statusLabels = { queued: '等待生成', running: '生成中', completed: '生成完成', failed: '生成失败', cancelled: '已取消' };
+function BatchReferences({ references }: { references?: MediaReferences }) {
+  const items = [
+    ...(references?.images ?? []).map((input) => ({ kind: 'image' as const, label: '参考图片', input })),
+    ...(references?.videos ?? []).map((input) => ({ kind: 'video' as const, label: '参考视频', input })),
+    ...(references?.audios ?? []).map((input) => ({ kind: 'audio' as const, label: '参考音频', input })),
+    ...(references?.firstFrame ? [{ kind: 'image' as const, label: '首帧', input: references.firstFrame }] : []),
+    ...(references?.lastFrame ? [{ kind: 'image' as const, label: '尾帧', input: references.lastFrame }] : []),
+  ];
+  if (!items.length) return null;
+  const source = (input: MediaInput) => input instanceof File ? undefined : input.thumbnailUrl || input.url;
+  return <div className="darl-mw-batch-references" aria-label="本次生成使用的参考素材">{items.slice(0, 4).map(({ kind, label, input }, index) => {
+    const thumbnail = kind === 'image' ? source(input) : undefined;
+    const name = `${label} ${index + 1}`;
+    return <span key={`${kind}-${index}`} className="darl-mw-batch-ref" title={name}>{thumbnail ? <img src={thumbnail} alt={name} loading="lazy"/> : <span aria-hidden="true">{kind === 'video' ? '视频' : kind === 'audio' ? '音频' : '图片'}</span>}</span>;
+  })}{items.length > 4 && <span className="darl-mw-batch-ref-more">+{items.length - 4}</span>}</div>;
+}
 function ResultMedia({ type, result, prompt, onPreview, full = false }: { type: 'image' | 'video'; result: MediaResult; prompt: string; onPreview?: () => void; full?: boolean }) {
   const [failed, setFailed] = useState(false);
   const [play, setPlay] = useState(false);
@@ -23,10 +39,13 @@ export function MediaResults({ task, models, onReuse, onReference, onRetry, onCa
   const [preview, setPreview] = useState<{ result: MediaResult; prompt: string; type: 'image' | 'video' } | null>(null);
   useEffect(() => setPreview(null), [task?.id]);
   if (!task?.batches.length) return <Empty title={task ? '开始你的第一批创作' : '创建一个创作任务'}>填写提示词，选择模型，生成图片或视频。</Empty>;
-  return <><div className="darl-mw-collection">{task.batches.length} 个生成批次</div>{task.batches.map((batch, index) => {
+  const batches = task.batches.every((batch) => batch.createdAt && Number.isFinite(Date.parse(batch.createdAt)))
+    ? [...task.batches].sort((a, b) => Date.parse(a.createdAt!) - Date.parse(b.createdAt!))
+    : task.batches;
+  return <><div className="darl-mw-collection">{task.batches.length} 个生成批次</div>{batches.map((batch, index) => {
     const model = models.find((item) => item.id === batch.modelId);
     const type = batch.type ?? model?.type;
-    return <section key={batch.id} className="darl-mw-batch" aria-label={`批次 ${index + 1}`}><div className="darl-mw-batch-header"><div><h3 title={batch.prompt}>{batch.prompt}</h3><div className="darl-mw-batch-meta"><Badge>{model?.name ?? batch.modelId}</Badge>{type && <Badge>{type === 'image' ? '图片' : '视频'}</Badge>}{batch.options.aspectRatio && <Badge>{batch.options.aspectRatio}</Badge>}{batch.options.resolution && <Badge>{batch.options.resolution}</Badge>}{batch.options.duration !== undefined && <Badge>{batch.options.duration}秒</Badge>}{batch.options.generateAudio !== undefined && <Badge>{batch.options.generateAudio ? '有声' : '无声'}</Badge>}</div></div><div className="darl-mw-batch-actions"><Button size="sm" variant="outline" onClick={() => onReuse(batch)}>复用参数</Button>{onDeleteBatch && <Button size="sm" variant="ghost" onClick={() => { if (window.confirm('确定永久删除这一生成批次及其结果文件？')) void onDeleteBatch(batch.id); }}>删除批次</Button>}</div></div>
+    return <section key={batch.id} className="darl-mw-batch" aria-label={`批次 ${index + 1}`}><div className="darl-mw-batch-header"><div><h3 title={batch.prompt}>{batch.prompt}</h3><div className="darl-mw-batch-meta"><Badge>{model?.name ?? batch.modelId}</Badge>{type && <Badge>{type === 'image' ? '图片' : '视频'}</Badge>}{batch.options.aspectRatio && <Badge>{batch.options.aspectRatio}</Badge>}{batch.options.resolution && <Badge>{batch.options.resolution}</Badge>}{batch.options.duration !== undefined && <Badge>{batch.options.duration}秒</Badge>}{batch.options.generateAudio !== undefined && <Badge>{batch.options.generateAudio ? '有声' : '无声'}</Badge>}</div><BatchReferences references={batch.references}/></div><div className="darl-mw-batch-actions"><Button size="sm" variant="outline" onClick={() => onReuse(batch)}>复用参数</Button>{onDeleteBatch && <Button size="sm" variant="ghost" onClick={() => { if (window.confirm('确定永久删除这一生成批次及其结果文件？')) void onDeleteBatch(batch.id); }}>删除批次</Button>}</div></div>
       <div className="darl-mw-result-grid">{batch.results.map((result, resultIndex) => <article key={result.id} className="darl-mw-result" aria-label={`结果 ${resultIndex + 1}：${statusLabels[result.status]}`}>
         <div className="darl-mw-media" style={/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(batch.options.aspectRatio ?? '') ? { aspectRatio: batch.options.aspectRatio!.replace(':', '/') } : undefined} data-status={result.status}>
           {result.status === 'completed' && result.url && type ? <ResultMedia type={type} result={result} prompt={batch.prompt} onPreview={() => setPreview({ result, prompt: batch.prompt, type })}/> : <>

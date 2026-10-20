@@ -60,7 +60,7 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
   const mergeJobs = useCallback((jobs: MediaJob[]) => {
     setTasks((current) => {
       const batches = new Map(jobs.map((job) => [job.id, jobToBatch(job)]));
-      return current.map((task) => {
+      const next = current.map((task) => {
         const taskJobs = jobs.filter((job) => (job.taskId || job.id) === task.id);
         const currentBatches = task.batches.map((batch) => {
           const updated = batches.get(batch.id);
@@ -70,7 +70,9 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
         });
         const known = new Set(currentBatches.map((batch) => batch.id));
         return { ...task, batches: [...currentBatches, ...taskJobs.filter((job) => !known.has(job.id)).map(jobToBatch)] };
-      }).concat(jobsToTasks(jobs.filter((job) => !current.some((task) => task.id === (job.taskId || job.id)))));
+      });
+      const newTasks = jobsToTasks(jobs.filter((job) => !current.some((task) => task.id === (job.taskId || job.id))));
+      return [...next, ...newTasks];
     });
   }, []);
 
@@ -175,7 +177,12 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
   const generate = async (request_: GenerateRequest) => {
     setError('');
     try {
-      await submit(request_.taskId, { modelId: request_.modelId, prompt: request_.prompt, options: request_.options, ...(request_.references ? { references: request_.references } : {}), ...(request_.style ? { style: request_.style } : {}) });
+      const count = Math.max(1, Math.min(4, Math.floor(request_.generationCount ?? 1)));
+      const requests = Array.from({ length: count }, () => ({ modelId: request_.modelId, prompt: request_.prompt, options: request_.options, ...(request_.references ? { references: request_.references } : {}), ...(request_.style ? { style: request_.style } : {}) }));
+      const results = await Promise.allSettled(requests.map((payload) => submit(request_.taskId, payload)));
+      const failed = results.filter((result) => result.status === 'rejected');
+      if (failed.length === results.length) throw (failed[0] as PromiseRejectedResult).reason;
+      if (failed.length) setError(`${results.length - failed.length} 个任务已提交，${failed.length} 个提交失败；已提交任务不会重试`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '提交生成任务失败');
       throw reason;

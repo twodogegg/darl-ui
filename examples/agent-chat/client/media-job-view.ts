@@ -91,6 +91,7 @@ export function jobToBatch(job: MediaJob): MediaBatch {
   const references = jobReferences(job.options || {});
   return {
     id: job.id,
+    createdAt: job.createdAt,
     type: job.type,
     modelId: job.modelId,
     prompt: job.prompt,

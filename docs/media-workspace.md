@@ -81,7 +81,7 @@ export function Studio({ startGeneration }: {
 | `onRegenerate` | `(batchId, resultId) => void`；重新生成当前这一张，宿主使用原批次快照发起一个结果的生成 |
 | `onFavoriteChange` | `(batchId, resultId, favorited) => void`；收藏 / 取消收藏，宿主回写结果的 `favorited` 字段 |
 | `accentColor` | 可选单组件主色覆盖 |
-| `className` | 可覆盖高度等布局；默认高度 760px，手机端 820px |
+| `className` | 可覆盖高度等布局；桌面端随视口在 760–1200px 间扩展，手机端限高 820px |
 
 只新增 `MediaWorkspace` 公共组件；模型、任务、请求等 TypeScript 类型从包入口导出。内部模块不是公共 API。
 
@@ -89,7 +89,8 @@ export function Studio({ startGeneration }: {
 
 图片模型只提供通用能力和 `images`；需要编辑能力时声明 `generationModes: ['text-to-image', 'reference-edit']`。视频模型另支持 `videos`、`audios`、`generationModes`、`firstLastFrame`、`durations`、`generateAudio`。模型可附带 `logicalModelId`、`bindingId`、`providerId`、`upstreamModelId` 和 `protocolKey`，组件会在提交事件中原样交给宿主路由。未配置、`0` 或 `false` 表示不提供相应功能。
 
-- `maxOutputs` 缺省为 1。只有大于 1 时显示数量选择；请求始终带 `count`。
+- `maxOutputs` 缺省为 1，控制供应商单次请求可返回的结果数；只有大于 1 时显示「单次输出」。请求始终带 `count`。
+- 「生成数量」是独立的宿主调用次数（1–4，默认 1），通过 `generationCount` 传给 `onGenerate`。它不改变 `options.count`，也不能被映射成供应商的 `n` 参数；宿主必须创建多个独立任务，并可在结果区按独立批次展示。
 - 比例、分辨率和时长候选为空时隐藏控件，提交不带相应字段。
 - 固定时长使用数组；范围使用 `{ min, max }`，整数秒可选。
 - 默认值必须在能力范围内；无效值回退到首个候选，数量限制在有效范围内。
@@ -111,6 +112,7 @@ export function Studio({ startGeneration }: {
 type GenerateRequest = {
   taskId: string;
   modelId: string;
+  generationCount?: number;
   logicalModelId?: string;
   bindingId?: string;
   providerId?: string;
@@ -145,12 +147,13 @@ type GenerateRequest = {
 
 `MediaTask` 含 `id`、`title`、`batches`。批次含 `id`、`modelId`、`prompt`、`options`、`results`，另可保存：
 
+- `createdAt?: string`：批次 ISO 时间。所有批次都带有效时间时，结果区按时间从早到晚展示；未提供时沿用 `batches` 原顺序。
 - `type?: 'image' | 'video'`：建议保存，以便历史模型从配置中删除后仍可播放结果。
 - `logicalModelId?`、`bindingId?`、`providerId?`、`upstreamModelId?`、`protocolKey?`、`route?`、`mode?`：建议保存，使历史批次能够复用原始逻辑模型和渠道路由。
 - `style?: MediaStyleOption`：建议保存，复用时恢复当时的风格选择。
-- `references?: MediaReferences`：历史复用时恢复素材；缺省恢复为空。跨会话保存前应由宿主将本地文件转成远程素材对象。
+- `references?: MediaReferences`：历史复用时恢复素材；结果区会展示参考图片、视频、音频及首尾帧缩略图。缺省恢复为空。跨会话保存前应由宿主将本地文件转成远程素材对象。
 
-结果含 `id`、`status`、可选 `url`、`error` 和 `favorited?: boolean`。状态为 `queued | running | completed | failed | cancelled`。每次生成由宿主追加批次，组件按 `batches` 原顺序展示；结果失败互不影响。
+结果含 `id`、`status`、可选 `url`、`error` 和 `favorited?: boolean`。状态为 `queued | running | completed | failed | cancelled`。每次生成由宿主追加批次；结果较多、记录区产生滚动时，显示粘附的顶部 / 底部跳转按钮。结果失败互不影响。
 
 成功结果支持图片 / 视频预览、下载，图片和视频结果都可用作参考，并支持重新生成及收藏 / 取消收藏。点击「用作参考」只加入当前输入区的参考素材，不带回结果批次的提示词或其他生成参数；如果当前模型不支持该素材类型，组件会切换到第一个支持该类型的模型，但保留当前提示词和参数草稿。重新生成、收藏按钮仅在配置相应回调时出现。重新生成按参考 HTML 重跑当前结果，不把当前输入区的模型、提示词或数量作为该结果的原始参数；宿主负责更新该结果的等待、运行、完成、失败状态。收藏不发起生成请求，状态由宿主传入 `result.favorited` 控制，不在组件内持久化。浏览器原生视频控件不会自动有声播放；媒体加载失败、完成但无地址均给出提示。
 

@@ -69,6 +69,8 @@ export interface MediaStyleOption {
 export interface GenerateRequest {
   taskId: string;
   modelId: string;
+  /** Independent host invocations. Never forwarded to the provider as its `n` parameter. */
+  generationCount?: number;
   /** Stable logical model identity, when supplied by the host model registry. */
   logicalModelId?: string;
   /** Selected channel metadata; the host resolves the actual credentials. */
@@ -101,6 +103,8 @@ export interface MediaResult {
 export interface MediaBatch {
   id: string;
   modelId: string;
+  /** ISO creation time. When present, historical batches are shown oldest first. */
+  createdAt?: string;
   logicalModelId?: string;
   bindingId?: string;
   providerId?: string;

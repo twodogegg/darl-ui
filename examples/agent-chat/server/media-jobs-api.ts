@@ -92,6 +92,7 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         if(!provider?.apiKey)throw new Error('供应商缺少 API Key');
         const type=model.type;
         const rawOptions=input.options&&typeof input.options==='object'&&!Array.isArray(input.options)?input.options as Record<string,unknown>:{};
+        if(rawOptions.generationCount!==undefined)throw new Error('生成数量必须由宿主拆分为独立任务');
         if(rawOptions.references!==undefined&&!Array.isArray(rawOptions.references))throw new Error('参考素材必须是数组');
         const referenceCount=Array.isArray(rawOptions.references)?rawOptions.references.length:0;
         const effective=effectiveCapabilities(config(),model,binding);
