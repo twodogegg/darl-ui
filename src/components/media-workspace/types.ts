@@ -1,3 +1,5 @@
+import type { StyleCreateRequest } from '../style-selector/StyleSelector';
+
 export interface BaseCapabilities {
   aspectRatios?: string[];
   resolutions?: string[];
@@ -47,7 +49,16 @@ export interface VideoModel {
 }
 export type MediaModel = ImageModel | VideoModel;
 export type MediaInput = File | { id: string; url: string };
-export interface MediaReferences {
+export interface MediaStyleOption {
+  id: string;
+  name: string;
+  description?: string;
+  image?: string;
+  category?: string;
+  favorite?: boolean;
+  isOwned?: boolean;
+  lastUsedAt?: number;
+}export interface MediaReferences {
   images?: MediaInput[];
   videos?: MediaInput[];
   audios?: MediaInput[];
@@ -66,6 +77,7 @@ export interface GenerateRequest {
   protocolKey?: string;
   route?: MediaRoute;
   mode?: MediaGenerationMode;
+  style?: MediaStyleOption;
   prompt: string;
   references?: MediaReferences;
   options: { aspectRatio?: string; resolution?: string; duration?: number; count: number; generateAudio?: boolean };
@@ -87,6 +99,7 @@ export interface MediaBatch {
   protocolKey?: string;
   route?: MediaRoute;
   mode?: MediaGenerationMode;
+  style?: MediaStyleOption;
   /** Save the output type if a historical model may be removed from the model list. */
   type?: MediaModel['type'];
   prompt: string;
@@ -98,12 +111,16 @@ export interface MediaTask { id: string; title: string; batches: MediaBatch[] }
 export interface MediaWorkspaceProps {
   models: MediaModel[];
   tasks: MediaTask[];
+  styles?: MediaStyleOption[];
+  /** Save a style created from the composer; reject to keep the draft. */
+  onCreateStyle?: (request: StyleCreateRequest) => void | Promise<void>;
   /** How the host should select a channel when a model has binding metadata. */
   routingStrategy?: MediaRouteStrategy;
   activeTaskId?: string;
   onTaskChange?: (taskId: string) => void;
   onCreateTask?: () => void;
   onRenameTask?: (taskId: string, title: string) => void;
+  onDeleteTask?: (taskId: string) => void | Promise<void>;
   onGenerate: (request: GenerateRequest) => void | Promise<void>;
   onRetry?: (batchId: string, resultId: string) => void;
   onCancel?: (batchId: string, resultId: string) => void;

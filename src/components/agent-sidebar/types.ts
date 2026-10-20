@@ -204,7 +204,7 @@ export interface AgentSidebarProps {
   onSelectedModelIdChange?: (id: string) => void;
   selectedReasoningEffort?: string;
   onSelectedReasoningEffortChange?: (effort: string) => void;
-  agents?: Array<{ id: string; name: string; avatar?: string; description?: string; type?: 'main_agent' | 'sub_agent'; selectable?: boolean; callable?: boolean; enabled?: boolean; isDefault?: boolean; builtIn?: boolean; reasoningEfforts?: string[] }>;
+  agents?: Array<{ id: string; name: string; avatar?: string; description?: string; type?: 'main_agent' | 'sub_agent'; selectable?: boolean; callable?: boolean; enabled?: boolean; isDefault?: boolean; builtIn?: boolean }>;
   selectedAgentId?: string | null;
   onSelectedAgentIdChange?: (id: string) => void;
   pageContext?: string;

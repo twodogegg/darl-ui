@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { ArrowLeft, FolderPlus, Pencil, Trash2, UploadCloud } from 'lucide-react';
 import { StyleSelector, type StyleOption, type StyleCreateRequest, type AgentConfig } from '@darl/ui';
+import { storageImage, styleOptionsFromCatalog, type StyleCatalog } from './workspace-styles';
 import { EpisodeWorkspace } from './EpisodeWorkspace';
 import './projects.css';
 
@@ -11,7 +12,6 @@ type Project = {
   style?: { name?: string; id?: number } | null;
   episode_count?: number;
 };
-type StyleRecord = { id: number; name: string; image_url?: string; category?: string; prompt?: string };
 type Draft = { name: string; description: string; aspect_ratio: string; style_catalog_id: string };
 const blank: Draft = { name: '', description: '', aspect_ratio: '9:16', style_catalog_id: '' };
 const ratios = ['9:16', '16:9', '4:3', '1:1', '3:4', '21:9'];
@@ -28,13 +28,6 @@ async function backend<T>(path: string, init?: RequestInit): Promise<T> {
 const json = (method: string, body: unknown): RequestInit => ({
   method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
-const storageImage = (key?: string | null): string | undefined => {
-  if (!key) return undefined;
-  if (/^\/media-workspace\/scene-[1-6]\.svg$/.test(key)) return key;
-  const clean = key.replace(/^\/storage\//, '');
-  return clean.split('/').every((part) => /^[a-zA-Z0-9_.-]+$/.test(part) && part !== '..' && part !== '.') ?
-    '/api/workspace/storage/' + clean.split('/').map(encodeURIComponent).join('/') : undefined;
-};
 const projectCover = (project: Project): string | undefined =>
   storageImage(project.cover_asset?.storage_key) || storageImage(project.cover_url) || storageImage(project.cover?.url) || undefined;
 
@@ -54,12 +47,8 @@ export function ProjectsPage({ onBack, agents, onEditAgent, hidden = false }: { 
   const [notice, setNotice] = useState('');
 
   const fetchStyles = async () => {
-    const catalog = await backend<{ items: StyleRecord[]; official_items: StyleRecord[] }>('styles');
-    const owned = new Set((catalog.items || []).map((item) => item.id));
-    const next = [...(catalog.official_items || []), ...(catalog.items || [])].map((style) => ({
-      id: String(style.id), name: style.name, image: storageImage(style.image_url),
-      description: style.prompt, category: style.category, isOwned: owned.has(style.id),
-    }));
+    const catalog = await backend<StyleCatalog>('styles');
+    const next = styleOptionsFromCatalog(catalog);
     setStyles(next);
     return next;
   };

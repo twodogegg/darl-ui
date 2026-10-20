@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import type { MediaJob } from './media-job-store';
-import { createH3Video, getH3Video, downloadH3Video } from './h3-flash';
+import { createH3Video, getH3Video, downloadH3Video, resolveH3File, uploadH3File } from './h3-flash';
 
 /** A finished image is either inline bytes or a link. The link IS the result. */
 export type MediaImage =
@@ -7,6 +8,13 @@ export type MediaImage =
   | { kind: 'b64'; data: Buffer; ext: 'png'|'jpeg'|'webp'|'gif'; raw: string };
 /** A provider may answer with inline base64 or with a URL to fetch. Both are valid. */
 export type ImageForm = 'b64_json' | 'url';
+
+function promptFor(job: MediaJob): string {
+  const style = job.style;
+  if (!style) return job.prompt;
+  const description = style.description?.trim();
+  return `${job.prompt}\n\n视觉风格：${style.name}${description ? `。${description}` : ''}`;
+}
 
 /** Recommended output sizes: aspect ratio × tier → WIDTHxHEIGHT. */
 export const IMAGE_SIZE_TABLE: Record<string, Record<'1K'|'2K'|'4K', string>> = {
@@ -42,10 +50,15 @@ function ensureHttp(base: string) {
   const parsed = new URL(base);
   if (!['https:','http:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error('供应商地址无效');
 }
+function supplierMessage(body: string) {
+  const value = (() => { try { return JSON.parse(body) as { error?: { message?: string }; message?: string }; } catch { return null; } })();
+  const message = value?.error?.message || value?.message;
+  return typeof message === 'string' && message.trim() ? message.trim() : body.slice(0, 800);
+}
 async function checked(response: Response, key: string) {
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    const error = new Error('供应商 HTTP '+response.status+': '+body.replaceAll(key,'[REDACTED]').slice(0,800));
+    const error = new Error(`供应商 HTTP ${response.status}：${supplierMessage(body).replaceAll(key, '[REDACTED]')}`);
     // Keep the raw body so callers can retry against the channel's own limits.
     (error as Error & { body?: string }).body = body;
     throw error;
@@ -92,18 +105,39 @@ function sniffMime(data: Buffer) {
 
 /**
  * Accept the reference shapes a host can send: a `data:` URL, an HTTP(S) URL,
- * or `{ url }`. Remote links are passed through so the channel fetches them
- * directly; only local base64 needs re-uploading.
+ * `{ url }`, or the internal `{ mediaReference }` written by the media API.
+ * Remote links pass through so the channel fetches them; local files are read
+ * as bytes for multipart/inline upload.
  */
-export async function normalizeImageReferences(value: unknown, max = MAX_REFERENCE_IMAGES): Promise<ImageReference[] | undefined> {
+export async function normalizeImageReferences(value: unknown, max = MAX_REFERENCE_IMAGES, localMedia?: (url: string) => { bytes: Buffer; mime: string } | undefined): Promise<ImageReference[] | undefined> {
   if (value === undefined || value === null) return undefined;
   const rows = Array.isArray(value) ? value : [value];
-  const picked = rows.flatMap((row) => typeof row === 'string' ? [row] : row && typeof row === 'object' && typeof (row as { url?: unknown }).url === 'string' ? [(row as { url: string }).url] : []);
+  type Source = { kind: 'value'; value: string } | { kind: 'file'; path: string; mimeType?: string };
+  const picked = rows.flatMap<Source>((row) => {
+    if (typeof row === 'string') return [{ kind: 'value', value: row }];
+    if (!row || typeof row !== 'object') return [];
+    const file = (row as { mediaReference?: unknown }).mediaReference;
+    if (typeof file === 'string') return [{ kind: 'file', path: file, mimeType: typeof (row as { mimeType?: unknown }).mimeType === 'string' ? (row as { mimeType: string }).mimeType : undefined }];
+    const url = (row as { url?: unknown }).url;
+    return typeof url === 'string' ? [{ kind: 'value', value: url }] : [];
+  });
   if (!picked.length) return undefined;
   if (picked.length > max) throw new Error(`参考图片最多 ${max} 张`);
   return picked.map((source, index) => {
-    const inline = DATA_URL.exec(source);
-    if (!inline) return { url: source };
+    if (source.kind === 'file') {
+      const data = readFileSync(source.path);
+      if (!data.length) throw new Error(`参考图片 ${index + 1} 为空`);
+      const mimeType = sniffMime(data) || source.mimeType || 'image/png';
+      return { name: `reference-${index + 1}.${mimeType.split('/')[1].replace('jpeg', 'jpg')}`, mimeType, data };
+    }
+    const inline = DATA_URL.exec(source.value);
+    const local = /^\/api\/media-generation\/jobs\/([a-f0-9-]+)\/file(?:\?index=(\d+))?$/.exec(source.value);
+    if (local) {
+      const saved = localMedia?.(source.value);
+      if (!saved) throw new Error(`参考图片 ${index + 1} 不存在或尚未完成`);
+      return { name: `reference-${index + 1}.${saved.mime.split('/')[1].replace('jpeg', 'jpg')}`, mimeType: saved.mime, data: saved.bytes };
+    }
+    if (!inline) return { url: source.value };
     const data = Buffer.from(inline[2], 'base64');
     if (!data.length) throw new Error(`参考图片 ${index + 1} 为空`);
     const mimeType = sniffMime(data) || inline[1].toLowerCase();
@@ -161,7 +195,7 @@ export function allowedSizesFromError(body: string) {
 function editForm(job: MediaJob, size: string, references: ImageReference[]) {
   const form = new FormData();
   form.set('model', job.upstreamModelId);
-  form.set('prompt', job.prompt);
+  form.set('prompt', promptFor(job));
   if (size !== 'auto') form.set('size', size);
   for (const [key, value] of Object.entries(requestOptions(job.options))) form.set(key, value);
   references.forEach((reference) => {
@@ -174,7 +208,7 @@ function editForm(job: MediaJob, size: string, references: ImageReference[]) {
 function editJson(job: MediaJob, size: string, references: ImageReference[]) {
   return {
     model: job.upstreamModelId,
-    prompt: job.prompt,
+    prompt: promptFor(job),
     image: references.map((reference) => 'url' in reference ? reference.url : `data:${reference.mimeType};base64,${reference.data.toString('base64')}`),
     ...(size !== 'auto' ? { size } : {}),
     ...jsonOptions(job.options),
@@ -201,6 +235,7 @@ async function readImage(value: unknown): Promise<MediaImage> {
  */
 export async function generateImages(job: MediaJob, key: string): Promise<{ images: MediaImage[]; provider: unknown }> {
   ensureHttp(job.baseUrl);
+  const prompt = promptFor(job);
   const size = imageSize(job.options);
   const references = await normalizeImageReferences(job.options.references);
   const request = (requestedSize: string) => references?.length
@@ -209,7 +244,7 @@ export async function generateImages(job: MediaJob, key: string): Promise<{ imag
         : { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: editForm(job, requestedSize, references), signal: AbortSignal.timeout(180000) })
     : fetch(url(job.baseUrl, 'images/generations'), {
         method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: job.upstreamModelId, prompt: job.prompt, size: requestedSize, ...jsonOptions(job.options) }),
+        body: JSON.stringify({ model: job.upstreamModelId, prompt, size: requestedSize, ...jsonOptions(job.options) }),
         signal: AbortSignal.timeout(180000),
       });
   let response: Response;
@@ -294,8 +329,9 @@ function mimeExtension(mimeType: string) {
  */
 export async function generateGeminiImages(job: MediaJob, key: string): Promise<{ images: MediaImage[]; provider: unknown }> {
   ensureHttp(job.baseUrl);
+  const prompt = promptFor(job);
   const references = await normalizeImageReferences(job.options.references, MAX_GEMINI_REFERENCE_IMAGES);
-  const parts: Record<string, unknown>[] = [{ text: job.prompt }];
+  const parts: Record<string, unknown>[] = [{ text: prompt }];
   for (const reference of references || []) {
     parts.push('url' in reference
       ? { fileData: { fileUri: reference.url } }
@@ -364,14 +400,23 @@ export async function generateImage(job: MediaJob, key: string) {
   return images[0];
 }
 
-export async function submitVideo(job:MediaJob,key:string):Promise<string>{
+export async function submitVideo(job:MediaJob,key:string,localMedia?:(url:string)=>{bytes:Buffer;mime:string}|undefined):Promise<string>{
   ensureHttp(job.baseUrl);
-  if(job.options.references)throw new Error('H3 参考素材上传协议尚未实测，不允许直接提交');
+  const references=await normalizeImageReferences(job.options.references,9,localMedia);
+  const referenceImages:string[]=[];
+  for(const reference of references||[]){
+    if('url' in reference){referenceImages.push(reference.url);continue;}
+    const blob=new Blob([new Uint8Array(reference.data)],{type:reference.mimeType});
+    const uploaded=await uploadH3File(job.baseUrl,key,blob,reference.name,'vision',AbortSignal.timeout(60000));
+    const resolved=await resolveH3File(job.baseUrl,key,uploaded.id,AbortSignal.timeout(30000));
+    if(!resolved.url)throw new Error('H3 参考图片没有返回公网 URL');
+    referenceImages.push(resolved.url);
+  }
   const result=await createH3Video(job.baseUrl,key,{
-    prompt:job.prompt, seconds:Number(job.options.duration??10),
+    prompt:promptFor(job), seconds:Number(job.options.duration??10),
     resolution:(job.options.resolution ?? '768') as '480'|'768',
     aspectRatio:(job.options.aspectRatio ?? '9:16') as '16:9'|'9:16',
-    mode:'text-to-video',
+    ...(referenceImages.length?{referenceImages,mode:'reference' as const}:{mode:'text-to-video' as const}),
   },AbortSignal.timeout(30000));
   return result.id;
 }
@@ -380,6 +425,6 @@ export async function checkVideo(job:MediaJob,key:string):Promise<{state:'runnin
   ensureHttp(job.baseUrl);
   const remote=await getH3Video(job.baseUrl,key,job.remoteTaskId,AbortSignal.timeout(30000));
   if(remote.status==='failed')return {state:'failed',error:remote.error||'视频生成失败'};
-  if(remote.status==='completed')return {state:'completed',media:Buffer.from(await downloadH3Video(job.baseUrl,key,remote,AbortSignal.timeout(120000)))};
+  if(remote.status==='succeeded')return {state:'completed',media:Buffer.from(await downloadH3Video(job.baseUrl,key,remote,AbortSignal.timeout(120000)))};
   return {state:'running'};
 }

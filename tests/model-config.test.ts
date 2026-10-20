@@ -5,9 +5,9 @@ describe('model configuration', () => {
   it('keeps zero and false overrides and replaces arrays', () => {
     const configuration = defaultModelConfiguration();
     const model = configuration.models.find((item) => item.id === 'minimax-h3-flash')!;
-    const binding = { ...model.bindings[0], capabilityOverrides: { maxReferenceVideos: 0, generateAudio: false, resolutions: ['480'] } };
+    const binding = { ...model.bindings[0], capabilityOverrides: { maxReferenceVideos: 0, generateAudio: false, resolutions: ['768'] } };
     const resolved = effectiveCapabilities(configuration, model, binding)!;
-    expect(resolved).toMatchObject({ maxReferenceVideos: 0, generateAudio: false, resolutions: ['480'] });
+    expect(resolved).toMatchObject({ maxReferenceVideos: 0, generateAudio: false, resolutions: ['768'] });
   });
 
   it('rejects mismatched templates and unknown protocols', () => {
@@ -22,7 +22,7 @@ describe('model configuration', () => {
   it('rejects defaults that fall outside a binding effective capability', () => {
     const configuration = defaultModelConfiguration();
     const model = configuration.models.find((item) => item.id === 'minimax-h3-flash')!;
-    model.bindings[0].capabilityOverrides = { resolutions: ['480'] };
+    model.bindings[0].capabilityOverrides = { resolutions: ['768'] };
     const errors = validateModelConfiguration(configuration);
     expect(errors.map((error) => error.message)).toContain('默认分辨率必须属于最终有效能力');
   });

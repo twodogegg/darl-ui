@@ -59,7 +59,7 @@ export const generationModeLabels: Record<MediaGenerationMode, string> = {
   'reference-edit': '参考图编辑',
   'text-to-video': '文生视频',
   'first-last-frame': '首尾帧',
-  reference: '参考素材',
+  reference: '全能参考',
 };
 export function filterReferences(model: MediaModel, references: MediaReferences, inputMode: MediaInputMode = references.firstFrame || references.lastFrame ? 'frames' : 'references'): MediaReferences | undefined {
   const result: MediaReferences = {};

@@ -1,9 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ProjectStore } from './project-store';
+import { isLocalOrLanAddress } from './local-access';
 
 const MAX_BODY_BYTES = 12 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const allowedTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 class RequestError extends Error {
@@ -80,8 +80,8 @@ export async function handleWorkspaceProjectRequest(
       'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
     response.end(JSON.stringify(data));
   };
-  if (!LOOPBACK.has(request.socket.remoteAddress || '')) {
-    send(403, { error: '本地项目数据只允许本机访问' });
+  if (!isLocalOrLanAddress(request.socket.remoteAddress)) {
+    send(403, { error: '本地项目数据只允许本机或同一局域网访问' });
     return true;
   }
 

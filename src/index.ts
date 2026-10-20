@@ -6,7 +6,7 @@ export type { FileUploaderProps, UploadFn, UploadContext, UploadItem, UploadStat
 export { VideoCompare } from './components/video-compare/VideoCompare';
 export type { CompareVideo, VideoCompareLayout, VideoCompareProps } from './components/video-compare/VideoCompare';
 export { MediaWorkspace } from './components/media-workspace/MediaWorkspace';
-export type { BaseCapabilities, BaseDefaults, ImageModel, VideoModel, MediaModel, MediaInput, MediaReferences, MediaGenerationMode, MediaRoute, MediaRouteStrategy, GenerateRequest, MediaResult, MediaBatch, MediaTask, MediaWorkspaceProps } from './components/media-workspace/types';
+export type { BaseCapabilities, BaseDefaults, ImageModel, VideoModel, MediaModel, MediaInput, MediaStyleOption, MediaReferences, MediaGenerationMode, MediaRoute, MediaRouteStrategy, GenerateRequest, MediaResult, MediaBatch, MediaTask, MediaWorkspaceProps } from './components/media-workspace/types';
 export { AgentSidebar } from './components/agent-sidebar/AgentSidebar';
 export { AgentPlaza } from './components/agent-plaza/AgentPlaza';
 export type { AgentPlazaProps } from './components/agent-plaza/AgentPlaza';

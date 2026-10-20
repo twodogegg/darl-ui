@@ -3,9 +3,9 @@ import { AgentPlaza, type AgentConfig } from '../../src';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 const agents: AgentConfig[] = [
-  { id: 'research', name: '资料研究助手', avatar: '🔍', description: '整理资料、核对来源并输出清晰结论。', type: 'main_agent', selectable: true, callable: true, instructions: '', providerId: '', modelId: '' },
-  { id: 'creative', name: '创意策划助手', avatar: '✨', description: '把想法变成可执行的内容方案。', type: 'main_agent', selectable: true, callable: true, instructions: '', providerId: '', modelId: '' },
-  { id: 'retrieval', name: '网页检索助手', avatar: '🌐', description: '仅供主 Agent 委派调用的检索助手。', type: 'sub_agent', selectable: false, callable: true, instructions: '', providerId: '', modelId: '' },
+  { id: 'research', name: '资料研究助手', avatar: '🔍', description: '整理资料、核对来源并输出清晰结论。', type: 'main_agent', selectable: true, callable: true, instructions: '' },
+  { id: 'creative', name: '创意策划助手', avatar: '✨', description: '把想法变成可执行的内容方案。', type: 'main_agent', selectable: true, callable: true, instructions: '' },
+  { id: 'retrieval', name: '网页检索助手', avatar: '🌐', description: '仅供主 Agent 委派调用的检索助手。', type: 'sub_agent', selectable: false, callable: true, instructions: '' },
 ];
 
 export function AgentPlazaDemo() {

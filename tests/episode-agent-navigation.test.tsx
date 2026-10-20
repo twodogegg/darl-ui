@@ -23,7 +23,7 @@ describe('episode Agent prompt navigation', () => {
     const onEditAgent = vi.fn();
     render(<EpisodeWorkspace projectId={8} agents={[
       { id: 'default', name: '网站助手', builtIn: true, isDefault: true, enabled: true,
-        instructions: '网站系统提示词', providerId: 'darl', modelId: 'deepseek-v4.1-flash' },
+        instructions: '网站系统提示词' },
     ]} onEditAgent={onEditAgent} />);
 
     const button = await screen.findByRole('button', { name: '编辑拆镜 Agent' });

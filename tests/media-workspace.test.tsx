@@ -148,7 +148,8 @@ describe('MediaWorkspace', () => {
       { id: 'b1', modelId: 'image', prompt: '图片批次', options: { count: 2 }, results: [{ id: 'done', status: 'completed', url: '/done.png' }, { id: 'bad', status: 'failed', error: '失败信息' }] },
       { id: 'b2', modelId: 'video', prompt: '视频批次', options: { count: 2 }, results: [{ id: 'running', status: 'running' }, { id: 'cancelled', status: 'cancelled' }] }
     ] }, { id: 't2', title: '第二任务', batches: [] }];
-    const callbacks = { onRetry: vi.fn(), onCancel: vi.fn(), onRegenerate: vi.fn(), onFavoriteChange: vi.fn(), onTaskChange: vi.fn(), onCreateTask: vi.fn(), onRenameTask: vi.fn() };
+    const onDeleteTask = vi.fn();
+    const callbacks = { onRetry: vi.fn(), onCancel: vi.fn(), onRegenerate: vi.fn(), onFavoriteChange: vi.fn(), onTaskChange: vi.fn(), onCreateTask: vi.fn(), onRenameTask: vi.fn(), onDeleteTask };
     const { rerender } = render(<MediaWorkspace models={models} tasks={history} activeTaskId="t1" onGenerate={vi.fn()} {...callbacks}/>);
     fireEvent.click(screen.getByRole('button', { name: '重试' })); expect(callbacks.onRetry).toHaveBeenCalledWith('b1', 'bad');
     fireEvent.click(screen.getByRole('button', { name: '取消' })); expect(callbacks.onCancel).toHaveBeenCalledWith('b2', 'running');
@@ -162,9 +163,12 @@ describe('MediaWorkspace', () => {
     expect(screen.queryByRole('button', { name: '继续编辑' })).toBeNull();
     expect(screen.queryByRole('button', { name: '预览' })).toBeNull();
     expect(screen.queryByText('2 个结果')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /第二任务/ })); expect(callbacks.onTaskChange).toHaveBeenCalledWith('t2');
+    fireEvent.click(screen.getByRole('button', { name: /^▧ 第二任务/ })); expect(callbacks.onTaskChange).toHaveBeenCalledWith('t2');
     expect(screen.getByRole('heading', { name: '测试任务' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '＋ 新建任务' })); expect(callbacks.onCreateTask).toHaveBeenCalled();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: '删除任务 测试任务' })); expect(onDeleteTask).toHaveBeenCalledWith('t1');
+    confirm.mockRestore();
     fireEvent.click(screen.getByRole('button', { name: '重命名' }));
     const rename = screen.getByRole('textbox', { name: '任务名称' });
     fireEvent.change(rename, { target: { value: '临时标题' } });
@@ -197,6 +201,20 @@ describe('MediaWorkspace', () => {
     await waitFor(() => expect(onGenerate).toHaveBeenCalled());
     expect(onGenerate.mock.calls[0][0]).toMatchObject({ prompt: '生成测试画面', references: { images: [{ id: 'image-result', url: '/image.png' }], videos: [{ id: 'video-result', url: '/video.mp4' }] } });
     expect(onGenerate.mock.calls[0][0].options).toEqual({ count: 1, duration: 8, generateAudio: true });
+  });
+  it('视频生成时点击图片结果用作参考，保持视频模型并加入参考图', async () => {
+    const history: MediaTask[] = [{ ...tasks[0], batches: [{ id: 'image-batch', modelId: 'image', type: 'image', prompt: '图片源', options: { count: 1 }, results: [{ id: 'image-result', status: 'completed', url: '/image.png' }] }] }];
+    const onGenerate = vi.fn();
+    const referenceVideo: MediaModel = { ...models[2], capabilities: { ...models[2].capabilities, generationModes: ['text-to-video', 'reference'] } };
+    render(<MediaWorkspace models={[models[0], referenceVideo]} tasks={history} onGenerate={onGenerate}/>);
+    switchType('视频');
+    expect(screen.getByRole('button', { name: '选择模型' })).toHaveTextContent('视频 A');
+    fireEvent.click(screen.getByRole('button', { name: '用作参考' }));
+    expect(screen.getByRole('radio', { name: '生成视频' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('button', { name: '选择模型' })).toHaveTextContent('视频 A');
+    expect(screen.getByAltText('image-result')).toBeInTheDocument();
+    prompt(); submit(); await waitFor(() => expect(onGenerate).toHaveBeenCalled());
+    expect(onGenerate.mock.calls[0][0]).toMatchObject({ modelId: 'video', mode: 'reference', references: { images: [{ id: 'image-result', url: '/image.png' }] } });
   });
   it('首尾帧只显示两个位置，普通参考素材与首尾帧互斥并分别保留', async () => {
     const onGenerate = vi.fn();
@@ -264,6 +282,30 @@ describe('MediaWorkspace', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('已添加相同文件');
     prompt(); submit(); await waitFor(() => expect(onGenerate).toHaveBeenCalled());
     expect(onGenerate.mock.calls[0][0].references.images).toEqual([image]);
+  });
+  it('风格只有传入 isOwned 时进入我的风格，并可创建新风格', async () => {
+    const styles = [
+      { id: 'market', name: '电影感', category: '真人风格', description: '自然肤色' },
+      { id: 'owned', name: '我的短剧感', category: '我的风格', description: '柔和逆光', isOwned: true },
+    ];
+    const onCreateStyle = vi.fn().mockResolvedValue(undefined);
+    const onGenerate = vi.fn();
+    render(<MediaWorkspace models={models} tasks={tasks} styles={styles} onCreateStyle={onCreateStyle} onGenerate={onGenerate}/>);
+    fireEvent.click(screen.getByRole('button', { name: '选择风格' }));
+    fireEvent.mouseDown(screen.getByRole('tab', { name: '我的风格' }));
+    expect(screen.getByRole('button', { name: '预览我的短剧感' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '预览电影感' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '创建风格' }));
+    fireEvent.change(screen.getByLabelText(/风格名称/), { target: { value: '新风格' } });
+    fireEvent.change(screen.getByLabelText(/风格描述词/), { target: { value: '冷色霓虹' } });
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    fireEvent.click(screen.getByRole('button', { name: '创建风格' }));
+    await waitFor(() => expect(onCreateStyle).toHaveBeenCalledWith({ name: '新风格', description: '冷色霓虹' }));
+    fireEvent.mouseDown(screen.getByRole('tab', { name: '风格广场' }));
+    fireEvent.click(screen.getByRole('button', { name: '预览电影感' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认选择' }));
+    prompt(); submit();
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith(expect.objectContaining({ style: styles[0] })));
   });
   it('普通文本粘贴不拦截，图片粘贴复用素材队列；无模型或任务不可提交', () => {
     const { rerender } = render(<MediaWorkspace models={models} tasks={tasks} onGenerate={vi.fn()}/>);

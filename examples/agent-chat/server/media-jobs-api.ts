@@ -1,21 +1,36 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { MediaJobStore } from './media-job-store';
 import { MediaJobRunner } from './media-runner';
 import { createFailureLog } from './failure-log';
-import type { ModelConfiguration } from '../../../src/components/settings/model-config';
+import { effectiveCapabilities, type ModelConfiguration } from '../../../src/components/settings/model-config';
+import { persistMediaReferences } from './media-references';
 import type { StoredProvider } from './models';
+import type { MediaStyleOption } from '../../../src/components/media-workspace/types';
+import { isLocalOrLanAddress } from './local-access';
 
-const localhost = new Set(['127.0.0.1','::1','::ffff:127.0.0.1']);
+/** Base64 reference images travel through this JSON endpoint. */
+const MAX_MEDIA_BODY = 128 * 1024 * 1024;
 function reply(res: ServerResponse,status:number,data:unknown) {
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(JSON.stringify(data));
 }
-async function body(req:IncomingMessage) {
+function parseStyle(value: unknown): MediaStyleOption | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const item = value as Record<string, unknown>;
+  if (typeof item.id !== 'string' || typeof item.name !== 'string') throw new Error('视觉风格参数无效');
+  return {
+    id: item.id.slice(0, 120), name: item.name.slice(0, 120),
+    ...(typeof item.description === 'string' && item.description.trim() ? { description: item.description.slice(0, 1000) } : {}),
+    ...(typeof item.category === 'string' ? { category: item.category.slice(0, 80) } : {}),
+  };
+}
+async function body(req:IncomingMessage, limit=100_000) {
   let data='';
   for await(const part of req) {
     data+=part.toString();
-    if(data.length>100_000)throw new Error('任务请求体超过限制');
+    if(data.length>limit)throw new Error('任务请求体超过限制');
   }
   return JSON.parse(data) as Record<string,unknown>;
 }
@@ -30,7 +45,7 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
   const handle=async(req:IncomingMessage,res:ServerResponse):Promise<boolean>=>{
     const path=new URL(req.url||'/', 'http://localhost').pathname;
     if(!path.startsWith('/api/media-generation/'))return false;
-    if(!localhost.has(req.socket.remoteAddress||'')){reply(res,403,{error:'生成任务 API 仅允许本机调用'});return true;}
+    if(!isLocalOrLanAddress(req.socket.remoteAddress)){reply(res,403,{error:'生成任务 API 仅允许本机或同一局域网调用'});return true;}
     const method=req.method||'GET';
     try{
       if(path==='/api/media-generation/jobs' && method==='GET'){
@@ -45,7 +60,8 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         reply(res,200,store.limits());return true;
       }
       if(path==='/api/media-generation/jobs' && method==='POST'){
-        const input=await body(req);
+        const input=await body(req, MAX_MEDIA_BODY);
+        if(typeof input.taskId!=='string'||!input.taskId.trim()||input.taskId.length>120)throw new Error('任务 ID 无效');
         if(typeof input.modelId!=='string'||!input.modelId)throw new Error('模型必填');
         if(typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>16000)throw new Error('提示词无效');
         const model=config().models.find(m=>m.id===input.modelId&&m.enabled!==false);
@@ -56,14 +72,27 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         const provider=providers().find(p=>p.id===binding.providerId);
         if(!provider?.apiKey)throw new Error('供应商缺少 API Key');
         const type=model.type;
-        const options=input.options&&typeof input.options==='object'&&!Array.isArray(input.options)?input.options as Record<string,unknown>:{};
-        if(options.references&&type!=='image')throw new Error('视频参考素材模式待真实网关核验后开放');
-        // 适配器在提交时再下载/解码参考图，这里只保留原始值。
-        const job=store.create({modelId:model.id,type,prompt:input.prompt.trim(),providerId:provider.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey,baseUrl:provider.baseUrl,options});
+        const rawOptions=input.options&&typeof input.options==='object'&&!Array.isArray(input.options)?input.options as Record<string,unknown>:{};
+        if(rawOptions.references!==undefined&&!Array.isArray(rawOptions.references))throw new Error('参考素材必须是数组');
+        const referenceCount=Array.isArray(rawOptions.references)?rawOptions.references.length:0;
+        const effective=effectiveCapabilities(config(),model,binding);
+        const maxReferences=effective&&'maxReferenceImages' in effective?effective.maxReferenceImages:0;
+        if(referenceCount>maxReferences)throw new Error(`参考图片最多 ${maxReferences} 张`);
+        // Large data URLs stay out of the job row; adapters read the saved files.
+        const options=persistMediaReferences(store.mediaRoot, rawOptions);
+        const style = parseStyle(input.style);
+        const job=store.create({taskId:input.taskId.trim(),modelId:model.id,type,prompt:input.prompt.trim(),...(style ? { style } : {}),providerId:provider.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey,baseUrl:provider.baseUrl,options});
         void runner.tick();
         reply(res,201,job);return true;
       }
       const match=path.match(/^\/api\/media-generation\/jobs\/([a-f0-9-]+)(\/file)?$/);
+      if(match && !match[2] && method==='DELETE'){
+        const job=store.delete(match[1]);
+        if(!job){reply(res,404,{error:'任务不存在'});return true;}
+        const paths=job.resultPaths?.length?job.resultPaths:job.resultPath?[job.resultPath]:[];
+        for(const file of paths){try{unlinkSync(file);}catch{}}
+        reply(res,200,{ok:true});return true;
+      }
       if(match && method==='GET'){
         const job=store.get(match[1]);
         if(!job){reply(res,404,{error:'任务不存在'});return true;}

@@ -1,6 +1,7 @@
 export type H3Resolution = '480' | '768';
 export type H3AspectRatio = '16:9' | '9:16';
-export type H3VideoStatus = 'queued' | 'in_progress' | 'completed' | 'failed';
+/** Status vocabulary actually returned by the unified gateway. */
+export type H3VideoStatus = 'queued' | 'processing' | 'succeeded' | 'failed';
 
 export interface H3FlashOptions {
   prompt: string;
@@ -28,6 +29,13 @@ export interface H3FlashRequest {
 
 export interface H3FileDescriptor { id: string; url?: string; purpose?: string }
 export interface H3VideoTask { id: string; status: H3VideoStatus; videoUrl?: string; error?: string }
+
+const H3_STATUSES: H3VideoStatus[] = ['queued', 'processing', 'succeeded', 'failed'];
+
+/** The gateway returns relative `video_url` paths; they need the API origin. */
+function absolute(baseUrl: string, url: string) {
+  return new URL(url, `${baseUrl.replace(/\/$/, '')}/`).toString();
+}
 
 function apiUrl(baseUrl: string, path: string) {
   const normalizedBase = baseUrl.replace(/\/$/, '');
@@ -66,8 +74,9 @@ export function buildH3FlashRequest(options: H3FlashOptions): H3FlashRequest {
 
 async function h3Response(response: Response, apiKey: string) {
   if (response.ok) return response;
-  const value = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-  const message = value?.error?.message || `H3 Flash API 请求失败（HTTP ${response.status}）`;
+  // The gateway answers 5xx with a flat { code, message } body instead of OpenAI's { error }.
+  const value = await response.json().catch(() => null) as { error?: { message?: string }; message?: string } | null;
+  const message = value?.error?.message || value?.message || `H3 Flash API 请求失败（HTTP ${response.status}）`;
   throw new Error(message.replaceAll(apiKey, '[已隐藏]'));
 }
 
@@ -101,12 +110,17 @@ export async function createH3Video(baseUrl: string, apiKey: string, options: H3
 export async function getH3Video(baseUrl: string, apiKey: string, taskId: string, signal?: AbortSignal): Promise<H3VideoTask> {
   const response = await fetch(apiUrl(baseUrl, `/v1/videos/${encodeURIComponent(taskId)}`), { headers: { Authorization: `Bearer ${apiKey}` }, signal });
   const value = await h3Response(response, apiKey).then((item) => item.json()) as { id?: unknown; status?: unknown; video_url?: unknown; error?: unknown };
-  if (value.id !== taskId || !['queued', 'in_progress', 'completed', 'failed'].includes(String(value.status))) throw new Error('H3 Flash 任务状态响应无效');
-  return { id: taskId, status: value.status as H3VideoStatus, ...(typeof value.video_url === 'string' ? { videoUrl: value.video_url } : {}), ...(typeof value.error === 'string' ? { error: value.error } : {}) };
+  if (value.id !== taskId || !H3_STATUSES.includes(value.status as H3VideoStatus)) throw new Error('H3 Flash 任务状态响应无效');
+  return {
+    id: taskId,
+    status: value.status as H3VideoStatus,
+    ...(typeof value.video_url === 'string' ? { videoUrl: absolute(baseUrl, value.video_url) } : {}),
+    ...(typeof value.error === 'string' ? { error: value.error } : {}),
+  };
 }
 
 export async function downloadH3Video(baseUrl: string, apiKey: string, task: H3VideoTask, signal?: AbortSignal): Promise<ArrayBuffer> {
-  if (task.status !== 'completed') throw new Error('H3 Flash 任务尚未完成');
+  if (task.status !== 'succeeded') throw new Error('H3 Flash 任务尚未完成');
   const contentUrl = task.videoUrl ? new URL(task.videoUrl, `${baseUrl.replace(/\/$/, '')}/`).toString() : apiUrl(baseUrl, `/v1/videos/${encodeURIComponent(task.id)}/content`);
   const response = await h3Response(await fetch(contentUrl, { headers: { Authorization: `Bearer ${apiKey}` }, signal }), apiKey);
   return response.arrayBuffer();

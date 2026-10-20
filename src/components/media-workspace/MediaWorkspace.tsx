@@ -3,11 +3,11 @@ import { Button } from '../ui/Button';
 import { readableForeground } from '../../theme/DarlUIProvider';
 import { MediaComposer } from './MediaComposer';
 import { MediaResults } from './MediaResults';
-import { filterReferences, normalizeOptions, referenceLimit, selectedGenerationMode, supportsFrames, type MediaInputMode } from './model';
+import { filterReferences, generationModes, normalizeOptions, referenceLimit, selectedGenerationMode, supportsFrames, type MediaInputMode } from './model';
 import { useReferences } from './useReferences';
-import type { GenerateRequest, MediaBatch, MediaModel, MediaResult, MediaWorkspaceProps } from './types';
+import type { GenerateRequest, MediaBatch, MediaGenerationMode, MediaModel, MediaResult, MediaWorkspaceProps } from './types';
 
-export function MediaWorkspace({ models, tasks, routingStrategy = 'selected-binding', activeTaskId, onTaskChange, onCreateTask, onRenameTask, onGenerate, onRetry, onCancel, onRegenerate, onFavoriteChange, accentColor, className = '' }: MediaWorkspaceProps) {
+export function MediaWorkspace({ models, tasks, styles = [], onCreateStyle, routingStrategy = 'selected-binding', activeTaskId, onTaskChange, onCreateTask, onRenameTask, onDeleteTask, onGenerate, onRetry, onCancel, onRegenerate, onFavoriteChange, accentColor, className = '' }: MediaWorkspaceProps) {
   const [localTaskId, setLocalTaskId] = useState(tasks[0]?.id);
   const activeId = activeTaskId ?? localTaskId;
   const task = tasks.find((item) => item.id === activeId) ?? (activeTaskId === undefined ? tasks[0] : undefined);
@@ -21,6 +21,9 @@ export function MediaWorkspace({ models, tasks, routingStrategy = 'selected-bind
   const [options, setOptions] = useState<GenerateRequest['options']>(() => model ? normalizeOptions(model) : { count: 1 });
   const [preferredInputMode, setInputMode] = useState<MediaInputMode>(() => supportsFrames(model) ? 'frames' : 'references');
   const inputMode = supportsFrames(model) && (preferredInputMode === 'frames' || !(['images', 'videos', 'audios'] as const).some((kind) => referenceLimit(model!, kind))) ? 'frames' : 'references';
+  const [generationMode, setGenerationMode] = useState<MediaGenerationMode | undefined>(() => model ? selectedGenerationMode(model, inputMode, {}) : undefined);
+  const [styleId, setStyleId] = useState<string>();
+  const selectedStyle = styles.find((style) => style.id === styleId);
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
@@ -34,7 +37,10 @@ export function MediaWorkspace({ models, tasks, routingStrategy = 'selected-bind
   const modelSignature = JSON.stringify(model);
   const previousModel = useRef(modelSignature);
   useEffect(() => {
-    if (previousModel.current !== modelSignature && model) { setOptions(normalizeOptions(model)); setInputMode(supportsFrames(model) ? 'frames' : 'references'); }
+    if (previousModel.current !== modelSignature && model) {
+      const nextInputMode = supportsFrames(model) ? 'frames' : 'references';
+      setOptions(normalizeOptions(model)); setInputMode(nextInputMode); setGenerationMode(selectedGenerationMode(model, nextInputMode, {}));
+    }
     previousModel.current = modelSignature;
   }, [modelSignature]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -43,14 +49,16 @@ export function MediaWorkspace({ models, tasks, routingStrategy = 'selected-bind
     const next = models.find((item) => item.id === id);
     if (!next || next.id === model?.id) return;
     previousModel.current = JSON.stringify(next);
-    setPreferredType(next.type); setModelId(id); setOptions(normalizeOptions(next)); setInputMode(supportsFrames(next) ? 'frames' : 'references'); setError('');
+    const nextInputMode = supportsFrames(next) ? 'frames' : 'references';
+    setPreferredType(next.type); setModelId(id); setOptions(normalizeOptions(next)); setInputMode(nextInputMode); setGenerationMode(selectedGenerationMode(next, nextInputMode, {})); setError('');
   };
   const chooseType = (type: MediaModel['type']) => {
     if (type === mediaType) return;
     const next = models.find((item) => item.type === type);
     if (!next) return;
     previousModel.current = JSON.stringify(next);
-    setPreferredType(type); setModelId(next.id); setOptions(normalizeOptions(next)); setInputMode(supportsFrames(next) ? 'frames' : 'references'); setError('');
+    const nextInputMode = supportsFrames(next) ? 'frames' : 'references';
+    setPreferredType(type); setModelId(next.id); setOptions(normalizeOptions(next)); setInputMode(nextInputMode); setGenerationMode(selectedGenerationMode(next, nextInputMode, {})); setError('');
   };
   const violations = model && inputMode === 'references' ? (['images', 'videos', 'audios'] as const).filter((kind) => referenceLimit(model, kind) > 0 && (draft.references[kind]?.length ?? 0) > referenceLimit(model, kind)).map((kind) => `${kind === 'images' ? '参考图片' : kind === 'videos' ? '参考视频' : '参考音频'}超过上限 ${referenceLimit(model, kind)}`) : [];
   const canGenerate = Boolean(model && task && prompt.trim() && !pending && !violations.length);
@@ -58,13 +66,15 @@ export function MediaWorkspace({ models, tasks, routingStrategy = 'selected-bind
     if (!canGenerate || !model || !task || submitting.current) return;
     submitting.current = true; setPending(true); setError('');
     const references = filterReferences(model, draft.references, inputMode);
-    const mode = selectedGenerationMode(model, inputMode, references || {});
+    const mode = generationMode && generationModes(model).includes(generationMode)
+      ? generationMode
+      : selectedGenerationMode(model, inputMode, references || {});
     const route = routingStrategy === 'auto'
       ? { strategy: 'auto' as const, ...(model.providerId ? { providerId: model.providerId } : {}) }
       : model.bindingId
         ? { strategy: 'selected-binding' as const, bindingId: model.bindingId, ...(model.providerId ? { providerId: model.providerId } : {}) }
         : undefined;
-    try { await onGenerate({ taskId: task.id, modelId: model.id, prompt: prompt.trim(), options: normalizeOptions(model, options), ...(model.logicalModelId ? { logicalModelId: model.logicalModelId } : {}), ...(model.bindingId ? { bindingId: model.bindingId } : {}), ...(model.providerId ? { providerId: model.providerId } : {}), ...(model.upstreamModelId ? { upstreamModelId: model.upstreamModelId } : {}), ...(model.protocolKey ? { protocolKey: model.protocolKey } : {}), ...(route ? { route } : {}), ...(mode ? { mode } : {}), ...(references ? { references } : {}) }); }
+    try { await onGenerate({ taskId: task.id, modelId: model.id, prompt: prompt.trim(), options: normalizeOptions(model, options), ...(selectedStyle ? { style: selectedStyle } : {}), ...(model.logicalModelId ? { logicalModelId: model.logicalModelId } : {}), ...(model.bindingId ? { bindingId: model.bindingId } : {}), ...(model.providerId ? { providerId: model.providerId } : {}), ...(model.upstreamModelId ? { upstreamModelId: model.upstreamModelId } : {}), ...(model.protocolKey ? { protocolKey: model.protocolKey } : {}), ...(route ? { route } : {}), ...(mode ? { mode } : {}), ...(references ? { references } : {}) }); }
     catch (reason) { if (mounted.current) setError(reason instanceof Error ? reason.message : '提交失败，请重试'); }
     finally { submitting.current = false; if (mounted.current) setPending(false); }
   };
@@ -73,7 +83,8 @@ export function MediaWorkspace({ models, tasks, routingStrategy = 'selected-bind
     const next = models.find((item) => item.id === batch.modelId);
     if (!next) { setError('历史模型已不可用，请选择其他模型'); return; }
     previousModel.current = JSON.stringify(next);
-    setPreferredType(next.type); setModelId(next.id); setOptions(normalizeOptions(next, batch.options)); setPrompt(batch.prompt); draft.restore(batch.references); setInputMode(batch.references?.firstFrame || batch.references?.lastFrame ? 'frames' : 'references'); setError(''); focusPrompt();
+    const nextInputMode = batch.references?.firstFrame || batch.references?.lastFrame ? 'frames' : 'references';
+    setPreferredType(next.type); setModelId(next.id); setOptions(normalizeOptions(next, batch.options)); setPrompt(batch.prompt); draft.restore(batch.references); setInputMode(nextInputMode); setGenerationMode(batch.mode || selectedGenerationMode(next, nextInputMode, batch.references || {})); setStyleId(batch.style?.id); setError(''); focusPrompt();
   };
   const reference = (result: MediaResult, type: MediaModel['type']) => {
     const kind = type === 'image' ? 'images' : 'videos';
@@ -82,16 +93,16 @@ export function MediaWorkspace({ models, tasks, routingStrategy = 'selected-bind
     if (!next || !result.url) { setError('没有支持该参考素材的可用模型'); return; }
     if (next.id !== model?.id) { previousModel.current = JSON.stringify(next); setPreferredType(next.type); setModelId(next.id); setOptions(normalizeOptions(next)); }
     draft.addRemote(kind, { id: result.id, url: result.url });
-    setInputMode('references'); setError(''); focusPrompt();
+    setInputMode('references'); setGenerationMode(next.type === 'image' ? 'reference-edit' : 'reference'); setError(''); focusPrompt();
   };
   const style = accentColor ? { '--darl-primary': accentColor, '--darl-primary-foreground': readableForeground(accentColor) } as CSSProperties : undefined;
   return <section className={`darl-media-workspace ${className}`} style={style} aria-label="媒体生成工作台">
     <aside className="darl-mw-sidebar"><div className="darl-mw-brand"><span className="darl-mw-brand-mark">▧</span><div><strong>MediaWorkspace</strong><small>统一图片 / 视频创作</small></div></div><div className="darl-mw-task-heading"><span>创作任务</span>{onCreateTask && <Button variant="secondary" size="sm" onClick={onCreateTask}>＋ 新建任务</Button>}</div><nav className="darl-mw-task-list" aria-label="创作任务">{tasks.map((item) => {
       const thumbnail = item.batches.flatMap((batch) => batch.type === 'image' || models.find((m) => m.id === batch.modelId)?.type === 'image' ? batch.results : []).find((result) => result.status === 'completed' && result.url);
-      return <Button key={item.id} variant="ghost" className="darl-mw-task" aria-current={item.id === task?.id ? 'page' : undefined} onClick={() => { if (activeTaskId === undefined) setLocalTaskId(item.id); onTaskChange?.(item.id); }}>{thumbnail ? <img src={thumbnail.url} alt=""/> : <span className="darl-mw-task-symbol">▧</span>}<span><strong>{item.title}</strong><small>{item.batches.length} 个批次 · 图片与视频</small></span></Button>;
+      return <div key={item.id} className="darl-mw-task-row"><Button variant="ghost" className="darl-mw-task" aria-current={item.id === task?.id ? 'page' : undefined} onClick={() => { if (activeTaskId === undefined) setLocalTaskId(item.id); onTaskChange?.(item.id); }}>{thumbnail ? <img src={thumbnail.url} alt=""/> : <span className="darl-mw-task-symbol">▧</span>}<span><strong>{item.title}</strong><small>{item.batches.length} 个批次 · 图片与视频</small></span></Button>{onDeleteTask && <Button variant="ghost" size="icon" className="darl-mw-task-delete" aria-label={`删除任务 ${item.title}`} onClick={() => { if (window.confirm(`确定删除「${item.title}」及其全部生成结果？`)) void onDeleteTask(item.id); }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5"/></svg></Button>}</div>;
     })}{!tasks.length && <p className="darl-mw-muted">暂无任务</p>}</nav><div className="darl-mw-sidebar-footer">同一任务，连续创作<br/>生成服务由宿主网站提供</div></aside>
     <div className="darl-mw-main"><header className="darl-mw-topbar"><span>创作工作台 <span>›</span> <strong>{task?.title ?? '未选择任务'}</strong></span><span className="darl-mw-muted">图片 / 视频</span></header><div className="darl-mw-scroll"><div className="darl-mw-content"><div className="darl-mw-title">{renaming && task && onRenameTask ? <form className="darl-mw-inline-rename" onSubmit={(event) => { event.preventDefault(); if (title.trim()) { onRenameTask(task.id, title.trim()); setRenaming(false); } }} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setRenaming(false); setTitle(task.title); } }}><input aria-label="任务名称" autoFocus value={title} onChange={(event) => setTitle(event.target.value)} /><Button type="submit" size="sm" disabled={!title.trim()}>保存</Button><Button type="button" variant="ghost" size="sm" onClick={() => { setRenaming(false); setTitle(task.title); }}>取消</Button></form> : <><h2>{task?.title ?? '媒体创作'}</h2>{task && onRenameTask && <Button variant="outline" size="sm" onClick={() => { setTitle(task.title); setRenaming(true); }}>重命名</Button>}</>}</div><p className="darl-mw-subtitle">生成批次按顺序排列，可复用参数或收藏结果</p><MediaResults task={task} models={models} onReuse={reuse} onReference={reference} onRetry={onRetry} onCancel={onCancel} onRegenerate={onRegenerate} onFavoriteChange={onFavoriteChange}/></div></div>
-      <div ref={promptContainer}><MediaComposer models={models} model={model} mediaType={mediaType} onMediaTypeChange={chooseType} options={options} onModelChange={chooseModel} onOptionsChange={setOptions} prompt={prompt} onPromptChange={setPrompt} draft={draft} inputMode={inputMode} onInputModeChange={(value) => { setInputMode(value); setError(''); }} error={violations.join('；') || error || (!models.length ? '暂无可用模型' : '')} onError={setError} pending={pending} canGenerate={canGenerate} onGenerate={() => { void generate(); }}/></div>
+      <div ref={promptContainer}><MediaComposer models={models} model={model} mediaType={mediaType} onMediaTypeChange={chooseType} options={options} onModelChange={chooseModel} onOptionsChange={setOptions} prompt={prompt} onPromptChange={setPrompt} draft={draft} inputMode={inputMode} onInputModeChange={(value) => { setInputMode(value); setGenerationMode(selectedGenerationMode(model, value, draft.references) || generationMode); setError(''); }} generationMode={generationMode} onGenerationModeChange={(value) => { setGenerationMode(value); setInputMode(value === 'first-last-frame' ? 'frames' : 'references'); setError(''); }} styles={styles} styleId={styleId} onStyleChange={setStyleId} onCreateStyle={onCreateStyle} error={violations.join('；') || error || (!models.length ? '暂无可用模型' : '')} onError={setError} pending={pending} canGenerate={canGenerate} onGenerate={() => { void generate(); }}/></div>
     </div>
   </section>;
 }

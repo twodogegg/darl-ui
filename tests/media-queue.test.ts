@@ -14,7 +14,7 @@ describe('SQLite media generation queue',()=>{
       expect(db.limit('gpt-image-2')).toBe(4);
       db.setLimit('gpt-image-2',100);
       expect(new MediaJobStore(path).limit('gpt-image-2')).toBe(100);
-      const first=db.create({modelId:'gpt-image-2',type:'image',prompt:'A',providerId:'darl',upstreamModelId:'gpt-image-2',baseUrl:'https://example.invalid/v1',options:{}});
+      const first=db.create({taskId:'task-1',modelId:'gpt-image-2',type:'image',prompt:'A',providerId:'darl',upstreamModelId:'gpt-image-2',baseUrl:'https://example.invalid/v1',options:{}});
       first.status='running';
       db.put(first);
       const second=db.create({modelId:'minimax-h3-flash',type:'video',prompt:'B',providerId:'darl',upstreamModelId:'minimax-h3-flash',baseUrl:'https://example.invalid/v1',options:{}});
@@ -22,6 +22,7 @@ describe('SQLite media generation queue',()=>{
       const restarted=new MediaJobStore(path);
       restarted.recover();
       expect(restarted.get(first.id)?.status).toBe('uncertain');
+      expect(restarted.get(first.id)?.taskId).toBe('task-1');
       expect(restarted.get(second.id)?.status).toBe('running');
       expect(restarted.get(second.id)?.remoteTaskId).toBe('video_123');
     }finally{rmSync(dir,{recursive:true,force:true});}
@@ -32,6 +33,15 @@ describe('SQLite media generation queue',()=>{
       const db=new MediaJobStore(join(dir,'db.sqlite'));
       expect(()=>db.setLimit('gpt-image-2',100001)).toThrow();
       expect(()=>db.setLimit('other',10)).toThrow();
+    }finally{rmSync(dir,{recursive:true,force:true});}
+  });
+  it('reuses an already saved media file on a repeated completion poll',()=>{
+    const dir=mkdtempSync(join(tmpdir(),'media-queue-'));
+    try{
+      const db=new MediaJobStore(join(dir,'db.sqlite'));
+      const first=db.saveMedia('job-1',Buffer.from('first'),'mp4');
+      const second=db.saveMedia('job-1',Buffer.from('second'),'mp4');
+      expect(second).toBe(first);
     }finally{rmSync(dir,{recursive:true,force:true});}
   });
 });
