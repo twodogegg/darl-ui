@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
 import { MediaJobStore, type MediaJob } from './media-job-store';
 import { generateImages, generateGeminiImages, submitVideo, checkVideo } from './media-adapters';
+
 
 type Credentials = { baseUrl: string; apiKey: string };
 type CredentialsResolver = (job: MediaJob) => Credentials | undefined;
@@ -57,18 +57,33 @@ export class MediaJobRunner {
     try{
       config=this.resolve(job);
       if(job.type==='image'){
-        const result=job.protocolKey==='gemini-generate-content'?await generateGeminiImages(job,config.apiKey):await generateImages(job,config.apiKey);
-        job.resultPaths=result.images.flatMap((image,index)=>image.kind==='b64'?[this.store.saveMedia(job.id+(index?'-'+index:''),image.data,image.ext)]:[]);
-        job.resultUrls=result.images.flatMap((image)=>image.kind==='url'?[image.url]:[]);
-        job.resultPath=job.resultPaths[0];
+        const localMedia = async (url: string) => {
+          const match = /^\/api\/files\/([^/?]+)/.exec(url);
+          if (match) return this.fileMedia(decodeURIComponent(match[1]));
+          return undefined;
+        };
+        const result=job.protocolKey==='gemini-generate-content'?await generateGeminiImages(job,config.apiKey,localMedia):await generateImages(job,config.apiKey,localMedia);
+        job.resultFileIds=[];
+        for (const [index, image] of result.images.entries()) {
+          let bytes: Buffer;
+          let mime: string;
+          if (image.kind === 'b64') { bytes=image.data; mime=`image/${image.ext === 'jpeg' ? 'jpeg' : image.ext}`; }
+          else {
+            const response = await fetch(image.url, { signal: AbortSignal.timeout(180000) });
+            if (!response.ok) throw new Error(`图片结果下载失败（HTTP ${response.status}）`);
+            bytes = Buffer.from(await response.arrayBuffer());
+            mime = response.headers.get('content-type')?.split(';')[0] || 'image/png';
+          }
+          const file = await this.store.saveFile(bytes, mime, `generated-${index}.${mime.split('/')[1] || 'bin'}`);
+          job.resultFileIds.push(file.id);
+        }
         job.status='completed';job.phase='completed';job.error=undefined;
         job.resultForm=result.images[0]?.kind==='url'?'url':'b64_json';
         job.providerResponse=result.provider as Record<string,unknown>;
       }else{
         const id=await submitVideo(job,config.apiKey,(url)=>{
-          const match=/^\/api\/media-generation\/jobs\/([a-f0-9-]+)\/file(?:\?index=(\d+))?$/.exec(url);
-          const owner=match?this.store.get(match[1]):undefined;
-          return owner?this.media(owner,Number(match?.[2]||0)):undefined;
+          const match=/^\/api\/files\/([^/?]+)/.exec(url);
+          return match?this.fileMedia(decodeURIComponent(match[1])):undefined;
         });
         job.remoteTaskId=id;job.phase='remote-running';job.nextPollAt=Date.now()+5000;
       }
@@ -88,7 +103,9 @@ export class MediaJobRunner {
       if(result.state==='failed'){job.status='failed';job.error=result.error;this.onFailure(job,result.error||'远端任务失败',apiKey);}
       if(result.state==='completed'){
         if(!result.media)throw new Error('缺少视频内容');
-        job.resultPath=this.store.saveMedia(job.id,result.media,'mp4');
+        job.resultFileIds=[];
+        const file = await this.store.saveFile(Buffer.from(result.media), 'video/mp4', `generated-${job.id}.mp4`);
+        job.resultFileIds.push(file.id);
         job.status='completed';job.error=undefined;job.resultForm='url';
       }
       job.phase=job.status==='completed'?'completed':'remote-running';
@@ -101,12 +118,17 @@ export class MediaJobRunner {
     }
     this.store.put(job);
   }
-  media(job:MediaJob,index=0):{bytes:Buffer;mime:string}|undefined{
+  async media(job:MediaJob,index=0):Promise<{bytes:Buffer;mime:string}|undefined>{
     if(job.status!=='completed')return undefined;
-    const path=job.resultPaths?.[index] ?? (index===0?job.resultPath:undefined);
-    if(!path)return undefined;
-    const extension=path.split('.').pop();
-    const mime=extension==='mp4'?'video/mp4':extension==='jpeg'?'image/jpeg':extension==='webp'?'image/webp':extension==='gif'?'image/gif':'image/png';
-    return {bytes:readFileSync(path),mime};
+    const fileId=job.resultFileIds?.[index];
+    if(fileId){
+      const result=await this.store.files.getBytes(fileId);
+      return result ? {bytes:result.bytes,mime:result.file.mimeType} : undefined;
+    }
+    return undefined;
+  }
+  private async fileMedia(id:string) {
+    const result = await this.store.files.getBytes(id);
+    return result ? {bytes:result.bytes,mime:result.file.mimeType} : undefined;
   }
 }

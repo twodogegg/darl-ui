@@ -1,14 +1,14 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { MediaJobStore } from './media-job-store';
 import { MediaJobRunner } from './media-runner';
 import { createFailureLog } from './failure-log';
 import { effectiveCapabilities, type ModelConfiguration } from '../../../src/components/settings/model-config';
-import { persistMediaReferences } from './media-references';
+import { resolveMediaReferencesInStore } from './media-references';
 import type { StoredProvider } from './models';
 import type { MediaStyleOption } from '../../../src/components/media-workspace/types';
 import { isLocalOrLanAddress } from './local-access';
+import type { FileStore } from './file-storage';
 
 /** Base64 reference images travel through this JSON endpoint. */
 const MAX_MEDIA_BODY = 128 * 1024 * 1024;
@@ -34,8 +34,27 @@ async function body(req:IncomingMessage, limit=100_000) {
   }
   return JSON.parse(data) as Record<string,unknown>;
 }
-export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration, providers:()=>StoredProvider[]){
-  const store=new MediaJobStore(dbPath);
+/** Resolve stored result files to original/thumbnail URLs without leaking provider credentials. */
+function presentJob(job: import('./media-job-store').MediaJob, files: FileStore) {
+  const { baseUrl: _, ...safe } = job;
+  const resultFiles = (job.resultFileIds || []).flatMap((id) => {
+    const file = files.get(id);
+    if (!file) return [];
+    return [{
+      fileId: id,
+      url: files.originalUrl(file) || `/api/files/${id}`,
+      // Width tiers: 160 sidebar list / 320 result card / 1024 detail preview (WebP via imageMogr2 or sharp).
+      ...(file.mimeType.startsWith('image/') ? {
+        listThumbnailUrl: files.thumbnailUrl(file, 160),
+        thumbnailUrl: files.thumbnailUrl(file, 320),
+        previewUrl: files.thumbnailUrl(file, 1024),
+      } : {}),
+    }];
+  });
+  return resultFiles.length ? { ...safe, resultFiles } : safe;
+}
+export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration, providers:()=>StoredProvider[], files:FileStore){
+  const store=new MediaJobStore(dbPath, files);
   const logFailure = createFailureLog(join(dirname(dbPath), 'logs'));
   const runner=new MediaJobRunner(store,(job)=>{
     const provider=providers().find(p=>p.id===job.providerId);
@@ -49,7 +68,7 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
     const method=req.method||'GET';
     try{
       if(path==='/api/media-generation/jobs' && method==='GET'){
-        reply(res,200,store.list().map(({baseUrl:_,...job})=>job));return true;
+        reply(res,200,store.list().map((job)=>presentJob(job,files)));return true;
       }
       if(path==='/api/media-generation/limits' && method==='GET'){reply(res,200,store.limits());return true;}
       if(path==='/api/media-generation/limits' && method==='POST'){
@@ -79,7 +98,7 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         const maxReferences=effective&&'maxReferenceImages' in effective?effective.maxReferenceImages:0;
         if(referenceCount>maxReferences)throw new Error(`参考图片最多 ${maxReferences} 张`);
         // Large data URLs stay out of the job row; adapters read the saved files.
-        const options=persistMediaReferences(store.mediaRoot, rawOptions);
+        const options=await resolveMediaReferencesInStore(rawOptions, files);
         const style = parseStyle(input.style);
         const job=store.create({taskId:input.taskId.trim(),modelId:model.id,type,prompt:input.prompt.trim(),...(style ? { style } : {}),providerId:provider.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey,baseUrl:provider.baseUrl,options});
         void runner.tick();
@@ -89,21 +108,30 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
       if(match && !match[2] && method==='DELETE'){
         const job=store.delete(match[1]);
         if(!job){reply(res,404,{error:'任务不存在'});return true;}
-        const paths=job.resultPaths?.length?job.resultPaths:job.resultPath?[job.resultPath]:[];
-        for(const file of paths){try{unlinkSync(file);}catch{}}
+        try { await store.removeFiles([job]); }
+        catch(error) { store.put(job); throw error; }
         reply(res,200,{ok:true});return true;
+      }
+      const taskMatch=path.match(/^\/api\/media-generation\/tasks\/([^/]+)$/);
+      if(taskMatch && method==='DELETE'){
+        const jobs=store.deleteTask(decodeURIComponent(taskMatch[1]));
+        if(!jobs.length){reply(res,404,{error:'任务不存在'});return true;}
+        store.removeMany(jobs);
+        try { await store.removeFiles(jobs); }
+        catch(error) { for(const job of jobs) store.put(job); throw error; }
+        reply(res,200,{ok:true,deleted:jobs.length});return true;
       }
       if(match && method==='GET'){
         const job=store.get(match[1]);
         if(!job){reply(res,404,{error:'任务不存在'});return true;}
         if(match[2]){
           const index=Number(new URL(req.url||'/','http://localhost').searchParams.get('index')||0);
-          const file=runner.media(job,Number.isInteger(index)&&index>=0?index:0);
+          const file=await runner.media(job,Number.isInteger(index)&&index>=0?index:0);
           if(!file){reply(res,404,{error:'任务结果尚未就绪'});return true;}
           res.writeHead(200,{'Content-Type':file.mime,'Cache-Control':'private,max-age=60','X-Content-Type-Options':'nosniff'});
           res.end(file.bytes);return true;
         }
-        const {baseUrl:_,...safe}=job;
+        const safe=presentJob(job,files);
         reply(res,200,safe);return true;
       }
       reply(res,404,{error:'接口不存在'});

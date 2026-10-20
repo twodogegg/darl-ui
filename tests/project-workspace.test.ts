@@ -4,21 +4,25 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import sharp from 'sharp';
 import { LocalStorage } from '../examples/agent-chat/server/storage';
 import { ProjectStore } from '../examples/agent-chat/server/project-store';
 import { handleWorkspaceProjectRequest } from '../examples/agent-chat/server/projects';
+import { FileStore } from '../examples/agent-chat/server/file-storage';
 
 let server: Server;
 let root: string;
 let store: ProjectStore;
 let dbPath: string;
 let base: string;
+let validImage: Buffer;
 
 beforeEach(async () => {
+  validImage ??= await sharp({ create: { width: 1, height: 1, channels: 4, background: { r: 1, g: 2, b: 3, alpha: 1 } } }).png().toBuffer();
   root = mkdtempSync(join(tmpdir(), 'darl-workspace-'));
   const storage = new LocalStorage(root);
   dbPath = storage.path;
-  store = new ProjectStore(dbPath);
+  store = new ProjectStore(dbPath, new FileStore(dbPath));
   server = createServer((req, res) => {
     void handleWorkspaceProjectRequest(req, res, store).then((handled) => {
       if (!handled) { res.statusCode = 404; res.end(); }
@@ -57,7 +61,7 @@ describe('SQLite project workspace', () => {
     const found = await request('projects');
     expect(found.data.data.items).toHaveLength(1);
     expect(found.data.data.items[0].id).toBe(created.data.data.project_id);
-    expect(new ProjectStore(dbPath).list()).toHaveLength(1);
+    expect(new ProjectStore(dbPath, new FileStore(dbPath)).list()).toHaveLength(1);
   });
 
   it('allows updates, then archives a project without affecting other stored state', async () => {
@@ -91,23 +95,56 @@ describe('SQLite project workspace', () => {
 
   it('saves optional manually uploaded cover image and makes it visible', async () => {
     const id = (await createProject()).data.data.project_id;
-    const onePixelPng = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==', 'base64');
     const form = new FormData();
-    form.append('image', new Blob([onePixelPng], { type: 'image/png' }), 'cover.png');
+    form.append('image', new Blob([Uint8Array.from(validImage)], { type: 'image/png' }), 'cover.png');
     const uploaded = await request('projects/' + id + '/covers/upload', { method: 'POST', body: form });
     expect(uploaded.status).toBe(201);
-    const coverId = uploaded.data.data.id;
-    const select = await request('projects/' + id + '/covers/' + coverId + '/select', { method: 'POST' });
+    const fileId = uploaded.data.data.file_id;
+    const select = await request('projects/' + id + '/covers/files/' + fileId + '/select', { method: 'POST' });
     expect(select.status).toBe(200);
-    expect(select.data.data.cover_asset.storage_key).toBe('covers/' + coverId);
-    const image = await fetch(base + 'storage/covers/' + coverId);
-    expect(image.status).toBe(200);
-    expect(image.headers.get('content-type')).toBe('image/png');
-    expect(Buffer.from(await image.arrayBuffer())).toEqual(onePixelPng);
+    expect(select.data.data.cover_asset.file_id).toBe(fileId);
+    expect(select.data.data.cover_asset.thumbnail_url).toMatch(/^\/api\/files\/[a-f0-9-]+\?width=320$/);
+    expect(select.data.data).not.toHaveProperty('cover_asset_id');
+    expect(select.data.data).not.toHaveProperty('cover_url');
+    expect(new FileStore(dbPath).get(fileId)?.id).toBe(fileId);
+    expect(new FileStore(dbPath).references(fileId)).toBe(true);
   });
 
-  it('allows creating custom style and rejects unsupported routes or encoded storage paths', async () => {
+  it('rejects corrupt image bytes before storing them', async () => {
+    const id = (await createProject()).data.data.project_id;
+    const form = new FormData();
+    form.append('image', new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==', 'base64')], { type: 'image/png' }), 'corrupt.png');
+    const response = await request('projects/' + id + '/covers/upload', { method: 'POST', body: form });
+    expect(response.status).toBe(422);
+    expect(response.data.error).toContain('图片内容损坏');
+    expect(new FileStore(dbPath).list()).toHaveLength(0);
+  });
+
+  it('keeps a shared cover file and deletes it after the last reference moves away', async () => {
+    const first = (await createProject('第一封面')).data.data.project_id;
+    const second = (await createProject('共享封面')).data.data.project_id;
+    const bytes = validImage;
+    const other = await sharp({ create: { width: 1, height: 1, channels: 4, background: { r: 9, g: 8, b: 7, alpha: 1 } } }).png().toBuffer();
+    const upload = async (id: number, value: Buffer, name: string) => {
+      const form = new FormData();
+      form.append('image', new Blob([Uint8Array.from(value)], { type: 'image/png' }), name);
+      return (await request(`projects/${id}/covers/upload`, { method: 'POST', body: form })).data.data.file_id as string;
+    };
+    const firstFile = await upload(first, bytes, 'first.png');
+    const sharedFile = await upload(second, bytes, 'shared.png');
+    expect(sharedFile).toBe(firstFile);
+    await request(`projects/${first}/covers/files/${firstFile}/select`, { method: 'POST' });
+    await request(`projects/${second}/covers/files/${sharedFile}/select`, { method: 'POST' });
+    const replacement = await upload(first, other, 'replacement.png');
+    await request(`projects/${first}/covers/files/${replacement}/select`, { method: 'POST' });
+    const files = new FileStore(dbPath);
+    expect(files.get(firstFile)).toBeDefined();
+    expect(files.references(firstFile)).toBe(true);
+    await request(`projects/${second}/covers/files/${replacement}/select`, { method: 'POST' });
+    expect(files.get(firstFile)).toBeUndefined();
+  });
+
+  it('allows creating custom style and no longer exposes retired storage routes', async () => {
     const form = new FormData();
     form.set('name', '我的写实风格');
     form.set('prompt', '自然光，真实肤色');
@@ -117,24 +154,27 @@ describe('SQLite project workspace', () => {
     expect((await request('styles')).data.data.items.some((style: { id: number }) => style.id === id)).toBe(true);
     expect((await request('projects/1/script')).status).toBe(404);
     expect((await request('storage/%2Fsecret.png')).status).toBe(404);
+    expect((await request('storage/styles/16')).status).toBe(404);
+    expect((await request('storage/covers/1')).status).toBe(404);
   });
 
   it('allows updating an owned style but protects built-in styles', async () => {
     const form = new FormData();
     form.set('name', '我的风格');
     form.set('prompt', '原始描述');
-    form.set('reference_image', new Blob([Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==', 'base64')], { type: 'image/png' }), 'style.png');
+    form.set('reference_image', new Blob([Uint8Array.from(validImage)], { type: 'image/png' }), 'style.png');
     const saved = await request('styles', { method: 'POST', body: form });
     const id = saved.data.data.id;
     const update = new FormData();
     update.set('name', '更新后的风格');
     update.set('prompt', '更新后的描述');
+    update.set('reference_image', new Blob([Uint8Array.from(validImage)], { type: 'image/png' }), 'style-2.png');
     expect((await request(`styles/${id}`, { method: 'PATCH', body: update })).status).toBe(200);
     const styles = (await request('styles')).data.data.items as Array<{ id: number; name: string; prompt: string }>;
     expect(styles.find((style) => style.id === id)).toMatchObject({ name: '更新后的风格', prompt: '更新后的描述' });
-    expect((await request('styles')).data.data.items.find((style: { id: number }) => style.id === id).image_url)
-      .toBe(`/storage/styles/${id}`);
+    const updatedStyle = (await request('styles')).data.data.items.find((style: { id: number }) => style.id === id);
+    expect(updatedStyle.image_url).toMatch(/^\/api\/files\/[a-f0-9-]+$/);
+    expect(updatedStyle.thumbnail_url).toMatch(/^\/api\/files\/[a-f0-9-]+\?width=320$/);
     const builtIn = new FormData();
     builtIn.set('name', '不应修改');
     builtIn.set('prompt', '不应修改');

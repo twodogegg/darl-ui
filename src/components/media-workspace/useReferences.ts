@@ -1,25 +1,27 @@
 import { useState } from 'react';
 import { validateFile } from '../file-uploader/validation';
 import { useUploader } from '../file-uploader/useUploader';
+import type { UploadContext } from '../file-uploader/types';
 import type { MediaInput, MediaReferences } from './types';
 
-const localOnly = async () => undefined;
 const kindOf = (file: File) => file.type.startsWith('video/') ? 'videos' : file.type.startsWith('audio/') ? 'audios' : 'images';
-export function useReferences(onError: (message: string) => void) {
+export function useReferences(onError: (message: string) => void, upload?: (file: File, context: UploadContext) => Promise<MediaInput>) {
   // Reuse FileUploader's local queue, validation, deduplication and object URL cleanup.
-  const files = useUploader({ upload: localOnly, autoUpload: false, accept: ['image/*', 'video/*', 'audio/*'], onReject: (items) => onError(items.map((item) => item.reason).join('；')) });
-  const first = useUploader({ upload: localOnly, autoUpload: false, accept: ['image/*'], maxFiles: 1, onReject: (items) => onError(items[0].reason) });
-  const last = useUploader({ upload: localOnly, autoUpload: false, accept: ['image/*'], maxFiles: 1, onReject: (items) => onError(items[0].reason) });
+  const remoteOnly = async () => { throw new Error('参考素材尚未上传完成'); };
+  const uploadFile = upload ? async (file: File, context: UploadContext) => { const result = await upload(file, context); if (result instanceof File) throw new Error('上传适配器必须返回文件引用'); return result; } : remoteOnly;
+  const files = useUploader({ upload: uploadFile, autoUpload: Boolean(upload), accept: ['image/*', 'video/*', 'audio/*'], onReject: (items) => onError(items.map((item) => item.reason).join('；')) });
+  const first = useUploader({ upload: uploadFile, autoUpload: Boolean(upload), accept: ['image/*'], maxFiles: 1, onReject: (items) => onError(items[0].reason) });
+  const last = useUploader({ upload: uploadFile, autoUpload: Boolean(upload), accept: ['image/*'], maxFiles: 1, onReject: (items) => onError(items[0].reason) });
   const [remote, setRemote] = useState<MediaReferences>({});
   const references: MediaReferences = { ...remote };
   for (const kind of ['images', 'videos', 'audios'] as const) {
-    references[kind] = [...(remote[kind] ?? []), ...files.items.filter((item) => kindOf(item.file) === kind).map((item) => item.file)];
+    references[kind] = [...(remote[kind] ?? []), ...files.items.filter((item) => kindOf(item.file) === kind).flatMap((item) => upload ? item.status === 'success' && item.result ? [item.result as MediaInput] : [] : [item.file])];
   }
-  if (first.items[0]) references.firstFrame = first.items[0].file;
-  if (last.items[0]) references.lastFrame = last.items[0].file;
+  if (first.items[0]) references.firstFrame = upload ? first.items[0].result || first.items[0].file : first.items[0].file;
+  if (last.items[0]) references.lastFrame = upload ? last.items[0].result || last.items[0].file : last.items[0].file;
   const previews = (kind: 'images' | 'videos' | 'audios') => [
-    ...(remote[kind] ?? []).map((input, index) => ({ key: `remote-${kind}-${index}`, name: input instanceof File ? input.name : input.id, url: input instanceof File ? undefined : input.url, remove: () => setRemote((prev) => ({ ...prev, [kind]: prev[kind]?.filter((_, i) => i !== index) })) })),
-    ...files.items.filter((item) => kindOf(item.file) === kind).map((item) => ({ key: item.id, name: item.file.name, url: item.previewUrl, remove: () => files.remove(item.id) }))
+    ...(remote[kind] ?? []).map((input, index) => ({ key: `remote-${kind}-${index}`, name: input instanceof File ? input.name : input.id, url: input instanceof File ? undefined : input.thumbnailUrl || input.url, status: undefined, progress: undefined, error: undefined, remove: () => setRemote((prev) => ({ ...prev, [kind]: prev[kind]?.filter((_, i) => i !== index) })) })),
+    ...files.items.filter((item) => kindOf(item.file) === kind).map((item) => ({ key: item.id, name: item.file.name, url: item.previewUrl, status: item.status as string | undefined, progress: item.progress as number | null | undefined, error: item.error as string | undefined, remove: () => files.remove(item.id) }))
   ];
   const frame = (role: 'firstFrame' | 'lastFrame') => {
     const queue = role === 'firstFrame' ? first : last;

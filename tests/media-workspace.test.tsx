@@ -181,6 +181,19 @@ describe('MediaWorkspace', () => {
     expect(callbacks.onRenameTask).toHaveBeenCalledWith('t1', '新标题');
     expect(screen.queryByRole('dialog')).toBeNull();
   });
+  it('图片卡片使用缩略图，详情才使用原图；视频点击前不创建 src', () => {
+    const history: MediaTask[] = [{ ...tasks[0], batches: [
+      { id: 'image-batch', modelId: 'image', type: 'image', prompt: '图片', options: { count: 1 }, results: [{ id: 'image-result', status: 'completed', url: '/original.png', thumbnailUrl: '/thumb.webp' }] },
+      { id: 'video-batch', modelId: 'video', type: 'video', prompt: '视频', options: { count: 1 }, results: [{ id: 'video-result', status: 'completed', url: '/video.mp4' }] },
+    ] }];
+    render(<MediaWorkspace models={models} tasks={history} onGenerate={vi.fn()} onDeleteBatch={vi.fn()}/>);
+    expect(screen.getByAltText('图片')).toHaveAttribute('src', '/thumb.webp');
+    expect(document.querySelector('video')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '播放视频 video-result' }));
+    expect(document.querySelector('video')).toHaveAttribute('src', '/video.mp4');
+    fireEvent.click(screen.getByRole('button', { name: '预览图片 image-result' }));
+    expect(document.querySelector('.darl-mw-preview img')).toHaveAttribute('src', '/original.png');
+  });
   it('图片和视频都可用作参考，且不带回源批次提示词或参数', async () => {
     const history: MediaTask[] = [{ ...tasks[0], batches: [
       { id: 'image-batch', modelId: 'image', type: 'image', prompt: '图片源提示词', options: { aspectRatio: '1:1', resolution: '1K', count: 4 }, results: [{ id: 'image-result', status: 'completed', url: '/image.png' }] },
@@ -201,6 +214,20 @@ describe('MediaWorkspace', () => {
     await waitFor(() => expect(onGenerate).toHaveBeenCalled());
     expect(onGenerate.mock.calls[0][0]).toMatchObject({ prompt: '生成测试画面', references: { images: [{ id: 'image-result', url: '/image.png' }], videos: [{ id: 'video-result', url: '/video.mp4' }] } });
     expect(onGenerate.mock.calls[0][0].options).toEqual({ count: 1, duration: 8, generateAudio: true });
+  });
+  it('用作参考时提交统一文件存储的真实 fileId 而非结果卡片展示 ID', async () => {
+    const history: MediaTask[] = [{ ...tasks[0], batches: [
+      { id: 'image-batch', modelId: 'image', type: 'image', prompt: '图片源提示词', options: { count: 1 }, results: [{ id: 'job-1-0', fileId: 'file-1', status: 'completed', url: '/api/media-generation/jobs/job-1/file', thumbnailUrl: '/api/files/file-1?width=320' }] },
+    ] }];
+    const onGenerate = vi.fn();
+    render(<MediaWorkspace models={models} tasks={history} onGenerate={onGenerate}/>);
+    prompt();
+    fireEvent.click(screen.getByRole('button', { name: '用作参考' }));
+    // The reference chip carries the stable file ID, while the result card keeps its display key.
+    expect(screen.getByAltText('file-1')).toHaveAttribute('src', '/api/files/file-1?width=320');
+    submit();
+    await waitFor(() => expect(onGenerate).toHaveBeenCalled());
+    expect(onGenerate.mock.calls[0][0]).toMatchObject({ references: { images: [{ id: 'file-1', fileId: 'file-1', url: '/api/media-generation/jobs/job-1/file', thumbnailUrl: '/api/files/file-1?width=320' }] } });
   });
   it('视频生成时点击图片结果用作参考，保持视频模型并加入参考图', async () => {
     const history: MediaTask[] = [{ ...tasks[0], batches: [{ id: 'image-batch', modelId: 'image', type: 'image', prompt: '图片源', options: { count: 1 }, results: [{ id: 'image-result', status: 'completed', url: '/image.png' }] }] }];

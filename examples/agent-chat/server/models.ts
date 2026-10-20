@@ -7,7 +7,7 @@ import { failure } from './errors';
 import { sourceBoundMessage, structuredAgentResult, type StructuredAgentResult } from './context';
 
 export interface StoredProvider extends ModelProvider { apiKey: string }
-export interface ChatImage { type: 'image'; name: string; mimeType: string; data: string; size?: number }
+export interface ChatImage { type: 'image'; name: string; mimeType: string; data: string; size?: number; fileId?: string }
 export type ChatContent = string | Array<{ type: 'text'; text: string } | ChatImage>;
 export interface ChatMessage { role: 'user' | 'assistant'; content: ChatContent }
 

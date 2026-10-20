@@ -1,17 +1,14 @@
 import { DatabaseSync } from 'node:sqlite';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { MediaStyleOption } from '../../../src/components/media-workspace/types';
+import { FileStore, type StoredFile } from './file-storage';
 
 export type MediaJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'uncertain';
 export type MediaJob = { id: string; taskId?: string; modelId: string; type: 'image' | 'video'; status: MediaJobStatus;
   prompt: string; options: Record<string, unknown>; style?: MediaStyleOption; providerId: string; upstreamModelId: string; baseUrl: string; protocolKey?: string;
-  remoteTaskId?: string; resultPath?: string; error?: string; phase?: string; attempts: number;
-  /** Every saved file, when the request asked for more than one image. */
-  resultPaths?: string[];
-  /** Direct result links, when the channel returned a URL instead of bytes. */
-  resultUrls?: string[];
+  remoteTaskId?: string; error?: string; phase?: string; attempts: number;
+  /** IDs in the unified file store for generated outputs. */
+  resultFileIds?: string[];
   /** Which payload shape the provider used for the finished image. */
   resultForm?: 'b64_json' | 'url';
   /** Trimmed provider payload, kept so the UI can show what actually came back. */
@@ -27,13 +24,12 @@ const FAILED_STATUSES: ReadonlySet<MediaJobStatus> = new Set(['failed', 'uncerta
  * Returning `isError` here is what makes the UI show the error instead of a green card.
  */
 export function mediaTaskResult(job: MediaJob) {
-  const files = job.resultPaths?.length ? job.resultPaths : job.resultPath ? [job.resultPath] : [];
+  const results = job.resultFileIds?.length || 0;
   const payload = {
     id: job.id,
     status: job.status,
     modelId: job.modelId,
-    ...(files.length ? { resultUrls: files.map((_, index) => `/api/media-generation/jobs/${job.id}/file${index ? `?index=${index}` : ''}`) } : {}),
-    ...(job.resultUrls?.length ? { providerUrls: job.resultUrls } : {}),
+    ...(results ? { resultUrls: Array.from({ length: results }, (_, index) => `/api/media-generation/jobs/${job.id}/file${index ? `?index=${index}` : ''}`) } : {}),
     ...(job.resultForm ? { resultForm: job.resultForm } : {}),
     ...(job.providerResponse ? { providerResponse: job.providerResponse } : {}),
     ...(job.error ? { error: job.error } : {}),
@@ -52,15 +48,12 @@ export const MEDIA_MODEL_IDS = ['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-im
 /** The DB, not a timer or browser tab, owns job state. One local Node server is supported. */
 export class MediaJobStore {
   private db: DatabaseSync;
-  readonly mediaRoot: string;
-  constructor(dbPath: string) {
+  constructor(dbPath: string, readonly files: FileStore) {
     this.db = new DatabaseSync(dbPath);
     this.db.exec('PRAGMA journal_mode=WAL');
     this.db.exec('CREATE TABLE IF NOT EXISTS media_generation_jobs (id TEXT PRIMARY KEY, model_id TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL)');
     this.db.exec('CREATE INDEX IF NOT EXISTS media_generation_jobs_queue ON media_generation_jobs(status,updated_at)');
     this.db.exec('CREATE TABLE IF NOT EXISTS media_model_limits (model_id TEXT PRIMARY KEY, concurrency INTEGER NOT NULL CHECK(concurrency BETWEEN 1 AND 100000))');
-    this.mediaRoot = join(dirname(dbPath), 'generated-media');
-    mkdirSync(this.mediaRoot, { recursive: true, mode: 0o700 });
   }
   list(): MediaJob[] {
     return (this.db.prepare('SELECT data FROM media_generation_jobs ORDER BY updated_at DESC').all() as unknown as Row[]).map(row => JSON.parse(row.data) as MediaJob);
@@ -75,6 +68,11 @@ export class MediaJobStore {
     if (job.status === 'queued' || job.status === 'running') throw new Error('任务仍在生成，请等待完成或失败后再删除');
     this.db.prepare('DELETE FROM media_generation_jobs WHERE id=?').run(id);
     return job;
+  }
+  deleteTask(taskId: string) {
+    const jobs = this.list().filter((job) => (job.taskId || job.id) === taskId);
+    if (jobs.some((job) => job.status === 'queued' || job.status === 'running')) throw new Error('任务仍在生成，请等待完成或失败后再删除');
+    return jobs;
   }
   put(job: MediaJob) {
     job.updatedAt = now();
@@ -109,12 +107,36 @@ export class MediaJobStore {
       this.put(job);
     }
   }
-  saveMedia(id: string, bytes: Buffer, ext: 'png'|'jpeg'|'webp'|'gif'|'mp4'): string {
-    if (bytes.length > 200*1024*1024) throw new Error('生成文件超过 200MB');
-    const path = join(this.mediaRoot, id+'.'+ext);
-    // A repeated success poll must reuse the saved file instead of failing on EEXIST.
-    if (existsSync(path)) return path;
-    writeFileSync(path, bytes, { flag:'wx', mode:0o600 });
-    return path;
+  async saveFile(bytes: Buffer, mime: string, name: string): Promise<StoredFile> {
+    if (bytes.length > 200 * 1024 * 1024) throw new Error('生成文件超过 200MB');
+    return this.files.put(bytes, mime, name);
+  }
+
+  async removeFiles(jobs: MediaJob[]) {
+    const remaining = this.list().filter((item) => !jobs.some((job) => job.id === item.id));
+    const ids = new Set(jobs.flatMap((job) => job.resultFileIds || []));
+    const conflicts = [...ids].filter((id) => remaining.some((job) => (job.resultFileIds || []).includes(id)));
+    if (conflicts.length) throw new Error('生成结果仍被其他任务引用，未删除');
+    const removed: string[] = [];
+    try {
+      for (const id of ids) {
+        if (this.files.references(id)) continue;
+        if (await this.files.remove(id)) removed.push(id);
+      }
+    } catch (error) {
+      for (const id of removed) this.files.forget(id);
+      throw error;
+    }
+    for (const id of removed) this.files.forget(id);
+  }
+  removeMany(jobs: MediaJob[]) {
+    this.db.exec('BEGIN');
+    try {
+      for (const job of jobs) this.db.prepare('DELETE FROM media_generation_jobs WHERE id=?').run(job.id);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 }

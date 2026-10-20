@@ -1,4 +1,5 @@
 import type { StyleCreateRequest } from '../style-selector/StyleSelector';
+import type { UploadContext } from '../file-uploader/types';
 
 export interface BaseCapabilities {
   aspectRatios?: string[];
@@ -48,7 +49,7 @@ export interface VideoModel {
   defaults?: BaseDefaults & { duration?: number; generateAudio?: boolean };
 }
 export type MediaModel = ImageModel | VideoModel;
-export type MediaInput = File | { id: string; url: string };
+export type MediaInput = File | { id: string; url: string; thumbnailUrl?: string; /** Stable ID in the host's unified file store; `id` may be a display key. */ fileId?: string };
 export interface MediaStyleOption {
   id: string;
   name: string;
@@ -84,8 +85,16 @@ export interface GenerateRequest {
 }
 export interface MediaResult {
   id: string;
+  /** Stable file identity when the host stores this result in the unified file store. */
+  fileId?: string;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   url?: string;
+  /** 320px card thumbnail (WebP when the host transforms images). */
+  thumbnailUrl?: string;
+  /** 160px list thumbnail, e.g. the task sidebar. */
+  listThumbnailUrl?: string;
+  /** 1024px preview used inside the detail modal; downloads keep using `url` (the original). */
+  previewUrl?: string;
   error?: string;
   favorited?: boolean;
 }
@@ -121,7 +130,11 @@ export interface MediaWorkspaceProps {
   onCreateTask?: () => void;
   onRenameTask?: (taskId: string, title: string) => void;
   onDeleteTask?: (taskId: string) => void | Promise<void>;
+  /** Permanently delete one generation batch. Omit when the host cannot guarantee physical cleanup. */
+  onDeleteBatch?: (batchId: string) => void | Promise<void>;
   onGenerate: (request: GenerateRequest) => void | Promise<void>;
+  /** Host uploads each selected reference immediately and returns a stable file reference. */
+  onUploadReference?: (file: File, context: UploadContext) => Promise<MediaInput>;
   onRetry?: (batchId: string, resultId: string) => void;
   onCancel?: (batchId: string, resultId: string) => void;
   onRegenerate?: (batchId: string, resultId: string) => void;

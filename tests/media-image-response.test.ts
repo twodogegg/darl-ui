@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { persistMediaReferences } from '../examples/agent-chat/server/media-references';
+import { persistMediaReferencesInStore, resolveMediaReferencesInStore } from '../examples/agent-chat/server/media-references';
+import { FileStore } from '../examples/agent-chat/server/file-storage';
 import { closestAllowedSize, allowedSizesFromError, geminiImageEndpoint, generateGeminiImages, imageResponseRecord, imageSize, normalizeImageReferences } from '../examples/agent-chat/server/media-adapters';
 import type { MediaJob } from '../examples/agent-chat/server/media-job-store';
 
@@ -56,15 +57,18 @@ describe('image results', () => {
 });
 
 describe('reference storage', () => {
-  it('stores data URLs on disk and reads them back as bytes', async () => {
+  it('stores data URLs in the unified file store and reads them back as bytes', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'darl-media-'));
+    const files = new FileStore(join(directory, 'data.sqlite'));
     try {
-      const options = persistMediaReferences(directory, { references: [`data:image/png;base64,${PNG.toString('base64')}`] });
-      const references = options.references as Array<{ mediaReference: string; mimeType: string }>;
+      const options = await persistMediaReferencesInStore({ references: [`data:image/png;base64,${PNG.toString('base64')}`] }, files);
+      const references = options.references as Array<{ fileId: string; mimeType: string; url: string }>;
       expect(references[0]).toMatchObject({ mimeType: 'image/png' });
-      expect(references[0].mediaReference.startsWith(directory)).toBe(true);
+      expect(references[0].url).toBe(`/api/files/${references[0].fileId}`);
+      expect(files.get(references[0].fileId)).toBeDefined();
       expect(JSON.stringify(options)).not.toContain('base64,');
-      const normalized = await normalizeImageReferences(references);
+      const normalized = await normalizeImageReferences(references, 16, async (url) =>
+        files.getBytes(url.split('/').pop() || '').then((item) => item ? { bytes: item.bytes, mime: item.file.mimeType } : undefined));
       expect(normalized?.[0]).toMatchObject({ mimeType: 'image/png' });
       expect(normalized?.[0] && 'data' in normalized[0] && normalized[0].data.equals(PNG)).toBe(true);
     } finally {
@@ -72,11 +76,47 @@ describe('reference storage', () => {
     }
   });
 
-  it('rejects non-image data URLs and oversized lists before writing', () => {
+  it('accepts an uploaded file reference by ID without restoring legacy file paths', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'darl-media-'));
+    const files = new FileStore(join(directory, 'data.sqlite'), {
+      mode: 'cos', region: 'ap-guangzhou', bucket: 'test-1250000000', scheme: 'https',
+      publicBaseUrl: 'https://demo.darl.cn', secretId: 'id', secretKey: 'key',
+    });
     try {
-      expect(() => persistMediaReferences(directory, { references: ['data:text/plain;base64,aGVsbG8='] })).toThrow('参考素材必须是图片 data URL');
-      expect(() => persistMediaReferences(directory, { references: [42] })).toThrow('参考素材格式无效');
+      // Seed the metadata row for an object already uploaded to COS: retain() is metadata-only in COS mode, so no network is made.
+      const stored = files.retain('stored-ref', PNG, 'image/png', 'reference.png');
+      const options = await persistMediaReferencesInStore({ references: [{ fileId: stored.id, url: files.originalUrl(stored) }] }, files);
+      expect(options.references).toEqual([{ fileId: stored.id, url: `/api/files/${stored.id}`, mimeType: 'image/png', name: 'reference.png' }]);
+      await expect(persistMediaReferencesInStore({ references: [{ fileId: 'missing' }] }, files)).rejects.toThrow('参考素材文件不存在');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('restores a missing reference row from its stored COS URL before rejecting', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'darl-media-'));
+    // COS-mode store: rebuilding a lost row assumes the object already exists at the canonical key (metadata-only, no upload).
+    const files = new FileStore(join(directory, 'data.sqlite'), {
+      mode: 'cos', region: 'ap-guangzhou', bucket: 'demo-1253466849', scheme: 'https',
+      publicBaseUrl: 'https://demo.darl.cn', secretId: 'id', secretKey: 'key',
+    });
+    try {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(PNG, { status: 200, headers: { 'Content-Type': 'image/png' } })));
+      const options = await resolveMediaReferencesInStore({ references: [{ fileId: 'restored-id', url: 'https://cdn.example.test/ref.png', name: 'ref.png' }] }, files);
+      expect(options.references).toEqual([{ fileId: 'restored-id', url: expect.stringMatching(/^https:\/\/demo\.darl\.cn\/darl-ui\/.+\.png$/), mimeType: 'image/png', name: 'ref.png' }]);
+      expect(files.get('restored-id')).toMatchObject({ mimeType: 'image/png', size: PNG.length });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects non-image data URLs and malformed references before writing', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'darl-media-'));
+    const files = new FileStore(join(directory, 'data.sqlite'));
+    try {
+      await expect(persistMediaReferencesInStore({ references: ['data:text/plain;base64,aGVsbG8='] }, files)).rejects.toThrow('参考素材必须是图片 data URL');
+      await expect(persistMediaReferencesInStore({ references: [42] }, files)).rejects.toThrow('参考素材格式无效');
+      expect(files.list()).toHaveLength(0);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

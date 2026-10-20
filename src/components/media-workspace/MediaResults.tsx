@@ -4,25 +4,29 @@ import { Alert, Badge, Empty, Modal } from './WorkspaceUI';
 import type { MediaBatch, MediaModel, MediaResult, MediaTask, MediaWorkspaceProps } from './types';
 
 const statusLabels = { queued: '等待生成', running: '生成中', completed: '生成完成', failed: '生成失败', cancelled: '已取消' };
-function ResultMedia({ type, result, prompt, onPreview }: { type: 'image' | 'video'; result: MediaResult; prompt: string; onPreview?: () => void }) {
+function ResultMedia({ type, result, prompt, onPreview, full = false }: { type: 'image' | 'video'; result: MediaResult; prompt: string; onPreview?: () => void; full?: boolean }) {
   const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [result.url]);
+  const [play, setPlay] = useState(false);
+  useEffect(() => { setFailed(false); setPlay(false); }, [result.url]);
   if (failed) return <Alert>媒体加载失败，请检查结果地址</Alert>;
+  if (type === 'video' && !full) return play
+    ? <video src={result.url} controls playsInline preload="metadata" onError={() => setFailed(true)} aria-label={`生成视频：${prompt}`}/>
+    : <button type="button" className="darl-mw-video-trigger" onClick={() => setPlay(true)} aria-label={`播放视频 ${result.id}`}><span aria-hidden="true">▶</span><small>点击播放</small></button>;
   if (type === 'video') return <video src={result.url} controls playsInline preload="metadata" onError={() => setFailed(true)} aria-label={`生成视频：${prompt}`}/>;
-  const image = <img src={result.url} alt={prompt} loading="lazy" onError={() => setFailed(true)}/>;
+  const image = <img src={full ? result.previewUrl || result.url : result.thumbnailUrl || result.url} alt={prompt} loading={full ? undefined : 'lazy'} onError={() => setFailed(true)}/>;
   return onPreview ? <button type="button" className="darl-mw-preview-trigger" onClick={onPreview} aria-label={`预览图片 ${result.id}`}>{image}</button> : image;
 }
-export function MediaResults({ task, models, onReuse, onReference, onRetry, onCancel, onRegenerate, onFavoriteChange }: {
+export function MediaResults({ task, models, onReuse, onReference, onRetry, onCancel, onRegenerate, onDeleteBatch, onFavoriteChange }: {
   task?: MediaTask; models: MediaModel[]; onReuse: (batch: MediaBatch) => void;
   onReference: (result: MediaResult, type: 'image' | 'video') => void;
-} & Pick<MediaWorkspaceProps, 'onRetry' | 'onCancel' | 'onRegenerate' | 'onFavoriteChange'>) {
+} & Pick<MediaWorkspaceProps, 'onRetry' | 'onCancel' | 'onRegenerate' | 'onDeleteBatch' | 'onFavoriteChange'>) {
   const [preview, setPreview] = useState<{ result: MediaResult; prompt: string; type: 'image' | 'video' } | null>(null);
   useEffect(() => setPreview(null), [task?.id]);
   if (!task?.batches.length) return <Empty title={task ? '开始你的第一批创作' : '创建一个创作任务'}>填写提示词，选择模型，生成图片或视频。</Empty>;
   return <><div className="darl-mw-collection">{task.batches.length} 个生成批次</div>{task.batches.map((batch, index) => {
     const model = models.find((item) => item.id === batch.modelId);
     const type = batch.type ?? model?.type;
-    return <section key={batch.id} className="darl-mw-batch" aria-label={`批次 ${index + 1}`}><div className="darl-mw-batch-header"><div><h3 title={batch.prompt}>{batch.prompt}</h3><div className="darl-mw-batch-meta"><Badge>{model?.name ?? batch.modelId}</Badge>{type && <Badge>{type === 'image' ? '图片' : '视频'}</Badge>}{batch.options.aspectRatio && <Badge>{batch.options.aspectRatio}</Badge>}{batch.options.resolution && <Badge>{batch.options.resolution}</Badge>}{batch.options.duration !== undefined && <Badge>{batch.options.duration}秒</Badge>}{batch.options.generateAudio !== undefined && <Badge>{batch.options.generateAudio ? '有声' : '无声'}</Badge>}</div></div><Button size="sm" variant="outline" onClick={() => onReuse(batch)}>复用参数</Button></div>
+    return <section key={batch.id} className="darl-mw-batch" aria-label={`批次 ${index + 1}`}><div className="darl-mw-batch-header"><div><h3 title={batch.prompt}>{batch.prompt}</h3><div className="darl-mw-batch-meta"><Badge>{model?.name ?? batch.modelId}</Badge>{type && <Badge>{type === 'image' ? '图片' : '视频'}</Badge>}{batch.options.aspectRatio && <Badge>{batch.options.aspectRatio}</Badge>}{batch.options.resolution && <Badge>{batch.options.resolution}</Badge>}{batch.options.duration !== undefined && <Badge>{batch.options.duration}秒</Badge>}{batch.options.generateAudio !== undefined && <Badge>{batch.options.generateAudio ? '有声' : '无声'}</Badge>}</div></div><div className="darl-mw-batch-actions"><Button size="sm" variant="outline" onClick={() => onReuse(batch)}>复用参数</Button>{onDeleteBatch && <Button size="sm" variant="ghost" onClick={() => { if (window.confirm('确定永久删除这一生成批次及其结果文件？')) void onDeleteBatch(batch.id); }}>删除批次</Button>}</div></div>
       <div className="darl-mw-result-grid">{batch.results.map((result, resultIndex) => <article key={result.id} className="darl-mw-result" aria-label={`结果 ${resultIndex + 1}：${statusLabels[result.status]}`}>
         <div className="darl-mw-media" style={/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(batch.options.aspectRatio ?? '') ? { aspectRatio: batch.options.aspectRatio!.replace(':', '/') } : undefined} data-status={result.status}>
           {result.status === 'completed' && result.url && type ? <ResultMedia type={type} result={result} prompt={batch.prompt} onPreview={() => setPreview({ result, prompt: batch.prompt, type })}/> : <>
@@ -42,5 +46,5 @@ export function MediaResults({ task, models, onReuse, onReference, onRetry, onCa
       </article>)}</div>
       {!batch.results.length && <Empty title="暂无结果">宿主更新任务后会显示生成状态。</Empty>}
     </section>;
-  })}<Modal title="结果预览" open={Boolean(preview)} onOpenChange={(open) => { if (!open) setPreview(null); }}>{preview && <><div className="darl-mw-preview"><ResultMedia type={preview.type} result={preview.result} prompt={preview.prompt}/></div><p className="darl-mw-preview-caption">{preview.prompt}</p></>}</Modal></>;
+  })}<Modal title="结果预览" open={Boolean(preview)} onOpenChange={(open) => { if (!open) setPreview(null); }}>{preview && <><div className="darl-mw-preview"><ResultMedia type={preview.type} result={preview.result} prompt={preview.prompt} full/></div><p className="darl-mw-preview-caption">{preview.prompt}</p></>}</Modal></>;
 }

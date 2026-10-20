@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import type { MediaJob } from './media-job-store';
 import { createH3Video, getH3Video, downloadH3Video, resolveH3File, uploadH3File } from './h3-flash';
 
@@ -104,45 +103,38 @@ function sniffMime(data: Buffer) {
 }
 
 /**
- * Accept the reference shapes a host can send: a `data:` URL, an HTTP(S) URL,
- * `{ url }`, or the internal `{ mediaReference }` written by the media API.
- * Remote links pass through so the channel fetches them; local files are read
+ * Accept a `data:` URL, an HTTP(S) URL, `{ url }`, or `{ fileId }`.
+ * Remote links pass through so the channel fetches them; stored files are read
  * as bytes for multipart/inline upload.
  */
-export async function normalizeImageReferences(value: unknown, max = MAX_REFERENCE_IMAGES, localMedia?: (url: string) => { bytes: Buffer; mime: string } | undefined): Promise<ImageReference[] | undefined> {
+type LocalMediaReader = (url: string) => Promise<{ bytes: Buffer; mime: string } | undefined> | { bytes: Buffer; mime: string } | undefined;
+
+export async function normalizeImageReferences(value: unknown, max = MAX_REFERENCE_IMAGES, localMedia?: LocalMediaReader): Promise<ImageReference[] | undefined> {
   if (value === undefined || value === null) return undefined;
   const rows = Array.isArray(value) ? value : [value];
-  type Source = { kind: 'value'; value: string } | { kind: 'file'; path: string; mimeType?: string };
+  type Source = { kind: 'value'; value: string } | { kind: 'file-id'; id: string };
   const picked = rows.flatMap<Source>((row) => {
     if (typeof row === 'string') return [{ kind: 'value', value: row }];
     if (!row || typeof row !== 'object') return [];
-    const file = (row as { mediaReference?: unknown }).mediaReference;
-    if (typeof file === 'string') return [{ kind: 'file', path: file, mimeType: typeof (row as { mimeType?: unknown }).mimeType === 'string' ? (row as { mimeType: string }).mimeType : undefined }];
-    const url = (row as { url?: unknown }).url;
-    return typeof url === 'string' ? [{ kind: 'value', value: url }] : [];
+    const item = row as { fileId?: unknown; url?: unknown };
+    if (typeof item.fileId === 'string') return [{ kind: 'file-id', id: item.fileId }];
+    return typeof item.url === 'string' ? [{ kind: 'value', value: item.url }] : [];
   });
   if (!picked.length) return undefined;
   if (picked.length > max) throw new Error(`参考图片最多 ${max} 张`);
-  return picked.map((source, index) => {
-    if (source.kind === 'file') {
-      const data = readFileSync(source.path);
-      if (!data.length) throw new Error(`参考图片 ${index + 1} 为空`);
-      const mimeType = sniffMime(data) || source.mimeType || 'image/png';
-      return { name: `reference-${index + 1}.${mimeType.split('/')[1].replace('jpeg', 'jpg')}`, mimeType, data };
+  return Promise.all(picked.map(async (source, index) => {
+    if (source.kind === 'file-id') {
+      const saved = await localMedia?.(`/api/files/${source.id}`);
+      if (saved) return { name: `reference-${index + 1}.${saved.mime.split('/')[1].replace('jpeg', 'jpg')}`, mimeType: saved.mime, data: saved.bytes };
+      throw new Error(`参考图片 ${index + 1} 不存在或尚未完成`);
     }
     const inline = DATA_URL.exec(source.value);
-    const local = /^\/api\/media-generation\/jobs\/([a-f0-9-]+)\/file(?:\?index=(\d+))?$/.exec(source.value);
-    if (local) {
-      const saved = localMedia?.(source.value);
-      if (!saved) throw new Error(`参考图片 ${index + 1} 不存在或尚未完成`);
-      return { name: `reference-${index + 1}.${saved.mime.split('/')[1].replace('jpeg', 'jpg')}`, mimeType: saved.mime, data: saved.bytes };
-    }
     if (!inline) return { url: source.value };
     const data = Buffer.from(inline[2], 'base64');
     if (!data.length) throw new Error(`参考图片 ${index + 1} 为空`);
     const mimeType = sniffMime(data) || inline[1].toLowerCase();
     return { name: `reference-${index + 1}.${mimeType.split('/')[1].replace('jpeg', 'jpg')}`, mimeType, data };
-  });
+  }));
 }
 
 function requestOptions(options: Record<string, unknown>) {
@@ -233,11 +225,11 @@ async function readImage(value: unknown): Promise<MediaImage> {
  * Generate or edit an image. References decide the endpoint: no references use
  * `/images/generations`, references use the multipart `/images/edits`.
  */
-export async function generateImages(job: MediaJob, key: string): Promise<{ images: MediaImage[]; provider: unknown }> {
+export async function generateImages(job: MediaJob, key: string, localMedia?: LocalMediaReader): Promise<{ images: MediaImage[]; provider: unknown }> {
   ensureHttp(job.baseUrl);
   const prompt = promptFor(job);
   const size = imageSize(job.options);
-  const references = await normalizeImageReferences(job.options.references);
+  const references = await normalizeImageReferences(job.options.references, MAX_REFERENCE_IMAGES, localMedia);
   const request = (requestedSize: string) => references?.length
     ? fetch(url(job.baseUrl, 'images/edits'), references.some((reference) => 'url' in reference)
         ? { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(editJson(job, requestedSize, references)), signal: AbortSignal.timeout(180000) }
@@ -327,10 +319,10 @@ function mimeExtension(mimeType: string) {
  * Gemini image generation and reference editing share one endpoint. Images are
  * inline Base64 or an upstream-reachable file URI; the result is inline Base64.
  */
-export async function generateGeminiImages(job: MediaJob, key: string): Promise<{ images: MediaImage[]; provider: unknown }> {
+export async function generateGeminiImages(job: MediaJob, key: string, localMedia?: LocalMediaReader): Promise<{ images: MediaImage[]; provider: unknown }> {
   ensureHttp(job.baseUrl);
   const prompt = promptFor(job);
-  const references = await normalizeImageReferences(job.options.references, MAX_GEMINI_REFERENCE_IMAGES);
+  const references = await normalizeImageReferences(job.options.references, MAX_GEMINI_REFERENCE_IMAGES, localMedia);
   const parts: Record<string, unknown>[] = [{ text: prompt }];
   for (const reference of references || []) {
     parts.push('url' in reference
@@ -395,12 +387,12 @@ export async function generateGeminiImages(job: MediaJob, key: string): Promise<
 }
 
 /** Single-image convenience wrapper used by callers that only keep one result. */
-export async function generateImage(job: MediaJob, key: string) {
-  const { images } = await generateImages(job, key);
+export async function generateImage(job: MediaJob, key: string, localMedia?: LocalMediaReader) {
+  const { images } = await generateImages(job, key, localMedia);
   return images[0];
 }
 
-export async function submitVideo(job:MediaJob,key:string,localMedia?:(url:string)=>{bytes:Buffer;mime:string}|undefined):Promise<string>{
+export async function submitVideo(job:MediaJob,key:string,localMedia?:LocalMediaReader):Promise<string>{
   ensureHttp(job.baseUrl);
   const references=await normalizeImageReferences(job.options.references,9,localMedia);
   const referenceImages:string[]=[];

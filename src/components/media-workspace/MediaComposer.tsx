@@ -68,6 +68,8 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
     {modelTypes.length > 1 && <div className="darl-mw-type" role="radiogroup" aria-label="生成类型">{modelTypes.map((type) => <Button key={type} variant={type === mediaType ? 'secondary' : 'ghost'} size="sm" role="radio" aria-checked={type === mediaType} aria-label={`生成${typeLabels[type]}`} onClick={() => onMediaTypeChange(type)}>{type === 'image' ? '▧' : '▷'} {typeLabels[type]}</Button>)}</div>}
     <div className="darl-mw-references">{inputMode === 'references' && (['images', 'videos', 'audios'] as const).map((kind) => draft.previews(kind).map((item) => <div key={item.key} className="darl-mw-reference" data-unsupported={!model || !referenceLimit(model, kind)} title={`${labels[kind]}：${item.name}`}>
       {kind === 'images' && item.url ? <img src={item.url} alt={item.name}/> : <span>{kind === 'videos' ? '视频' : kind === 'audios' ? '音频' : '图片'}</span>}
+      {item.status === 'uploading' && <span className="darl-mw-reference-progress">{item.progress == null ? '上传中' : `${item.progress}%`}</span>}
+      {item.status === 'error' && <span className="darl-mw-reference-error" title={item.error}>失败</span>}
       <Button variant="secondary" size="icon" onClick={item.remove} aria-label={`移除${labels[kind]} ${item.name}`}>×</Button>
     </div>))}
     {inputMode === 'frames' && supportsFrames(model) && (['firstFrame', 'lastFrame'] as const).map((role) => {
