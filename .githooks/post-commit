@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# 提交后自动重建并重启 agent-chat 预览服务（供 Cloudflare Tunnel 对外访问）。
+# 只触发重启，构建在 launchd 服务内执行并写入日志，因此不会拖慢 git commit；
+# 任何失败都不影响提交结果。用 `npm run hooks:install` 启用（设置 core.hooksPath）。
+set -uo pipefail
+
+label="cn.darlai.agents-preview"
+domain="gui/$(id -u)"
+
+# 只关心会影响打包产物的改动；纯文档提交跳过。
+if ! git diff-tree --no-commit-id --name-only -r HEAD | grep -qE '^(src/|examples/agent-chat/|playground/|vite\.|package\.json|package-lock\.json|index\.html)'; then
+  exit 0
+fi
+
+if launchctl print "$domain/$label" >/dev/null 2>&1; then
+  launchctl kickstart -k "$domain/$label" >/dev/null 2>&1 \
+    && echo "agent-chat: preview 服务已重建并重启 (https://agents.darlai.cn)" \
+    || echo "agent-chat: 警告 - 重启 preview 服务失败，请查看 ~/.cloudflared/agents-preview.err.log"
+else
+  echo "agent-chat: 警告 - 未找到 $label 服务，跳过自动重启"
+fi
+
+exit 0

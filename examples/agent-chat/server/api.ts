@@ -51,6 +51,8 @@ function resolveTextModel(providers: StoredProvider[], configuration: ModelConfi
 
 const uploadMimeType = (type: string) => type === 'image/jpg' ? 'image/jpeg' : /^(?:image\/(?:png|jpeg|webp|gif)|video\/mp4|audio\/(?:mpeg|wav)|application\/(?:pdf|zip|octet-stream)|text\/plain)$/.test(type) ? type : 'application/octet-stream';
 
+const DATA_IMAGE = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/i;
+
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_DATA_URL_LENGTH = 64 + 4 * Math.ceil(MAX_IMAGE_BYTES / 3);
 
@@ -266,6 +268,21 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const loadDefaultMediaSelection = (): DefaultMediaSelection => validateDefaultMediaSelection(storage.getConfig<unknown>('defaultMediaModels') || defaultMediaSelection);
   const update = async (mutate: (providers: StoredProvider[]) => StoredProvider[]) => storage.setConfig('providers', mutate(await load()));
   const saveAgents = async (next: StoredAgent[]) => storage.setConfig('agents', next);
+  // Agent 头像常以 data URL 保存，单个可达数 MB，直接内嵌在 `/api/agents` 的 JSON 里会把首屏拖到几十秒。
+  // 这里把 data URL 头像写入文件存储，只保留 `/api/files/:id` 链接，浏览器再按需加载。
+  const externalizeAvatar = async (agent: StoredAgent): Promise<StoredAgent> => {
+    const match = typeof agent.avatar === 'string' ? agent.avatar.match(DATA_IMAGE) : null;
+    if (!match) return agent;
+    const stored = await files.put(Buffer.from(match[2], 'base64'), uploadMimeType(match[1]), `agent-${agent.id}`);
+    const url = files.originalUrl(stored);
+    return url ? { ...agent, avatar: url } : agent;
+  };
+  let avatarMigration: Promise<void> | undefined;
+  const migrateAvatars = () => avatarMigration ??= (async () => {
+    const stored = loadAgents(storage);
+    if (!stored.some((agent) => typeof agent.avatar === 'string' && DATA_IMAGE.test(agent.avatar))) return;
+    await saveAgents(validateAgents(await Promise.all(stored.map(externalizeAvatar))));
+  })().catch((error) => { avatarMigration = undefined; throw error; });
   const middleware = async (request: IncomingMessage, response: ServerResponse, next: () => void) => {
     if (!request.url?.startsWith('/api/')) return next();
     const send = (status: number, data: unknown) => {
@@ -274,12 +291,18 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     };
     // 本示例服务端持有真实模型密钥，已按需求开放局域网访问：按当前固定服务端口做同源校验，
     // 同一局域网的任何设备都能消耗凭据，请勿在不可信网络中运行。
+    // AGENT_CHAT_ALLOWED_HOSTS 可额外放行反代/隧道域名（例如 Cloudflare Tunnel 暴露的 hostname）。
+    const allowedHosts = new Set((env.AGENT_CHAT_ALLOWED_HOSTS || '').split(',').map((item) => item.trim()).filter(Boolean));
+    // 本服务既可能跑在 dev 端口，也可能跑在 preview（打包产物）端口，两者都算同源。
+    const localPorts = new Set([env.AGENT_CHAT_PORT || '5197', env.AGENT_CHAT_PREVIEW_PORT || '5199']);
     const portOf = (value: string) => value.match(/:(\d+)$/)?.[1];
     const host = request.headers.host || '';
     const origin = request.headers.origin;
     let originHost: string | undefined;
     try { originHost = origin ? new URL(origin).host : undefined; } catch { return send(403, { error: '请求来源无效' }); }
-    if (portOf(host) !== (env.AGENT_CHAT_PORT || '5197') || (originHost && originHost !== host)) return send(403, { error: '仅允许本服务端口同源访问' });
+    const hostPort = portOf(host);
+    const hostAllowed = (hostPort !== undefined && localPorts.has(hostPort)) || allowedHosts.has(host);
+    if (!hostAllowed || (originHost && originHost !== host)) return send(403, { error: '仅允许本服务端口同源访问' });
     if (await voiceApi(request, response)) return;
     if (request.url.split('?')[0] === '/api/files' && request.method === 'POST') {
       if (!isLocalOrLanAddress(request.socket.remoteAddress)) return send(403, { error: '上传仅允许本机或同一局域网' });
@@ -348,6 +371,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       await skillLibrary.ready;
       const providers = await load();
       const modelConfiguration = await loadModelConfiguration();
+      await migrateAvatars();
       const configuredAgents = loadAgents(storage);
       const savedDefault = configuredAgents.find((agent) => agent.id === 'default' && agent.builtIn);
       const defaultAgent: StoredAgent = { id: 'default', name: savedDefault?.name || '网站助手', avatar: savedDefault?.avatar || '/agent-default-avatar.png', description: savedDefault?.description || '系统默认 Agent', type: 'main_agent', source: 'system_default', selectable: true, callable: true, contextStrategy: 'inherit_filtered', instructions: savedDefault?.instructions || await loadPrompt(), skillIds: [], contextPolicy: savedDefault?.contextPolicy || { childContext: 'task-only', historyMode: 'summary', toolResultMode: 'standard' }, enabled: true, isDefault: true, builtIn: true };
@@ -529,7 +553,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const incoming = body?.agent ?? body;
         const existing = agents.find((item) => item.id === incoming?.id);
         if (existing?.builtIn && (incoming?.type === 'sub_agent' || incoming?.selectable === false || incoming?.source && incoming.source !== 'system_default' || incoming?.builtIn === false || incoming?.isDefault === false)) throw new Error('系统默认 Agent 不能改为 Sub Agent、取消选择权限或取消默认状态');
-        const agent = validateAgent(incoming, agents.filter((item) => item.id !== existing?.id));
+        const agent = await externalizeAvatar(validateAgent(incoming, agents.filter((item) => item.id !== existing?.id)));
         const next = agents.some((item) => item.id === agent.id) ? agents.map((item) => item.id === agent.id ? agent : item) : [...agents, agent];
         if (agent.isDefault) next.forEach((item) => { item.isDefault = item.id === agent.id; });
         else {

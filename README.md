@@ -59,6 +59,10 @@ Agent Chat 的素材上传、命名字体、项目封面和媒体结果统一通
 
 复制 `.env.example` 为 `.env.local`，配置服务端 `AGENT_CHAT_API_KEY`；默认地址 `https://api.darl.cn/v1`，默认模型 `deepseek-v4.1-flash`。也可直接在示例的「设置 → 模型」中管理提供方、API 协议、模型类型和推理强度。推理强度填写模型实际支持的值，如 `low, medium, high`；留空则不发送此参数。
 
+示例服务端默认只接受 `AGENT_CHAT_PORT` 端口的同源请求。要通过反向代理或 Cloudflare Tunnel 用自定义域名访问，在 `.env.local` 设置 `AGENT_CHAT_ALLOWED_HOSTS=agents.example.com`（逗号分隔可填多个），Vite 的 `server.allowedHosts` 与 API 同源校验会同时读取它。注意：这会把持有真实模型密钥、可执行本机命令的服务端暴露到公网，任何能访问该域名的人都能消耗凭据，仅限自用并保持审批模式。
+
+隧道/反代对外访问请用打包产物而不是 dev server：`npm run preview:agent-chat` 会先 `build:agent-chat`，再在 `AGENT_CHAT_PREVIEW_PORT`（默认 5199）用 preview 模式同时提供静态资源和同一套 `/api` 中间件。dev server 的模块请求数量是打包后的几十倍，慢速上行链路下首屏会拖到几十秒。
+
 - 支持 OpenAI Chat Completions / Responses 流式文本协议、多轮对话、停止、重新生成、新对话和历史搜索。
 - 示例服务端使用 AI SDK Core 和 OpenAI-compatible Provider 运行模型与工具循环；MCP 通过已有 SDK 动态转换为 AI SDK 工具，执行确认仍由宿主处理。每次请求从本地 SQLite 恢复并重建模型上下文，由宿主提供本机文件和 Shell 工具；这些执行能力仅属于宿主示例，不进入组件库浏览器产物。
 - Markdown 使用开源的 `react-markdown`、`remark-gfm` 和 `rehype-sanitize` 渲染；回复中的 `md` / `markdown` 代码块会显示为编译后的内容，复制按钮仍复制原始 Markdown。

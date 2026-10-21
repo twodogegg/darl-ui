@@ -37,7 +37,9 @@
     "pack:local": "npm run build:lib && npm pack",
     "dev:playground": "vite --config vite.playground.config.ts",
     "dev:agent-chat": "vite --config vite.agent-chat.config.ts",
-    "build:agent-chat": "vite build --config vite.agent-chat.config.ts"
+    "build:agent-chat": "vite build --config vite.agent-chat.config.ts",
+    "preview:agent-chat": "bash scripts/preview-agent-chat.sh",
+    "hooks:install": "git config core.hooksPath .githooks && echo \"Git hooks enabled: .githooks\""
   },
   "peerDependencies": {
     "react": ">=18.2.0 <20",
