@@ -41,6 +41,24 @@ describe('model configuration', () => {
     expect(models.every((model) => model.id.startsWith('darl/'))).toBe(true);
   });
 
+  it('passes the configured default reasoning effort to AgentSidebar models', () => {
+    const configuration = defaultModelConfiguration();
+    const models = toAgentModels(configuration, [{ id: 'darl', name: 'Darl', baseUrl: 'https://example.test/v1', protocol: 'openai-completions', models: [] }]);
+    const deepseek = models.find((model) => model.logicalModelId === 'deepseek-v4.1-flash')!;
+    expect(deepseek.reasoningEfforts).toEqual(['low', 'high', 'max']);
+    expect(deepseek.defaultReasoningEffort).toBe('high');
+    const gpt = models.find((model) => model.logicalModelId === 'gpt-6.1-sol')!;
+    expect(gpt.defaultReasoningEffort).toBe('medium');
+  });
+
+  it('keeps binding-level default reasoning overrides in the runtime model', () => {
+    const configuration = defaultModelConfiguration();
+    const model = configuration.models.find((item) => item.id === 'deepseek-v4.1-flash')!;
+    model.bindings[0].capabilityOverrides = { defaultReasoningEffort: 'max' };
+    const runtime = toAgentModels(configuration, [{ id: 'darl', name: 'Darl', baseUrl: 'https://example.test/v1', protocol: 'openai-completions', models: [] }]).find((item) => item.logicalModelId === 'deepseek-v4.1-flash')!;
+    expect(runtime.defaultReasoningEffort).toBe('max');
+  });
+
   it('maps H3 media capabilities without enabling unverified frame generation', () => {
     const configuration = defaultModelConfiguration();
     const models = toMediaModels(configuration, true);

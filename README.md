@@ -313,7 +313,7 @@ import '@darl/ui/styles.css';
 />
 ```
 
-`sessions` 包含会话 ID、标题、消息和可选的固定 `agentId`；`applications`、`skills`、`models` 全部由宿主提供。工具记录通过消息的 `toolCalls` 传入，参数和结果支持任意 JSON，不绑定具体 MCP；普通记录仅显示应用、工具名、状态及失败原因，不提供原始 JSON 展开入口。`onToolConfirm(toolCallId, approved)` 接收用户对 `confirmation` 状态调用的允许或拒绝，宿主必须在服务端落实该决定；确认前会自动展示参数，失败可重试。`onSend` 的正文保留 Agent 稳定 ID 引用，宿主应解析本轮用户消息并校验可调用目录；此外收到会话 ID、应用 / Skill ID、有效模型及推理强度、可选本地附件 `files` 和已编码的图片 `attachments`；组件会在输入区显示缩略图，图片消息可以不带正文。宿主应把 `attachments` 转换为模型供应商的视觉输入，并在 `AgentMessage.attachments` 中回传图片 URL 以显示结果。失败保留草稿并显示错误。模型与思考等级共用一个入口，弹层中先选模型，再选择该模型支持的等级；模型不提供 `reasoningEfforts` 时隐藏等级选项且不发送旧值。`isGenerating/onStop` 可连接宿主生成状态。完整类型从 `@darl/ui` 导出。
+`sessions` 包含会话 ID、标题、消息和可选的固定 `agentId`；`applications`、`skills`、`models` 全部由宿主提供。工具记录通过消息的 `toolCalls` 传入，参数和结果支持任意 JSON，不绑定具体 MCP；普通记录仅显示应用、工具名、状态及失败原因，不提供原始 JSON 展开入口。`onToolConfirm(toolCallId, approved)` 接收用户对 `confirmation` 状态调用的允许或拒绝，宿主必须在服务端落实该决定；确认前会自动展示参数，失败可重试。`onSend` 的正文保留 Agent 稳定 ID 引用，宿主应解析本轮用户消息并校验可调用目录；此外收到会话 ID、应用 / Skill ID、有效模型及推理强度、可选本地附件 `files` 和已编码的图片 `attachments`；组件会在输入区显示缩略图，图片消息可以不带正文。宿主应把 `attachments` 转换为模型供应商的视觉输入，并在 `AgentMessage.attachments` 中回传图片 URL 以显示结果。失败保留草稿并显示错误。模型与思考等级共用一个入口，弹层中先选模型，再选择该模型支持的等级；模型不提供 `reasoningEfforts` 时隐藏等级选项且不发送旧值。当前等级只来自用户选择、宿主受控值或模型记录里的 `defaultReasoningEffort`（该值会由 `toAgentModels` 从能力模板/绑定覆盖带出）；两者都没有时不显示也不提交等级，不会按 `reasoningEfforts` 的列表顺序自行挑选，因此刷新页面不会把默认等级改写成列表第一项。`isGenerating/onStop` 可连接宿主生成状态。完整类型从 `@darl/ui` 导出。
 
 `approvalMode` 为宿主控制的 `ask | auto | full`；同时提供 `onApprovalModeChange` 后显示输入框审批菜单。回调可返回 Promise，保存失败会保留原选择并显示错误。`approvalModePending` 在宿主读取/保存策略时阻止切换及发送；生成中无法切换。组件仅展示策略，宿主必须服务端持久化并统一执行；示例会拒绝客户端模式与服务端设置不一致的聊天请求。独立的 `ApprovalModeSelector` 可在宿主设置页复用，组件库不会自行批准任何调用。Playground 的选择只作用于本地 UI 演示。
 

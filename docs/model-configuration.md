@@ -67,7 +67,7 @@ DeepSeek 官方将请求 `medium` 映射到实际 `high`，因此不在 UI 中�
 ### 文本
 
 - `reasoningEfforts: string[]`：只列出当前协议/渠道真实支持的思考等级，不含关闭思考。
-- `defaultReasoningEffort`：必须属于候选档位。
+- `defaultReasoningEffort`：必须属于候选档位。`toAgentModels` 会把它作为 `AgentModel.defaultReasoningEffort` 传给 `AgentSidebar`；用户和宿主都没给出选择时使用该值，未配置则不带等级，不能按 `reasoningEfforts` 的顺序推断默认值。
 - 视觉输入、工具调用等可用于内部运行时校验，但不作为新的通用用户调参面板。
 
 ### 图片

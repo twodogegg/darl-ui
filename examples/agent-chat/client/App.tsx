@@ -1,6 +1,6 @@
 import { useFishVoice, VoiceSettings } from './VoiceSettings';
 import { useEffect, useRef, useState } from 'react';
-import { AgentPlaza, AgentSidebar, ApprovalModeSelector, type AgentApprovalMode, AgentsSettingsCard, DefaultModelSelector, DarlUIProvider, ModelManagementCard, SettingsPage, SkillManager, defaultModelConfiguration, toAgentModels, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentErrorInfo, type AgentExecutionEvent, type AgentToolCall, type AgentSendRequest, type AgentSession, type AgentSkill, type DefaultModelDraft, type DefaultModelOption, type DefaultModelSelection, type ModelConfiguration, type ModelProvider } from '@darl/ui';
+import { AgentPlaza, AgentSidebar, ApprovalModeSelector, type AgentApprovalMode, AgentsSettingsCard, DefaultModelSelector, DarlUIProvider, ModelManagementCard, SettingsPage, SkillManager, defaultModelConfiguration, defaultReasoningEffort, toAgentModels, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentErrorInfo, type AgentExecutionEvent, type AgentToolCall, type AgentSendRequest, type AgentSession, type AgentSkill, type DefaultModelDraft, type DefaultModelOption, type DefaultModelSelection, type ModelConfiguration, type ModelProvider } from '@darl/ui';
 import { ArrowLeft, Blocks, BookOpen, Bot, Database, MessageSquare, Settings2, Sparkles, Wrench } from 'lucide-react';
 import createSkillPrompt from '../prompts/create-skill.md?raw';
 import { lines } from '../stream';
@@ -91,6 +91,9 @@ export function App() {
   const running = useRef<AbortController | null>(null);
   const models = toAgentModels(modelConfiguration, providers).filter((model) => model.type === 'text' && model.enabled !== false);
   const availableModelId = models.some((model) => model.id === modelId) ? modelId : models[0]?.id;
+  const availableModel = models.find((model) => model.id === availableModelId);
+  // 用户尚未选择时，沿用模型配置的默认思考等级；没配置就是空，不按列表顺序臆造。
+  const activeEffort = availableModel?.reasoningEfforts?.includes(effort ?? '') ? effort : defaultReasoningEffort(availableModel);
 
   useEffect(() => { let active = true; api<{ mode: AgentApprovalMode }>('approval-settings').then(value => { if (active) { setApprovalMode(value.mode); setApprovalReady(true); } }).catch(reason => { if (active) setError(reason.message); }); return () => { active = false; }; }, []);
   const updateApprovalMode = async (mode: AgentApprovalMode) => {
@@ -305,7 +308,7 @@ export function App() {
         if (!attachment.url?.startsWith('data:image/')) return [];
         return [{ name: attachment.name, type: attachment.type || 'image/png', data: attachment.url, size: attachment.size }];
       });
-      void run({ voiceMode: fishVoice.voice?.enabled, sessionId: session.id, content: user.content, skillIds: [], applicationIds: [...user.content.matchAll(/\]\(app:([^)]*)\)/g)].flatMap((match) => { try { return [decodeURIComponent(match[1])]; } catch { return []; } }), modelId: availableModelId, agentId: session.agentId, reasoningEffort: models.find((model) => model.id === availableModelId)?.reasoningEfforts?.includes(effort || '') ? effort : undefined, attachments: imageAttachments }, history).catch((reason) => setError(reason.message));
+      void run({ voiceMode: fishVoice.voice?.enabled, sessionId: session.id, content: user.content, skillIds: [], applicationIds: [...user.content.matchAll(/\]\(app:([^)]*)\)/g)].flatMap((match) => { try { return [decodeURIComponent(match[1])]; } catch { return []; } }), modelId: availableModelId, agentId: session.agentId, reasoningEffort: activeEffort, attachments: imageAttachments }, history).catch((reason) => setError(reason.message));
   };
   const createSkillViaChat = async () => {
     if (running.current) throw new Error('请先停止当前生成');
@@ -315,7 +318,7 @@ export function App() {
     setSessions(current => [session, ...current]);
     setActiveId(session.id);
     setSkillManagerOpen(false); setSettings(false); setGuide(false); setPlazaVisible(false); setProjectsVisible(false); setMediaJobsVisible(false); setOpen(true);
-    await run({ sessionId: session.id, agentId: session.agentId, content: createSkillPrompt.trim(), skillIds: ['builtin:skill-creator'], applicationIds: [], modelId: availableModelId, reasoningEffort: effort }, undefined, session);
+    await run({ sessionId: session.id, agentId: session.agentId, content: createSkillPrompt.trim(), skillIds: ['builtin:skill-creator'], applicationIds: [], modelId: availableModelId, reasoningEffort: activeEffort }, undefined, session);
   };
   const saveSkill = async (skill: AgentSkill) => {
     setSkills(await api<AgentSkill[]>('skills', { skill }));
@@ -373,7 +376,7 @@ export function App() {
       onNewSession={showPlaza}
       onSend={run} onStop={() => running.current?.abort()} isGenerating={generating} onRegenerate={regenerate}
       applications={applications} onToolConfirm={async (id, approved) => { await api(`tool-confirmations/${id}`, { approved }); }}
-      agents={agents} selectedAgentId={agentId} models={models} selectedModelId={availableModelId} onSelectedModelIdChange={setModelId} selectedReasoningEffort={effort} onSelectedReasoningEffortChange={setEffort}
+      agents={agents} selectedAgentId={agentId} models={models} selectedModelId={availableModelId} onSelectedModelIdChange={setModelId} selectedReasoningEffort={activeEffort} onSelectedReasoningEffortChange={setEffort}
       uploadAttachment={async (file) => {
         const body = new FormData();
         body.set('file', file);

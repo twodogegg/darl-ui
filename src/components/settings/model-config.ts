@@ -253,6 +253,7 @@ export function toAgentModels(configuration: ModelConfiguration, providers: Mode
       type: model.type,
       enabled: true,
       reasoningEfforts: text?.reasoningEfforts.filter((effort) => effort !== 'none'),
+      defaultReasoningEffort: text?.defaultReasoningEffort,
       capabilities: {
         ...(text ? { vision: text.vision, tools: text.tools, contextWindow: text.contextWindow } : {}),
         ...(media ? mediaCapabilities(media) : {}),
@@ -261,6 +262,16 @@ export function toAgentModels(configuration: ModelConfiguration, providers: Mode
     } as AgentModel];
     });
   });
+}
+
+/**
+ * Resolve the reasoning level a host should use when the user has no saved choice.
+ * Returns `undefined` when the model configures no default, so hosts keep the field
+ * empty instead of inventing one from list order.
+ */
+export function defaultReasoningEffort(model: Pick<AgentModel, 'reasoningEfforts' | 'defaultReasoningEffort'> | undefined): string | undefined {
+  const configured = model?.defaultReasoningEffort;
+  return configured && model?.reasoningEfforts?.includes(configured) ? configured : undefined;
 }
 
 export function mediaCapabilities(value: CapabilityValues): AgentModelCapabilities {

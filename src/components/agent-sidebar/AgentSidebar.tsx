@@ -13,6 +13,7 @@ import { InteractiveConfirmDialog } from '../interactive-confirm-dialog/Interact
 import type { AgentApplication, AgentAttachment, AgentErrorInfo, AgentExecutionEvent, AgentImageAttachment, AgentSession, AgentSidebarProps, AgentSkill, AgentToolCall } from './types';
 import { ApprovalModeSelector } from './ApprovalModeSelector';
 import { importSkillPackage } from './skill-package';
+import { defaultReasoningEffort } from '../settings/model-config';
 
 const emptySkills: AgentSkill[] = [];
 const emptyFiles: File[] = [];
@@ -316,7 +317,7 @@ export function AgentSidebar({ voice, open, onOpenChange, sessions, activeSessio
   const skillsPropRef = useRef(skills);
 
   const [localModelId, setLocalModelId] = useState(models[0]?.id);
-  const [localEffort, setLocalEffort] = useState(models[0]?.reasoningEfforts?.[0] || '中');
+  const [localEffort, setLocalEffort] = useState(defaultReasoningEffort(models[0]));
   const [attachments, setAttachments] = useState<Record<string, File[]>>({});
   const [attachmentPreviews, setAttachmentPreviews] = useState<Record<string, string>>({});
   const attachmentPreviewUrls = useRef<Record<string, string>>({});
@@ -347,7 +348,7 @@ export function AgentSidebar({ voice, open, onOpenChange, sessions, activeSessio
   const agentId = requestedAgentId;
   const supportedEfforts = selectedModel?.reasoningEfforts ?? [];
   const preferredEffort = controlledEffort ?? localEffort;
-  const effort = supportedEfforts.includes(preferredEffort) ? preferredEffort : supportedEfforts[0];
+  const effort = supportedEfforts.includes(preferredEffort ?? '') ? preferredEffort : defaultReasoningEffort(selectedModel);
   const draftKey = activeSession?.id ?? '';
   const draft = drafts[draftKey] ?? '';
   const applicationIds = referenceIds(draft, 'app');

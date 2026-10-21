@@ -99,6 +99,8 @@ export interface AgentModel {
   providerId?: string;
   type?: AgentModelType;
   reasoningEfforts?: string[];
+  /** Preferred level when the host has no saved user choice; must be one of `reasoningEfforts`. */
+  defaultReasoningEffort?: string;
   capabilities?: AgentModelCapabilities;
   enabled?: boolean;
 }

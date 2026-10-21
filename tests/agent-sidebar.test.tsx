@@ -219,7 +219,7 @@ describe('AgentSidebar', () => {
 
   it('根据动态应用和 Skill 数据选择能力并提交消息', async () => {
     const onSend = vi.fn();
-    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" onSend={onSend} applications={apps} skills={skills} models={[{ id: 'model', name: '通用模型', reasoningEfforts: ['低', '高'] }]} />);
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" onSend={onSend} applications={apps} skills={skills} models={[{ id: 'model', name: '通用模型', reasoningEfforts: ['低', '高'], defaultReasoningEffort: '低' }]} />);
     fireEvent.click(screen.getByRole('button', { name: '添加材料或能力' }));
     fireEvent.click(screen.getByRole('button', { name: /选择应用/ }));
     fireEvent.click(screen.getByRole('button', { name: /客户系统/ }));
@@ -480,15 +480,33 @@ describe('AgentSidebar', () => {
     expect(screen.getByRole('textbox', { name: '输入消息' })).toHaveTextContent('保留草稿');
   });
 
-  it('受控推理参数无效时提交模型支持值，无推理模型隐藏选择', async () => {
+  it('受控推理参数无效时回落到模型默认等级，无默认值时不提交等级', async () => {
     const onSend = vi.fn();
     const props = { open: true, onOpenChange: vi.fn(), sessions, onSend, selectedReasoningEffort: '高' };
-    const { rerender } = render(<AgentSidebar {...props} models={[{ id: 'fast', name: '快速模型', reasoningEfforts: ['低'] }]} />);
+    const { rerender } = render(<AgentSidebar {...props} models={[{ id: 'fast', name: '快速模型', reasoningEfforts: ['低'], defaultReasoningEffort: '低' }]} />);
     fireEvent.input(screen.getByRole('textbox', { name: '输入消息' }), { target: { textContent: '你好' } });
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
     await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: '低' })));
     rerender(<AgentSidebar {...props} models={[{ id: 'plain', name: '普通模型' }]} />);
     expect(screen.queryByRole('button', { name: /思考：/ })).toBeNull();
+  });
+
+  it('模型只有候选等级、没有默认等级时不臆造思考等级', async () => {
+    const onSend = vi.fn();
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} onSend={onSend} models={[{ id: 'model', name: '通用模型', reasoningEfforts: ['low', 'high', 'max'] }]} />);
+    expect(screen.getByRole('button', { name: /通用模型/ })).not.toHaveTextContent('·');
+    fireEvent.input(screen.getByRole('textbox', { name: '输入消息' }), { target: { textContent: '你好' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: undefined })));
+  });
+
+  it('使用模型配置的默认思考等级，而不是候选列表第一项', async () => {
+    const onSend = vi.fn();
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} onSend={onSend} models={[{ id: 'model', name: 'DeepSeek V4.1 Flash', reasoningEfforts: ['low', 'high', 'max'], defaultReasoningEffort: 'high' }]} />);
+    expect(screen.getByRole('button', { name: /DeepSeek V4.1 Flash · high/ })).toBeInTheDocument();
+    fireEvent.input(screen.getByRole('textbox', { name: '输入消息' }), { target: { textContent: '你好' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'high' })));
   });
 
   it('聊天侧栏不再显示 Skill 管理入口', () => {
