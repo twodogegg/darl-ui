@@ -14,6 +14,7 @@ import '@darl/ui/styles.css';
   onSessionDelete={deleteSession}
   onNewSession={createSession}
   onSend={sendMessage}
+  voice={voiceAdapter}
   onRegenerate={regenerateMessage}
   onToolConfirm={confirmToolCall}
   isGenerating={isGenerating}
@@ -64,8 +65,14 @@ const task = await fetch('/v1/videos', {
   body: { model: 'minimax-h3-flash', prompt, resolution: '768', aspect_ratio: '9:16' },
 });`;
 
-const streamExample = `{"type":"text","text":"好的，我先"}
+const streamExample = `// 普通模式
+{"type":"text","text":"好的，我先"}
 {"type":"text","text":"查看订单。"}
+{"type":"done"}
+
+// 开启语音模式时，Agent 分别生成文字与语音文案
+{"type":"output","output":{"output_type":"text","content":"适合阅读的完整内容"}}
+{"type":"output","output":{"output_type":"speech","content":"适合听的交流内容"}}
 {"type":"done"}`;
 
 const imageExample = `onSend={async ({ content, attachments }) => {

@@ -1,14 +1,14 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': resolve(__dirname, 'playground/src') } },
   root: resolve(__dirname, 'playground'),
   cacheDir: resolve(__dirname, 'node_modules/.vite/playground'),
   build: { outDir: resolve(__dirname, 'dist/demo'), emptyOutDir: true },
-  server: { host: '0.0.0.0', port: 5188, strictPort: true, fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/.local/**'] } }
-});
+  server: { host: '0.0.0.0', port: Number(loadEnv(mode, __dirname, '').PLAYGROUND_PORT || 5188), strictPort: true, fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/.local/**'] } }
+}));

@@ -222,3 +222,6 @@ body { margin: 0; background: #101113; }
 .example-approval-option { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 14px 16px; cursor: pointer; }
 .example-approval-option + .example-approval-option { border-top: 1px solid var(--darl-border, #444); }
 .example-approval-option span { font-weight: 500; }
+
+.example-voice-settings { display:grid; gap:16px; max-width:640px; }
+.example-voice-settings > p { color:var(--darl-muted); font-size:13px; line-height:1.6; }
