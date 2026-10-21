@@ -1,5 +1,5 @@
 import { createVoiceApi, loadVoiceGuide, voiceGuideForTurn } from './voice';
-import { VoiceOutputParser } from './voice-output';
+import { VoiceOutputParser, voiceOutputFormat } from './voice-output';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -1019,7 +1019,8 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           });
         }
         const voiceParser = voiceMode ? new VoiceOutputParser() : undefined;
-        for await (const text of (delegations.length ? generateWithToolLoop(provider, model, contextMessages, instructions, effort, signal, execution, delegations) : generate(provider, model, contextMessages, instructions, effort, signal, execution))) {
+        const outputFormat = voiceMode ? voiceOutputFormat(provider.protocol) : undefined;
+        for await (const text of (delegations.length ? generateWithToolLoop(provider, model, contextMessages, instructions, effort, signal, execution, delegations, outputFormat) : generate(provider, model, contextMessages, instructions, effort, signal, execution, outputFormat))) {
           const events = voiceParser ? voiceParser.push(text).map((output) => ({ type: 'output', output })) : [{ type: 'text', text }];
           for (const event of events) {
             if (!response.write(`${JSON.stringify(event)}\n`)) await new Promise<void>((done) => {

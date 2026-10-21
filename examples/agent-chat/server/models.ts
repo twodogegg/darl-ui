@@ -2,7 +2,7 @@ import type { ModelProvider, AgentModelConfig } from '../../../src/index';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
-import { dynamicTool, jsonSchema, stepCountIs, streamText, ToolLoopAgent, type LanguageModel, type ModelMessage } from 'ai';
+import { dynamicTool, jsonSchema, stepCountIs, streamText, ToolLoopAgent, type LanguageModel, type ModelMessage, type OutputInterface } from 'ai';
 import { failure } from './errors';
 import { sourceBoundMessage, structuredAgentResult, type StructuredAgentResult } from './context';
 
@@ -141,7 +141,7 @@ export function aiTools(execution: ToolExecution | undefined, signal: AbortSigna
   })]));
 }
 
-export async function* generate(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution) {
+export async function* generate(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, output?: OutputInterface) {
   signal.throwIfAborted();
   if (!messages.length) throw new Error('对话消息不能为空');
   const reasoning = reasoningValue(effort);
@@ -155,6 +155,7 @@ export async function* generate(provider: StoredProvider, model: AgentModelConfi
     toolCallConcurrency: 1,
     maxRetries: 2,
     abortSignal: signal,
+    output,
     ...(reasoning ? { providerOptions: { [providerOptionsName]: { reasoningEffort: reasoning } } } : {}),
   });
   let hasText = false;
@@ -186,7 +187,7 @@ function loopTools(execution: ToolExecution | undefined, delegations: AgentDeleg
   return tools;
 }
 
-function createToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, delegations?: AgentDelegation[]) {
+function createToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, delegations?: AgentDelegation[], output?: OutputInterface) {
   const reasoning = reasoningValue(effort);
   const providerOptionsName = provider.protocol === 'openai-responses' ? 'openai' : provider.id;
   const pending = new Set(delegations?.filter(item => item.required).map(item => item.name));
@@ -194,6 +195,7 @@ function createToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, 
   return new ToolLoopAgent({
     model: languageModel(provider, model),
     instructions,
+    output,
     tools: model.capabilities?.tools === false ? {} : loopTools(execution, tracked, signal),
     prepareStep: () => {
       const name = pending.values().next().value;
@@ -207,10 +209,10 @@ function createToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, 
 }
 
 /** Stream a configured Agent. Each call receives only the messages passed by the host. */
-export async function* generateWithToolLoop(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, delegations?: AgentDelegation[]) {
+export async function* generateWithToolLoop(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, delegations?: AgentDelegation[], output?: OutputInterface) {
   signal.throwIfAborted();
   if (!messages.length) throw new Error('对话消息不能为空');
-  const agent = createToolLoopAgent(provider, model, instructions, effort, signal, execution, delegations);
+  const agent = createToolLoopAgent(provider, model, instructions, effort, signal, execution, delegations, output);
   const result = await agent.stream({ messages: modelMessages(messages.map(sourceBoundMessage)), abortSignal: signal });
   let hasText = false;
   for await (const text of checkedText(result.textStream)) { hasText = true; yield text; }
