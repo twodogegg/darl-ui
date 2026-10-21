@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LocalStorage } from '../examples/agent-chat/server/storage';
 import { FileStore } from '../examples/agent-chat/server/file-storage';
 import { SkillRuntime } from '../examples/agent-chat/server/skill-runtime';
+import { commandResultError } from '../examples/agent-chat/server/errors';
 import type { AgentSkill } from '../src';
 
 describe('generic local Skill runtime', () => {
@@ -63,12 +64,14 @@ describe('generic local Skill runtime', () => {
   });
 
   it('returns actual exit errors and missing dependencies without fabricating success', async () => {
-    const result = await execute('run_command', { command: `${node} -e 'process.stderr.write("failure");process.exit(7)'`, waitMs: 1000 });
+    const result = await execute('run_command', { command: `${node} -e 'process.stderr.write("failure private-diagnostic-token sk-runtime-test-key");process.exit(7)'`, waitMs: 1000 });
     expect(result).toMatchObject({ status: 'exited', exitCode: 7, isError: true });
     expect(result.output).toContain('failure');
+    expect(commandResultError({ status: result.status, exitCode: result.exitCode, output: result.output }, { requestId: 'command-request', key: 'private-diagnostic-token' })).toMatchObject({ stage: 'runtime', code: 'COMMAND_FAILED', message: '命令已退出，退出码：7\n命令输出：\nfailure [已隐藏] [已隐藏]', requestId: 'command-request' });
     const missing = await execute('run_command', { command: 'darl_nonexistent_cli_246813579', waitMs: 1000 });
     expect(missing.isError).toBe(true);
     expect(missing.exitCode).not.toBe(0);
+    expect(commandResultError({ status: missing.status, exitCode: missing.exitCode, output: missing.output }).message).toContain('darl_nonexistent_cli_246813579');
   });
 
   it('does not forward backend secrets and bounds captured command output', async () => {
@@ -100,6 +103,7 @@ describe('generic local Skill runtime', () => {
     expect((await execute('process_status', { processId: result.processId, waitMs: 500 })).status).toBe('cancelled');
     const timed = await execute('run_command', { command: `${node} -e 'setInterval(()=>{},1000)'`, timeoutMs: 100, waitMs: 1000 });
     expect(timed).toMatchObject({ status: 'timed_out', isError: true });
+    expect(commandResultError({ status: timed.status, exitCode: timed.exitCode, output: timed.output })).toMatchObject({ stage: 'timeout', code: 'COMMAND_TIMEOUT', message: '命令执行超时' });
     const stopped = await execute('run_command', { command: `${node} -e 'setInterval(()=>{},1000)'`, waitMs: 0 });
     expect((await execute('stop_process', { processId: stopped.processId })).status).toBe('cancelled');
   });

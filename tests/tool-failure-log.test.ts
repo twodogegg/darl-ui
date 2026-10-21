@@ -44,11 +44,11 @@ describe('tool failure log', () => {
     const echoed: string[] = [];
     try {
       const log = createFailureLog(directory, (line) => echoed.push(line));
-      log({ requestId: 'req-1', runId: 'run-1', toolCallId: 'call-1', appName: '素材库', toolName: 'search', stage: 'mcp-tool', code: 'MCP_TOOL_FAILED', message: 'request ahk_private failed', secret: 'ahk_private' });
+      log({ requestId: 'req-1', runId: 'run-1', toolCallId: 'call-1', appName: '素材库', toolName: 'search', stage: 'mcp-tool', code: 'MCP_TOOL_FAILED', message: 'request ahk_private failed', command: 'cli --token ahk_private', processId: 'process-1', exitCode: 7, secret: 'ahk_private' });
       log({ requestId: 'req-2', stage: 'mcp-tool', code: 'MCP_TOOL_FAILED', message: 'Authorization: Bearer sk-live-123456' });
       const lines = readFileSync(join(directory, 'failure.log'), 'utf8').trim().split('\n');
       expect(lines).toHaveLength(2);
-      expect(JSON.parse(lines[0])).toMatchObject({ requestId: 'req-1', toolCallId: 'call-1', code: 'MCP_TOOL_FAILED', message: 'request [已隐藏] failed' });
+      expect(JSON.parse(lines[0])).toMatchObject({ requestId: 'req-1', toolCallId: 'call-1', code: 'MCP_TOOL_FAILED', message: 'request [已隐藏] failed', command: 'cli --token [已隐藏]', processId: 'process-1', exitCode: 7 });
       expect(lines.join('\n')).not.toContain('ahk_private');
       expect(lines.join('\n')).not.toContain('sk-live-123456');
       expect(echoed[0]).toContain('MCP_TOOL_FAILED');

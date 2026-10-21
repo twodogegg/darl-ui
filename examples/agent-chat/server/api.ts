@@ -9,7 +9,7 @@ import { auth } from '@modelcontextprotocol/sdk/client/auth.js';
 import { applicationCatalog, connectApplication, conversationApplications, createMcpOAuthProvider, loadApplications, saveApplications, MCP_OAUTH_CALLBACK_PATH, McpConnectionManager, toolRisk, ToolConfirmations } from './mcp';
 import { loadAgents, mentionedAgents, publicAgent, validateAgent, validateAgents, type StoredAgent } from './agents';
 import { generate, generateWithToolLoop, listModels, publicProvider, runToolLoopAgent, safeError, validateProvider, type AgentDelegation, type ChatImage, type ChatMessage, type StoredProvider, type ToolExecution } from './models';
-import { AgentFailure, createAgentError, failure } from './errors';
+import { AgentFailure, commandResultError, createAgentError, failure } from './errors';
 import { compactContextMessages, contextCharBudget, normalizeContextPolicy, selectedContext } from './context';
 import { LocalStorage, validateClientState, type ClientState } from './storage';
 import { SubAgentThreadLocks, continueSubAgentConversation } from './subagent-conversations';
@@ -761,10 +761,10 @@ export function createApi(directory: string, env: Record<string, string>, prompt
                 callSignal.throwIfAborted();
                 call.status = 'status' in result && result.status === 'cancelled' ? 'cancelled' : 'isError' in result && result.isError ? 'error' : 'success';
                 call.endedAt = new Date().toISOString(); call.durationMs = Date.now() - Date.parse(call.startedAt);
-                if (call.status === 'error') {
-                  call.error = '命令失败、超时或已取消，请查看真实输出';
-                  call.errorInfo = createAgentError('runtime', new Error(call.error), { requestId, runId: executionRunId, parentRunId, code: 'COMMAND_FAILED', message: call.error, retryable: false });
-                  logFailure({ requestId, runId: executionRunId, parentRunId, agentId: ownerAgentId, toolCallId: call.id, appId: call.appId, appName: call.appName, toolName: call.toolName, stage: call.errorInfo.stage, code: call.errorInfo.code, message: call.error, secret });
+                if (call.status === 'error' && 'isError' in result) {
+                  call.errorInfo = commandResultError(result, { requestId, runId: executionRunId, parentRunId, key: secret });
+                  call.error = call.errorInfo.message;
+                  logFailure({ requestId, runId: executionRunId, parentRunId, agentId: ownerAgentId, toolCallId: call.id, appId: call.appId, appName: call.appName, toolName: call.toolName, stage: call.errorInfo.stage, code: call.errorInfo.code, message: call.error, command: result.command, processId: result.processId, exitCode: result.exitCode, durationMs: call.durationMs, secret });
                 }
                 publishRuntimeCall();
                 return JSON.stringify(result);

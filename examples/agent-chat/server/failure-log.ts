@@ -15,6 +15,9 @@ export interface FailureLogEntry {
   stage: string;
   code: string;
   message: string;
+  command?: string;
+  processId?: string;
+  exitCode?: number | null;
   durationMs?: number;
   secret?: string;
 }
@@ -39,6 +42,7 @@ export function createFailureLog(directory: string, echo: (line: string) => void
       timestamp: new Date().toISOString(),
       ...rest,
       message: redactMessage(rest.message, secret),
+      ...(rest.command !== undefined ? { command: redactMessage(rest.command, secret) } : {}),
     };
     const target = [record.appName, record.toolName].filter(Boolean).join('/');
     echo(`[agent] ${record.timestamp} ${record.stage} ${record.code}${target ? ` ${target}` : ''} — ${record.message}${record.requestId ? ` (requestId=${record.requestId})` : ''}\n`);

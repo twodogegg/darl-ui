@@ -40,7 +40,7 @@
 .darl-agent-error-card { display: grid; gap: 6px; margin-top: 8px; padding: 10px; border: 1px solid color-mix(in srgb, var(--darl-danger, #dc2626) 42%, var(--darl-agent-border)); border-radius: 9px; background: color-mix(in srgb, var(--darl-danger, #dc2626) 7%, var(--darl-agent-bg)); }
 .darl-agent-error-card-head { display: flex; align-items: center; gap: 6px; color: var(--darl-danger, #dc2626); font-size: 11px; }
 .darl-agent-error-card-head span { margin-left: auto; color: var(--darl-agent-muted); font-size: 10px; }
-.darl-agent-error-card p { margin: 0; color: var(--darl-agent-text); font-size: 12px; overflow-wrap: anywhere; }
+.darl-agent-error-card p { margin: 0; color: var(--darl-agent-text); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .darl-agent-error-card-meta { display: flex; flex-wrap: wrap; gap: 5px 10px; color: var(--darl-agent-muted); font: 10px/1.4 ui-monospace, monospace; overflow-wrap: anywhere; }
 .darl-agent-error-card small { color: var(--darl-agent-muted); font-size: 10px; }
 .darl-agent-composer-shell { position: relative; flex: none; padding: 9px 12px 11px; border-top: 1px solid var(--darl-agent-border); background: var(--darl-agent-bg); }.darl-agent-contexts { display: flex; flex-wrap: wrap; gap: 5px; max-height: 78px; overflow: auto; padding: 0 1px 7px; }.darl-agent-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 4px 7px; border: 1px solid var(--darl-agent-border); border-radius: 6px; background: var(--darl-agent-surface); color: var(--darl-agent-muted); font-size: 10px; }.darl-agent-chip button { display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }.darl-agent-chip--app { color: var(--darl-agent-primary); }.darl-agent-chip--skill { color: #7c3aed; }
@@ -134,7 +134,7 @@
 
 .darl-agent-picker-toolbar-actions { display: inline-flex; align-items: center; gap: 5px; }
 .darl-agent-skill-manager { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 18px; background: #0f172a66; -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
-.darl-agent-skill-manager-card { --darl-agent-bg: var(--darl-background, #fff); --darl-agent-surface: var(--darl-surface, #f8fafc); --darl-agent-text: var(--darl-text, #0f172a); --darl-agent-muted: var(--darl-muted, #64748b); --darl-agent-border: var(--darl-border, #e2e8f0); --darl-agent-primary: var(--darl-primary, #2563eb); position: fixed; inset: 18px; z-index: 81; width: min(920px, calc(100% - 36px)); height: min(720px, calc(100vh - 36px)); height: min(720px, calc(100dvh - 36px)); margin: auto; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--darl-agent-border); border-radius: 16px; background: var(--darl-agent-bg); color: var(--darl-agent-text); box-shadow: 0 24px 80px #0f172a38; }
+.darl-agent-skill-manager-card { --darl-agent-bg: var(--darl-background, #fff); --darl-agent-surface: var(--darl-surface, #f8fafc); --darl-agent-text: var(--darl-text, #0f172a); --darl-agent-muted: var(--darl-muted, #64748b); --darl-agent-border: var(--darl-border, #e2e8f0); --darl-agent-primary: var(--darl-primary, #2563eb); position: fixed; inset: 18px; z-index: 81; width: min(1180px, calc(100% - 36px)); height: min(880px, calc(100vh - 36px)); height: min(880px, calc(100dvh - 36px)); margin: auto; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--darl-agent-border); border-radius: 16px; background: var(--darl-agent-bg); color: var(--darl-agent-text); box-shadow: 0 24px 80px #0f172a38; }
 .darl-agent-skill-manager-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex: none; padding: 18px 20px 15px; border-bottom: 1px solid var(--darl-agent-border); }
 .darl-agent-manager-title-wrap { display: flex; align-items: flex-start; gap: 11px; }
 .darl-agent-manager-title-icon { display: grid; place-items: center; width: 34px; height: 34px; margin-top: 1px; border: 1px solid color-mix(in srgb, var(--darl-agent-skill) 30%, var(--darl-agent-border)); border-radius: 10px; background: color-mix(in srgb, var(--darl-agent-skill) 13%, var(--darl-agent-bg)); color: var(--darl-agent-skill); }
@@ -177,7 +177,7 @@
 .darl-agent-skill-favorite svg { width: 13px; height: 13px; }
 .darl-agent-skill-list-icon { display: grid; place-items: center; width: 25px; height: 25px; flex: none; border-radius: 7px; background: color-mix(in srgb, var(--darl-agent-skill) 12%, var(--darl-agent-bg)); color: var(--darl-agent-skill); }
 .darl-agent-skill-list-icon svg { width: 13px; height: 13px; }
-.darl-agent-skill-editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 18px 20px 14px; }
+.darl-agent-skill-editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: auto; padding: 18px 20px 14px; }
 .darl-agent-skill-editor-heading { border-bottom: 1px solid var(--darl-agent-border); }
 .darl-agent-skill-editor-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding-bottom: 12px; }
 .darl-agent-skill-editor-actions { display: flex; gap: 3px; }
@@ -189,31 +189,71 @@
 .darl-agent-skill-form input:focus, .darl-agent-skill-form textarea:focus, .darl-agent-skill-file-title input:focus, .darl-agent-skill-file-editor > textarea:focus { border-color: var(--darl-agent-primary); }
 .darl-agent-skill-switch { display: flex !important; align-items: center; gap: 6px !important; }
 .darl-agent-skill-switch input { width: 14px; height: 14px; }
-.darl-agent-skill-files { display: grid; grid-template-columns: 170px minmax(0, 1fr); min-height: 230px; flex: 1; overflow: hidden; border: 1px solid var(--darl-agent-border); border-radius: 9px; }
-.darl-agent-skill-files { background: var(--darl-agent-bg); box-shadow: 0 1px 2px #0f172a0d; }
-.darl-agent-skill-files > aside { overflow: auto; padding: 7px; border-right: 1px solid var(--darl-agent-border); background: var(--darl-agent-surface); }
-.darl-agent-skill-files-heading { display: flex; align-items: center; justify-content: space-between; gap: 5px; padding: 2px 3px 6px; color: var(--darl-agent-muted); font-size: 10px; }
-.darl-agent-skill-files-heading .darl-button { min-height: 25px; padding: 0 4px; font-size: 9px; }
-.darl-agent-skill-files > aside > button { display: flex; align-items: center; width: 100%; gap: 5px; padding: 6px 5px; border: 0; border-radius: 5px; background: transparent; color: var(--darl-agent-text); text-align: left; font-size: 10px; cursor: pointer; }
-.darl-agent-skill-files > aside > button:hover, .darl-agent-skill-files > aside > button.is-selected { background: var(--darl-agent-bg); }
-.darl-agent-skill-files > aside > button svg { width: 13px; height: 13px; color: var(--darl-agent-muted); }
+.darl-agent-skill-manager-card, .darl-agent-skill-manager-card * { box-sizing: border-box; }
+.darl-agent-skill-files { display: grid; grid-template-columns: minmax(180px, 25%) minmax(0, 1fr); min-height: 180px; flex: 1; overflow: hidden; border: 1px solid var(--darl-agent-border); border-radius: 9px; background: var(--darl-agent-bg); }
+.darl-agent-skill-files > aside { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--darl-agent-border); background: var(--darl-agent-surface); }
+.darl-agent-skill-files-heading { display: flex; align-items: center; justify-content: space-between; gap: 5px; min-height: 42px; padding: 7px 10px; border-bottom: 1px solid var(--darl-agent-border); color: var(--darl-agent-muted); font-size: 11px; }
+.darl-agent-skill-files-heading strong { display: flex; align-items: center; gap: 7px; font-weight: 500; }
+.darl-agent-skill-files-heading strong span { font-size: 10px; font-variant-numeric: tabular-nums; }
+.darl-agent-skill-files-heading .darl-button { min-height: 26px; padding: 0 4px; font-size: 10px; }
+.darl-agent-skill-file-tree { min-height: 0; overflow: auto; padding: 6px; scrollbar-width: thin; }
+.darl-agent-skill-file-tree ul { min-width: 0; margin: 0; padding: 0; list-style: none; }
+.darl-agent-skill-file-tree details > ul { margin-left: 14px; padding-left: 7px; border-left: 1px solid var(--darl-agent-border); }
+.darl-agent-skill-file-tree button, .darl-agent-skill-file-tree summary { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; min-height: 32px; padding: 6px 7px; border: 0; border-radius: 5px; background: transparent; color: var(--darl-agent-text); text-align: left; font-family: inherit; font-size: 11px; line-height: 1.5; cursor: pointer; }
+.darl-agent-skill-file-tree summary { list-style: none; }
+.darl-agent-skill-file-tree summary::-webkit-details-marker { display: none; }
+.darl-agent-skill-file-tree button:hover, .darl-agent-skill-file-tree summary:hover { background: var(--darl-agent-bg); }
+.darl-agent-skill-file-tree button[aria-current='page'] { background: color-mix(in srgb, var(--darl-agent-primary) 12%, var(--darl-agent-bg)); color: var(--darl-agent-primary); }
+.darl-agent-skill-file-tree span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.darl-agent-skill-file-tree svg { flex: none; width: 14px; height: 14px; color: var(--darl-agent-muted); }
+.darl-agent-skill-file-tree button[aria-current='page'] svg { color: inherit; }
+.darl-agent-skill-folder-chevron { width: 10px !important; }
+.darl-agent-skill-file-tree details[open] > summary > .darl-agent-skill-folder-chevron { transform: rotate(90deg); }
+.darl-agent-skill-file-tree details[open] > summary > .darl-agent-skill-folder-closed, .darl-agent-skill-file-tree details:not([open]) > summary > .darl-agent-skill-folder-open { display: none; }
 .darl-agent-skill-file-editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.darl-agent-skill-file-title { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-bottom: 1px solid var(--darl-agent-border); color: var(--darl-agent-muted); font-size: 10px; }
-.darl-agent-skill-file-title strong { color: var(--darl-agent-text); }
-.darl-agent-skill-file-title input { height: 26px; flex: 1; padding: 0 6px; font-size: 10px; }
-.darl-agent-skill-file-title .darl-button { min-height: 26px; min-width: 26px; }
-.darl-agent-skill-file-editor > textarea { flex: 1; min-height: 100px; padding: 10px; border: 0; border-radius: 0; resize: none; font: 11px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.darl-agent-skill-file-title { display: flex; align-items: center; flex: none; gap: 8px; min-height: 42px; padding: 7px 10px; border-bottom: 1px solid var(--darl-agent-border); color: var(--darl-agent-muted); font-size: 11px; }
+.darl-agent-skill-file-title > svg { flex: none; width: 14px; height: 14px; }
+.darl-agent-skill-file-title strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--darl-agent-text); font-weight: 500; }
+.darl-agent-skill-file-title input { min-width: 0; height: 28px; flex: 1; padding: 0 6px; font-size: 11px; }
+.darl-agent-skill-file-title .darl-button { flex: none; min-height: 26px; min-width: 26px; }
+.darl-agent-skill-file-modes { display: flex; flex: none; gap: 2px; padding: 2px; border: 1px solid var(--darl-agent-border); border-radius: 6px; background: var(--darl-agent-surface); }
+.darl-agent-skill-file-modes button { padding: 3px 9px; border: 0; border-radius: 4px; background: transparent; color: var(--darl-agent-muted); font: inherit; cursor: pointer; }
+.darl-agent-skill-file-modes button[aria-pressed='true'] { background: var(--darl-agent-bg); color: var(--darl-agent-text); box-shadow: 0 1px 3px #0f172a12; }
+.darl-agent-skill-file-tree :is(button, summary):focus-visible, .darl-agent-skill-file-modes button:focus-visible { outline: 2px solid var(--darl-agent-primary); outline-offset: -2px; }
+.darl-agent-skill-file-editor > textarea { flex: 1; min-height: 100px; padding: 16px; border: 0; border-radius: 0; resize: none; background: var(--darl-agent-bg); font: 12px/1.8 ui-monospace, SFMono-Regular, Consolas, monospace; tab-size: 2; }
 .darl-agent-skill-file-editor > textarea::placeholder { color: var(--darl-agent-muted); opacity: .7; }
-.darl-agent-skill-manager-feedback { min-height: 26px; padding: 7px 0 0; color: var(--darl-agent-muted); font-size: 10px; }
+.darl-agent-skill-file-preview { flex: 1; min-height: 0; overflow: auto; padding: 22px 26px 32px; scrollbar-width: thin; overflow-wrap: anywhere; }
+.darl-agent-skill-markdown { font-size: 13px; line-height: 1.8; }
+.darl-agent-skill-markdown > :first-child { margin-top: 0; }
+.darl-agent-skill-markdown :is(h1, h2, h3, h4, h5, h6) { margin: 24px 0 12px; line-height: 1.4; }
+.darl-agent-skill-markdown h1 { padding-bottom: 12px; border-bottom: 1px solid var(--darl-agent-border); font-size: 23px; }
+.darl-agent-skill-markdown h2 { font-size: 18px; }
+.darl-agent-skill-markdown h3 { font-size: 15px; }
+.darl-agent-skill-markdown :is(ul, ol) { padding-left: 22px; }
+.darl-agent-skill-markdown li > p { margin: 6px 0; }
+.darl-agent-skill-markdown blockquote { margin: 16px 0; padding: 2px 14px; border-left: 3px solid var(--darl-agent-border); color: var(--darl-agent-muted); }
+.darl-agent-skill-markdown blockquote p { margin: 6px 0; }
+.darl-agent-skill-markdown pre { max-width: 100%; overflow: auto; margin: 14px 0; padding: 14px 16px; border: 1px solid var(--darl-agent-border); border-radius: 8px; background: var(--darl-agent-surface); font: 12px/1.75 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.darl-agent-skill-markdown pre code { padding: 0; background: transparent; font: inherit; white-space: pre; }
+.darl-agent-skill-markdown .darl-agent-inline-code { font-size: .9em; }
+.darl-agent-skill-markdown-table { max-width: 100%; overflow: auto; margin: 16px 0; }
+.darl-agent-skill-markdown table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.darl-agent-skill-markdown :is(th, td) { padding: 8px 12px; border: 1px solid var(--darl-agent-border); text-align: left; }
+.darl-agent-skill-markdown th { background: var(--darl-agent-surface); font-weight: 600; }
+.darl-agent-skill-markdown img { max-width: 100%; height: auto; border-radius: 6px; }
+.darl-agent-skill-markdown hr { margin: 24px 0; border: 0; border-top: 1px solid var(--darl-agent-border); }
+.darl-agent-skill-file-empty { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-width: 0; padding: 24px; color: var(--darl-agent-muted); font-size: 12px; text-align: center; overflow-wrap: anywhere; }
+.darl-agent-skill-file-empty strong { max-width: 100%; color: var(--darl-agent-text); font-weight: 500; }
+.darl-agent-skill-manager-feedback { flex: none; min-height: 26px; padding: 7px 0 0; color: var(--darl-agent-muted); font-size: 10px; }
 .darl-agent-skill-invocation-hint { color: var(--darl-agent-muted); font-size: 11px; }
 .darl-agent-skill-auto-invocation { display: grid; gap: 4px; }
 .darl-agent-skill-auto-invocation .darl-switch { width: fit-content; color: var(--darl-agent-text); font-size: 11px; }
 .darl-agent-skill-auto-invocation small { color: var(--darl-agent-muted); font-size: 10px; }
 .darl-agent-skill-manager-feedback .is-error { color: var(--darl-danger, #dc2626); }
-.darl-agent-skill-manager-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 9px; color: var(--darl-agent-muted); font-size: 10px; }
+.darl-agent-skill-manager-footer { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; padding-top: 9px; color: var(--darl-agent-muted); font-size: 10px; }
 .darl-agent-skill-manager-footer > div { display: flex; gap: 6px; }
 .darl-agent-skill-manager-footer .darl-button { min-width: 74px; }
-@media(max-width: 700px) { .darl-agent-skill-manager { padding: 0; place-items: stretch; }.darl-agent-skill-manager-card { inset: 0; width: 100%; height: 100vh; height: 100dvh; border-radius: 0; }.darl-agent-skill-manager-body { grid-template-columns: 1fr; overflow: auto; }.darl-agent-skill-list-pane { max-height: 38vh; max-height: 38dvh; border-right: 0; border-bottom: 1px solid var(--darl-agent-border); }.darl-agent-skill-editor { min-height: 500px; }.darl-agent-skill-files { min-height: 270px; } }
+@media(max-width: 700px) { .darl-agent-skill-manager { padding: 0; place-items: stretch; }.darl-agent-skill-manager-card { inset: 0; width: 100%; height: 100vh; height: 100dvh; border-radius: 0; }.darl-agent-skill-manager-body { grid-template-columns: 1fr; overflow: auto; }.darl-agent-skill-list-pane { max-height: 38vh; max-height: 38dvh; border-right: 0; border-bottom: 1px solid var(--darl-agent-border); }.darl-agent-skill-editor { min-height: 650px; overflow: visible; padding: 14px; }.darl-agent-skill-files { flex: none; grid-template-columns: minmax(0, 1fr); grid-template-rows: 160px 360px; min-height: 520px; }.darl-agent-skill-files > aside { border-right: 0; border-bottom: 1px solid var(--darl-agent-border); }.darl-agent-skill-file-preview { padding: 18px; } }
 
 .darl-agent-tool-confirm { display: grid; gap: 8px; padding: 0 9px 10px; color: var(--darl-agent-muted); font-size: 11px; }
 .darl-agent-tool-confirm > div { display: flex; flex-wrap: wrap; gap: 8px; }

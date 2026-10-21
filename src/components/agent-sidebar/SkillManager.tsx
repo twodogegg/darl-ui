@@ -5,6 +5,7 @@ import { Button } from '../ui/Button';
 import { Switch } from '../ui/FormControls';
 import type { AgentSkill, AgentSkillResource } from './types';
 import { importSkillPackage, newSkillDraft, nextSkillVersion, validateSkill } from './skill-package';
+import { SkillFileTree, SkillMarkdown } from './SkillFiles';
 
 type Filter = 'all' | 'favorite' | 'mine' | 'builtin';
 type ImportConflict = { preview: AgentSkill; existing: AgentSkill };
@@ -26,6 +27,7 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [resourcePath, setResourcePath] = useState<string | null>(null);
+  const [fileMode, setFileMode] = useState<'preview' | 'edit'>('preview');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [importConflict, setImportConflict] = useState<ImportConflict | null>(null);
@@ -55,6 +57,7 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
     setSelectedId(initial?.id || null);
     setDraft(initial ? { ...initial, resources: initial.resources?.map((resource) => ({ ...resource })) } : newSkillDraft());
     setResourcePath(null);
+    setFileMode(initial ? 'preview' : 'edit');
     setError('');
     setNotice('');
     setImportConflict(null);
@@ -69,11 +72,20 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
   const resources = draft.resources || [];
   const currentResource = resources.find((resource) => resource.path === resourcePath);
   const isBuiltin = selected?.scope === 'builtin';
+  const filePath = currentResource?.path ?? 'SKILL.md';
+  const fileContent = currentResource ? currentResource.content : draft.instructions || '';
+  const isMarkdown = /\.(md|markdown)$/i.test(filePath);
+  const isBinary = currentResource?.encoding === 'base64';
+  const selectFile = (path: string) => {
+    setResourcePath(path === 'SKILL.md' ? null : path);
+    setFileMode(/\.(md|markdown)$/i.test(path) ? 'preview' : 'edit');
+  };
   const select = (skill: AgentSkill) => {
     if (dirty && !window.confirm('当前 Skill 有未保存修改，是否放弃？')) return;
     setSelectedId(skill.id);
     setDraft({ ...skill, resources: skill.resources?.map((resource) => ({ ...resource })) });
     setResourcePath(null);
+    setFileMode('preview');
     setError('');
     setNotice('');
   };
@@ -82,6 +94,7 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
     setSelectedId(null);
     setDraft(newSkillDraft());
     setResourcePath(null);
+    setFileMode('edit');
     setError('');
     setNotice('');
   };
@@ -173,7 +186,7 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
   };
   const updateResource = (patch: Partial<AgentSkillResource>) => {
     if (!currentResource) return;
-    if (patch.path) setResourcePath(patch.path);
+    if (patch.path !== undefined) setResourcePath(patch.path);
     setDraft((current) => ({ ...current, resources: (current.resources || []).map((resource) => resource === currentResource ? { ...resource, ...patch } : resource) }));
   };
 
@@ -194,7 +207,18 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
         <section className="darl-agent-skill-editor">
           <div className="darl-agent-skill-editor-heading"><div><span className="darl-agent-manager-eyebrow">{selectedId ? 'EDIT SKILL' : 'NEW SKILL'}</span><h3>{draft.name || '新建 Skill'}</h3></div><div className="darl-agent-skill-editor-actions">{selected && !isBuiltin && <Button variant="ghost" size="sm" onClick={() => void remove()}><Trash2 data-icon="inline-start" />删除</Button>}</div></div>
           <div className="darl-agent-skill-form"><label><span>名称</span><input value={draft.name || ''} disabled={isBuiltin} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="例如：代码审查" /></label><label><span>描述</span><textarea value={draft.description || ''} disabled={isBuiltin} rows={2} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="说明什么时候使用这个 Skill" /></label><div className="darl-agent-skill-auto-invocation"><Switch aria-label="允许自动调用" checked={draft.allowImplicitInvocation !== false} onChange={(event) => setDraft({ ...draft, allowImplicitInvocation: event.target.checked })}>允许自动调用</Switch><small>关闭后，只有在聊天中手动 @ 引用时才会使用。</small></div></div>
-          <div className="darl-agent-skill-files"><aside><div className="darl-agent-skill-files-heading"><strong>文件</strong><Button variant="ghost" size="sm" disabled={isBuiltin} onClick={() => { const path = `references/resource-${resources.length + 1}.md`; setDraft({ ...draft, resources: [...resources, { path, content: '' }] }); setResourcePath(path); }}><Plus data-icon="inline-start" />资源</Button></div><button type="button" className={!resourcePath ? 'is-selected' : ''} onClick={() => setResourcePath(null)}><FileText />SKILL.md</button>{resources.map((resource) => <button type="button" key={resource.path} className={resource.path === resourcePath ? 'is-selected' : ''} onClick={() => setResourcePath(resource.path)}><FolderOpen />{resource.path}</button>)}</aside><div className="darl-agent-skill-file-editor">{currentResource ? <><div className="darl-agent-skill-file-title"><input value={currentResource.path} disabled={isBuiltin} onChange={(event) => updateResource({ path: event.target.value })} /><Button variant="ghost" size="icon" disabled={isBuiltin} aria-label="删除资源" onClick={() => { setDraft({ ...draft, resources: resources.filter((resource) => resource !== currentResource) }); setResourcePath(null); }}><Trash2 /></Button></div><textarea value={currentResource.encoding === 'base64' ? '二进制资源无法在此编辑' : currentResource.content} disabled={isBuiltin || currentResource.encoding === 'base64'} onChange={(event) => updateResource({ content: event.target.value })} aria-label={`${currentResource.path} 内容`} /> </> : <><div className="darl-agent-skill-file-title"><strong>SKILL.md</strong><span>Markdown 指令</span></div><textarea value={draft.instructions || ''} disabled={isBuiltin} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} aria-label="SKILL.md 内容" placeholder="写下输入要求、执行流程和输出格式…" /></>}</div></div>
+          <div className="darl-agent-skill-files">
+            <aside><div className="darl-agent-skill-files-heading"><strong>文件 <span>{resources.length + 1}</span></strong><Button variant="ghost" size="sm" disabled={isBuiltin} onClick={() => { let index = resources.length + 1; while (resources.some((resource) => resource.path === `references/resource-${index}.md`)) index += 1; const path = `references/resource-${index}.md`; setDraft({ ...draft, resources: [...resources, { path, content: '' }] }); setResourcePath(path); setFileMode('edit'); }}><Plus data-icon="inline-start" />资源</Button></div>
+              <SkillFileTree key={draft.id} paths={['SKILL.md', ...resources.map((resource) => resource.path)]} selectedPath={filePath} onSelect={selectFile} />
+            </aside>
+            <div className="darl-agent-skill-file-editor">
+              <div className="darl-agent-skill-file-title"><FileText />{currentResource && fileMode === 'edit' ? <input aria-label="资源路径" value={currentResource.path} disabled={isBuiltin} onChange={(event) => updateResource({ path: event.target.value })} /> : <strong title={filePath}>{filePath}</strong>}
+                {!isBinary && <div className="darl-agent-skill-file-modes" role="group" aria-label="文件显示方式">{isMarkdown && <button type="button" aria-pressed={fileMode === 'preview'} onClick={() => setFileMode('preview')}>预览</button>}<button type="button" aria-pressed={fileMode === 'edit' || !isMarkdown} onClick={() => setFileMode('edit')}>{isBuiltin ? '源码' : '编辑'}</button></div>}
+                {currentResource && !isBuiltin && <Button variant="ghost" size="icon" aria-label="删除资源" onClick={() => { setDraft({ ...draft, resources: resources.filter((resource) => resource !== currentResource) }); setResourcePath(null); }}><Trash2 /></Button>}
+              </div>
+              {isBinary ? <div className="darl-agent-skill-file-empty"><FileText /><strong>{filePath.split('/').pop()}</strong><span>二进制资源无法在此编辑</span></div> : isMarkdown && fileMode === 'preview' ? <div className="darl-agent-skill-file-preview" key={filePath}>{fileContent.trim() ? <SkillMarkdown content={fileContent} filePath={filePath} resources={resources} onSelect={selectFile} /> : <p className="darl-agent-empty">暂无内容{!isBuiltin && '，点击「编辑」开始编写。'}</p>}</div> : <textarea value={fileContent} readOnly={isBuiltin} spellCheck={false} onChange={(event) => currentResource ? updateResource({ content: event.target.value }) : setDraft({ ...draft, instructions: event.target.value })} aria-label={`${filePath} 内容`} placeholder="写下输入要求、执行流程和输出格式…" />}
+            </div>
+          </div>
           <div className="darl-agent-skill-manager-feedback" role="status">{error ? <span className="is-error">{error}</span> : notice || (dirty ? '有未保存的修改' : 'Skill 已保存')}</div>
           <footer className="darl-agent-skill-manager-footer"><span>{isBuiltin ? '内置 Skill 只能修改自动调用设置。' : '保存后会增加版本号。'}</span><div><Button variant="outline" onClick={close}>关闭</Button><Button disabled={!dirty} onClick={() => void save()}>保存修改</Button></div></footer>
         </section>

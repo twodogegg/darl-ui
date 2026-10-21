@@ -1,4 +1,5 @@
 import type { AgentErrorInfo, AgentErrorStage } from '../../../src/index';
+import { redactMessage } from './failure-log';
 
 export class AgentFailure extends Error {
   readonly stage: AgentErrorStage;
@@ -59,6 +60,15 @@ export function createAgentError(stage: AgentErrorStage, reason: unknown, contex
     retryable: context.retryable ?? custom?.retryable ?? (resolvedStage !== 'validation' && resolvedStage !== 'tool-validation' && resolvedStage !== 'cancellation'),
     suggestion: context.suggestion || custom?.suggestion || suggestions[resolvedStage],
   };
+}
+
+export function commandResultError(result: { status: string; exitCode: number | null; output: string }, context: { requestId?: string; runId?: string; parentRunId?: string; key?: string } = {}) {
+  const timedOut = result.status === 'timed_out';
+  const summary = timedOut ? '命令执行超时' : result.status === 'failed' ? '命令启动失败' : `命令已退出，退出码：${result.exitCode ?? '未知'}`;
+  const message = redactMessage(`${summary}${result.output.trim() ? `\n命令输出：\n${result.output}` : ''}`, context.key);
+  return createAgentError(timedOut ? 'timeout' : 'runtime', new Error(message), {
+    ...context, code: timedOut ? 'COMMAND_TIMEOUT' : 'COMMAND_FAILED', message, retryable: false,
+  });
 }
 
 export function failure(stage: AgentErrorStage, code: string, message: string, retryable = true, suggestion?: string) {
