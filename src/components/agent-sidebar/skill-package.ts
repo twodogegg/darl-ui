@@ -4,11 +4,11 @@ import type { AgentSkill, AgentSkillResource } from './types';
 
 const MAX_EXPANDED = 20 * 1024 * 1024;
 const MAX_FILE = 2 * 1024 * 1024;
-const ignored = (path: string) => path.split('/').some((part) => part === '__MACOSX' || part === '.skillhub' || part === '.DS_Store');
+export const skillPathIgnored = (path: string) => path.split('/').some((part) => ['__MACOSX', '.skillhub', '.DS_Store', '.git', 'node_modules'].includes(part));
 const newId = () => crypto.randomUUID();
 
 export function skillPathValid(path: string) {
-  return !!path && !/[\\:\u0000-\u001f]/.test(path) && path.split('/').every((part) => !!part && !part.startsWith('.'));
+  return !!path && !/[\\:\u0000-\u001f]/.test(path) && path.split('/').every((part) => !!part && part !== '.' && part !== '..');
 }
 function assertPath(path: string) {
   if (!skillPathValid(path)) throw new Error(`请使用安全的相对路径：${path}`);
@@ -48,7 +48,7 @@ export function validateSkill(skill: AgentSkill) {
   if ((skill.resources?.length || 0) > 100) throw new Error('最多允许 100 个资源文件');
   for (const resource of skill.resources || []) {
     assertPath(resource.path);
-    if (!/^(references|scripts|assets|agents)\//.test(resource.path)) throw new Error('资源必须放在 references/、scripts/、assets/ 或 agents/ 下');
+    if (resource.path.toLowerCase() === 'skill.md') throw new Error('资源不能覆盖 SKILL.md');
     const key = resource.path.toLowerCase();
     if (paths.has(key)) throw new Error(`资源路径重复：${resource.path}`);
     paths.add(key);
@@ -86,7 +86,7 @@ async function readEntries(files: File[]): Promise<Entry[]> {
   if (files.length === 1 && /\.zip$/i.test(first.name)) {
     if (first.size > 10 * 1024 * 1024) throw new Error('Skill ZIP 不能超过 10 MB');
     const entries = unzipSync(new Uint8Array(await first.arrayBuffer()), { filter(entry) {
-      if (ignored(entry.name) || entry.name.endsWith('/')) return false;
+      if (skillPathIgnored(entry.name) || entry.name.endsWith('/')) return false;
       check(entry.name, entry.originalSize);
       return true;
     } });
@@ -95,7 +95,7 @@ async function readEntries(files: File[]): Promise<Entry[]> {
   const entries: Entry[] = [];
   for (const file of files) {
     const path = file.webkitRelativePath || file.name;
-    if (ignored(path)) continue;
+    if (skillPathIgnored(path)) continue;
     check(path, file.size);
     entries.push({ path, bytes: new Uint8Array(await file.arrayBuffer()) });
   }
@@ -114,10 +114,9 @@ export async function importSkillPackage(files: File[]): Promise<AgentSkill> {
   for (const entry of entries) {
     if (entry === manifest) continue;
     const path = entry.path.slice(base.length);
-    if (!entry.path.startsWith(base) || !/^(references|scripts|assets|agents)\//.test(path)) throw new Error(`Skill 包包含不支持的文件：${entry.path}`);
+    if (!entry.path.startsWith(base)) throw new Error(`文件不在 Skill 目录内：${entry.path}`);
     try { resources.push({ path, content: text(entry.bytes, path) }); }
     catch (error) {
-      if (!path.startsWith('assets/')) throw error;
       let binary = '';
       for (const byte of entry.bytes) binary += String.fromCharCode(byte);
       resources.push({ path, content: btoa(binary), encoding: 'base64' });

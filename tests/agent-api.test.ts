@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { LocalStorage } from '../examples/agent-chat/server/storage';
 import { callMcpToolWithRetry, createApi, findAttachedImageForUpload, isRetryableMcpError, mcpResultError } from '../examples/agent-chat/server/api';
 
 async function withApi(directory: string, promptFile: string, test: (request: (path: string, body?: unknown, method?: string) => Promise<Response>) => Promise<void>) {
@@ -34,6 +35,59 @@ function dbJson<T>(directory: string, key: string): T {
 }
 
 describe('Agent configuration API', () => {
+  it('exposes the actual runtime schemas alongside media tools', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'darl-runtime-tools-'));
+    const promptFile = join(directory, 'system.md');
+    await writeFile(promptFile, '默认提示词');
+    try {
+      await withApi(directory, promptFile, async (request) => {
+        const tools = await (await request('tools')).json() as Array<Record<string, unknown>>;
+        expect(tools).toEqual(expect.arrayContaining([
+          expect.objectContaining({ name: 'builtin_load_skill', risk: 'read', appId: 'builtin:runtime' }),
+          expect.objectContaining({ name: 'builtin_run_command', risk: 'write', inputSchema: expect.objectContaining({ required: ['command'] }) }),
+          expect.objectContaining({ name: 'builtin_generate_media' }),
+        ]));
+        expect(await (await request('approval-settings')).json()).toEqual({ mode: 'auto' });
+      });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
+  it('persists approval modes, rejects invalid updates and refuses stale chat policies', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'darl-approval-'));
+    const promptFile = join(directory, 'system.md');
+    await writeFile(promptFile, '默认提示词');
+    try {
+      await withApi(directory, promptFile, async (request) => {
+        for (const mode of ['ask', 'auto', 'full']) {
+          expect(await (await request('approval-settings', { mode })).json()).toEqual({ mode });
+          expect(await (await request('approval-settings')).json()).toEqual({ mode });
+        }
+        expect((await request('approval-settings', { mode: ['full'] })).ok).toBe(false);
+        expect(await (await request('approval-settings')).json()).toEqual({ mode: 'full' });
+        expect((await request('chat', { approvalMode: 'ask', messages: [] })).status).toBe(409);
+      });
+      await withApi(directory, promptFile, async (request) => {
+        expect(await (await request('approval-settings')).json()).toEqual({ mode: 'full' });
+      });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
+  it('persists a conversation Agent and refuses switching it in a chat request', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'darl-bound-agent-'));
+    const promptFile = join(directory, 'system.md');
+    await writeFile(promptFile, '默认提示词');
+    try {
+      await withApi(directory, promptFile, async request => {
+        const sessions = [{ id: 'one', agentId: 'art', title: '会话', messages: [] }];
+        expect((await request('state', { sessions, skills: [], activeId: 'one' })).ok).toBe(true);
+        expect((await (await request('state')).json()).sessions).toEqual(sessions);
+        const denied = await request('chat', { sessionId: 'one', agentId: 'writer', messages: [{ role: 'user', content: '你好' }] });
+        expect(denied.status).toBe(409);
+        expect((await denied.json()).error).toContain('Agent 已固定');
+      });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
   it('keeps safe MCP error details visible while masking credentials', () => {
     expect(mcpResultError({ content: [{ type: 'text', text: 'Asset Hub API 404: asset 不存在或无权访问' }] })).toBe('Asset Hub API 404: asset 不存在或无权访问');
     expect(mcpResultError({ content: [{ type: 'text', text: 'request ahk_private failed' }] }, 'ahk_private')).toBe('request [已隐藏] failed');
@@ -160,15 +214,49 @@ describe('Agent configuration API', () => {
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
+  it('migrates legacy Skills and protects the default creator from state autosaves and edits', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'darl-skill-migration-'));
+    const promptFile = join(directory, 'system.md');
+    await writeFile(promptFile, '默认提示词');
+    const storage = new LocalStorage(directory);
+    storage.setConfig('clientState', { sessions: [], skills: [{ id: 'legacy', name: '旧技能', instructions: '保留原始数据' }] });
+    try {
+      await withApi(directory, promptFile, async request => {
+        const list = await (await request('skills')).json();
+        expect(list.map((item: { id: string }) => item.id)).toEqual(['builtin:skill-creator', 'legacy']);
+        expect(list[0].resources.some((item: { path: string }) => item.path === 'scripts/quick_validate.py')).toBe(true);
+        expect((await request('skills', { skill: { ...list[0], instructions: '篡改默认技能' } })).status).toBe(400);
+        expect((await request('skills/builtin%3Askill-creator', undefined, 'DELETE')).status).toBe(400);
+        expect((await request('skills', { skill: { ...list[0], favorite: true, allowImplicitInvocation: false, version: '1.1' } })).ok).toBe(true);
+        expect((await request('state', { sessions: [], skills: [] })).ok).toBe(true);
+      });
+      await withApi(directory, promptFile, async request => {
+        const list = await (await request('skills')).json();
+        expect(list.map((item: { id: string }) => item.id)).toEqual(['builtin:skill-creator', 'legacy']);
+        expect(list[0].favorite).toBe(true);
+        expect(list[0].allowImplicitInvocation).toBe(false);
+        expect(list[0].version).toBe('1.1');
+      });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
   it('persists chat state and media tasks in the local database', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'darl-local-state-'));
     const promptFile = join(directory, 'system.md');
     await writeFile(promptFile, '默认提示词');
     try {
       await withApi(directory, promptFile, async (request) => {
-        const state = { sessions: [{ id: 's1', title: '小说', messages: [] }], activeId: 's1', skills: [{ id: 'skill-1', name: '编剧', instructions: '按场次输出' }] };
+        const state = { sessions: [{ id: 's1', title: '小说', messages: [] }], activeId: 's1', skills: [] };
+        const skill = { id: 'skill-1', name: '编剧', description: '按场次写作', instructions: '按场次输出', version: '1.0' };
+        expect((await request('skills', { skill })).ok).toBe(true);
         expect((await request('state', state)).status).toBe(200);
-        expect(await (await request('state')).json()).toEqual(state);
+        const restored = await (await request('state')).json();
+        expect(restored.sessions).toEqual(state.sessions);
+        expect(restored.activeId).toBe(state.activeId);
+        expect(restored.skills.map((item: { id: string }) => item.id)).toEqual(['builtin:skill-creator', 'skill-1']);
+        expect(dbJson<unknown[]>(directory, 'skills')).toHaveLength(1);
+        expect((await request('skills/skill-1', undefined, 'DELETE')).ok).toBe(true);
+        expect((await (await request('skills')).json()).map((item: { id: string }) => item.id)).toEqual(['builtin:skill-creator']);
         const tasks = [{ id: 'task-1', title: '第一集', batches: [] }];
         expect((await request('media-tasks', { tasks })).status).toBe(200);
         expect(await (await request('media-tasks')).json()).toEqual(tasks);

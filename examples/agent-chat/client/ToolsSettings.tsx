@@ -18,28 +18,28 @@ type ToolDescriptor = {
 
 /** Presentation only; name, description and schema come from the server. */
 const PRESENTATION: Record<string, { title: string; risk: ToolRisk; actions: string }> = {
-  builtin_generate_media: { title: '提交媒体生成任务', risk: 'write', actions: '需要有效的媒体模型绑定；图片和视频可在二次确认设置中调整。' },
+  builtin_generate_media: { title: '提交媒体生成任务', risk: 'write', actions: '需要有效的媒体模型绑定；图片和视频遵循统一审批模式。' },
   builtin_get_media_task: { title: '查询媒体任务状态', risk: 'read', actions: '只读取本机媒体任务，不会创建新的生成任务。' },
 };
 
-/** The same MEDIA_TOOLS the model receives, so this page cannot drift from it. */
-type ServerTool = { name: string; description?: string; inputSchema?: JsonSchema };
+/** The same builtin schemas the model receives, so this page cannot drift from it. */
+type ServerTool = { name: string; title?: string; description?: string; inputSchema?: JsonSchema; risk?: ToolRisk; appId?: string; appName?: string };
 
 function descriptor(tool: ServerTool): ToolDescriptor {
   const meta = PRESENTATION[tool.name] ?? { title: tool.name, risk: 'write', actions: '' };
   return {
     name: tool.name,
-    title: meta.title,
+    title: tool.title || meta.title,
     description: tool.description,
-    risk: meta.risk,
+    risk: tool.risk || meta.risk,
     inputSchema: tool.inputSchema,
-    appId: 'builtin:media',
-    appName: '内置 / 媒体生成',
+    appId: tool.appId || 'builtin:media',
+    appName: tool.appName || '内置 / 媒体生成',
     source: 'builtin',
   };
 }
 
-const riskLabels: Record<ToolRisk, string> = { read: '只读', write: '执行前确认', dangerous: '高风险' };
+const riskLabels: Record<ToolRisk, string> = { read: '只读', write: '写操作', dangerous: '高风险' };
 
 function formatJson(value: unknown) {
   return JSON.stringify(value ?? {}, null, 2);
@@ -93,14 +93,14 @@ export function ToolsSettings() {
     <div className="darl-tools-stats" aria-label="工具统计">
       <div><span>可用工具</span><strong>{builtinTools.length}</strong></div>
       <div><span>内置工具</span><strong>{builtinTools.length}</strong></div>
-      <div><span>需要确认</span><strong>{builtinTools.filter((tool) => tool.risk === 'write').length}</strong></div>
+      <div><span>写操作</span><strong>{builtinTools.filter((tool) => tool.risk === 'write').length}</strong></div>
       <div><span>只读工具</span><strong>{builtinTools.filter((tool) => tool.risk === 'read').length}</strong></div>
     </div>
 
     <div className="darl-tools-toolbar">
       <label><Search size={15} aria-hidden="true" /><span className="darl-visually-hidden">搜索工具</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称或描述" /></label>
       <div className="darl-tools-filters" role="tablist" aria-label="工具来源">
-        {([['all', '全部'], ['write', '需确认'], ['read', '只读']] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={filter === value} onClick={() => setFilter(value)}>{label}<small>{value === 'all' ? builtinTools.length : builtinTools.filter((tool) => tool.risk === value).length}</small></button>)}
+        {([['all', '全部'], ['write', '写操作'], ['read', '只读']] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={filter === value} onClick={() => setFilter(value)}>{label}<small>{value === 'all' ? builtinTools.length : builtinTools.filter((tool) => tool.risk === value).length}</small></button>)}
       </div>
     </div>
 
@@ -121,7 +121,7 @@ export function ToolsSettings() {
             <div className="darl-tool-schema-grid">
               <div><h3>输入参数</h3><pre>{formatJson(tool.inputSchema)}</pre></div>
             </div>
-            <div className="darl-tool-config"><span>配置</span><strong>{PRESENTATION[tool.name]?.actions || '—'}</strong></div>
+            <div className="darl-tool-config"><span>配置</span><strong>{PRESENTATION[tool.name]?.actions || (tool.risk === 'read' ? '读取当前会话的工作区或技能目录。' : '在输入框或「审批模式」中配置工具执行审批。命令在本机运行，不提供沙箱隔离。')}</strong></div>
           </div>}
         </article>;
       })}

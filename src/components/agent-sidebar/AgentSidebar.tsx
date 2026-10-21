@@ -8,6 +8,7 @@ import remarkGfm from 'remark-gfm';
 import { Button } from '../ui/Button';
 import { InteractiveConfirmDialog } from '../interactive-confirm-dialog/InteractiveConfirmDialog';
 import type { AgentApplication, AgentAttachment, AgentErrorInfo, AgentExecutionEvent, AgentImageAttachment, AgentSession, AgentSidebarProps, AgentSkill, AgentToolCall } from './types';
+import { ApprovalModeSelector } from './ApprovalModeSelector';
 import { importSkillPackage } from './skill-package';
 
 const emptySkills: AgentSkill[] = [];
@@ -173,24 +174,26 @@ function Markdown({ content, onCopyCode, depth = 0 }: { content: string; onCopyC
 }
 
 function ToolCallCard({ call }: { call: AgentToolCall }) {
-  const status = { pending: '等待调用', running: '执行中', retrying: '重试中', success: '已完成', error: '调用失败', confirmation: '等待确认' }[call.status];
-  const StatusIcon = call.status === 'running' || call.status === 'retrying' ? LoaderCircle : call.status === 'error' ? AlertCircle : call.status === 'success' ? Check : Wrench;
+  const state = call.errorInfo?.stage === 'cancellation' ? 'cancelled' : call.status;
+  const status = { pending: '等待调用', running: '执行中', retrying: '重试中', success: '已完成', error: '调用失败', confirmation: '等待确认', cancelled: call.errorInfo?.code === 'TOOL_REJECTED' ? '已拒绝' : '已停止' }[state];
+  const StatusIcon = state === 'running' || state === 'retrying' ? LoaderCircle : state === 'error' ? AlertCircle : state === 'success' ? Check : state === 'cancelled' ? Square : Wrench;
   const delegationTask = call.appId.startsWith('agent:') && call.input && typeof call.input === 'object' && 'task' in call.input && typeof call.input.task === 'string' ? call.input.task : '';
-  return <article className={`darl-agent-tool-call darl-agent-tool-call--${call.status}`}>
+  return <article className={`darl-agent-tool-call darl-agent-tool-call--${state}`}>
     <div className="darl-agent-tool-summary">
       <span className="darl-agent-tool-icon"><StatusIcon size={14} className={call.status === 'running' || call.status === 'retrying' ? 'darl-agent-spin' : undefined} /></span>
-      <span className="darl-agent-tool-title"><strong>{call.agentId ? `子 Agent · ${call.appName}` : call.appName}</strong><span>{call.toolTitle || call.toolName}</span></span>
+      <span className="darl-agent-tool-title"><strong>{call.agentId ? `协作 Agent · ${call.appName}` : call.appName}</strong><span>{call.toolTitle || call.toolName}</span></span>
       <span className="darl-agent-tool-status">{status}</span>
     </div>
     {delegationTask && <div className="darl-agent-tool-detail">
       {delegationTask && <div><span>委派任务</span><pre>{delegationTask}</pre></div>}
     </div>}
-    {call.errorInfo ? <AgentErrorCard error={call.errorInfo} /> : call.error && <p className="darl-agent-tool-error">{call.error}</p>}
+    {call.errorInfo ? <AgentErrorCard error={call.errorInfo} /> : call.error && state !== 'cancelled' && <p className="darl-agent-tool-error">{call.error}</p>}
   </article>;
 }
 
 function AgentErrorCard({ error }: { error: AgentErrorInfo }) {
-  const stage = { model: '模型请求', 'mcp-connection': 'MCP 连接', 'mcp-tool': 'MCP 工具', delegation: '子 Agent 委派', 'tool-validation': '工具参数', validation: '请求校验', cancellation: '已取消', timeout: '请求超时' }[error.stage];
+  if (error.stage === 'cancellation') return <p className="darl-agent-status-note" role="status">{error.message}</p>;
+  const stage = { model: '模型请求', 'mcp-connection': 'MCP 连接', 'mcp-tool': 'MCP 工具', runtime: '本机执行', delegation: '子 Agent 委派', 'tool-validation': '工具参数', validation: '请求校验', cancellation: '已取消', timeout: '请求超时' }[error.stage];
   return <div className="darl-agent-error-card" role="alert"><div className="darl-agent-error-card-head"><AlertCircle size={15} /><strong>{stage}失败</strong><span>{error.retryable ? '可以重试' : '请修改后重试'}</span></div><p>{error.message}</p><div className="darl-agent-error-card-meta"><span>错误码：{error.code}</span>{error.requestId && <span>requestId：{error.requestId}</span>}{error.runId && <span>runId：{error.runId}</span>}</div><small>{error.suggestion}</small></div>;
 }
 
@@ -199,7 +202,7 @@ const executionStatusText: Record<AgentExecutionEvent['status'], string> = {
 };
 
 function executionSourceText(event: AgentExecutionEvent) {
-  return event.source === 'tool' ? 'MCP 工具' : event.agentId ? '子 Agent' : '主 Agent';
+  return event.source === 'tool' ? '工具' : event.agentId ? '协作 Agent' : '主 Agent';
 }
 
 function executionDuration(event: AgentExecutionEvent, now: number, events: AgentExecutionEvent[] = []) {
@@ -264,7 +267,7 @@ function ExecutionTimeline({ events, calls = [] }: { events: AgentExecutionEvent
         const depth = Math.min(3, (runDepth.get(latest.runId || '') || 0) + (latest.source === 'tool' ? 1 : 0));
         return <li key={activity.key} className={`darl-agent-execution-item darl-agent-execution-item--${latest.status}${isLive ? '' : ' is-history'}`} style={{ '--darl-agent-depth': depth } as CSSProperties}>
           <div className="darl-agent-execution-row"><span className="darl-agent-execution-dot">{isLive && (latest.status === 'running' || latest.status === 'retrying') ? <LoaderCircle size={12} className="darl-agent-spin" /> : latest.status === 'success' ? <Check size={12} /> : latest.status === 'error' || latest.status === 'cancelled' || latest.status === 'timeout' ? <AlertCircle size={12} /> : <ChevronRight size={12} />}</span><span className="darl-agent-execution-copy"><strong>{executionSourceText(latest)}</strong><span>{latest.name}</span></span>{retryCount > 0 && <span className="darl-agent-execution-retry">重试 {retryCount}</span>}<span className="darl-agent-execution-state">{executionStatusText[latest.status]}</span><time>{formatDuration(executionDuration(latest, now, events))}</time></div>
-          {hasDetails && <details className="darl-agent-execution-details"><summary>查看详情</summary>{first.summary && <p>{first.summary}</p>}{transitions.length > 1 && <small className="darl-agent-execution-transitions">{transitions.join(' → ')}</small>}{latest.error && <div className="darl-agent-execution-error"><strong>{latest.error.message}</strong><small>{latest.error.code} · {latest.error.suggestion}</small></div>}{confirmation && <ToolCallCard call={confirmation} />}</details>}
+          {hasDetails && <details className="darl-agent-execution-details"><summary>查看详情</summary>{first.summary && <p>{first.summary}</p>}{transitions.length > 1 && <small className="darl-agent-execution-transitions">{transitions.join(' → ')}</small>}{latest.error && (latest.error.stage === 'cancellation' ? <p className="darl-agent-status-note">{latest.error.message}</p> : <div className="darl-agent-execution-error"><strong>{latest.error.message}</strong><small>{latest.error.code} · {latest.error.suggestion}</small></div>)}{confirmation && <ToolCallCard call={confirmation} />}</details>}
         </li>;
       })}
     </ol>}
@@ -275,23 +278,23 @@ function Picker({ title, children, onClose, className = '' }: { title: string; c
   return <div className={`darl-agent-picker ${className}`.trim()} role="dialog" aria-label={title}><div className="darl-agent-picker-head"><strong>{title}</strong><Button variant="ghost" size="icon" aria-label={`关闭${title}`} onClick={onClose}><X size={16} /></Button></div>{children}</div>;
 }
 
-function AgentPickerAvatar({ agent }: { agent: { name: string; avatar?: string } }) {
+function AgentAvatar({ agent }: { agent: { name: string; avatar?: string } }) {
   const value = agent.avatar;
-  if (value?.startsWith('/') || value?.startsWith('http') || value?.startsWith('data:image/')) return <img className="darl-agent-picker-avatar" src={value} alt="" />;
-  return <span className="darl-agent-picker-avatar" aria-hidden="true">{value || agent.name.slice(0, 1).toUpperCase()}</span>;
+  if (value?.startsWith('/') || value?.startsWith('http') || value?.startsWith('data:image/')) return <img className="darl-agent-header-avatar" src={value} alt={`${agent.name}头像`} />;
+  return <span className="darl-agent-header-avatar" aria-hidden="true">{value || agent.name.slice(0, 1).toUpperCase()}</span>;
 }
 
 function statusText(status: AgentApplication['status']): string {
   return status === 'connected' ? '已连接' : status === 'needs-auth' ? '需要授权' : '未连接';
 }
 
-export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, onSessionChange, onSessionRename, onSessionDelete, onNewSession, onSend, onRegenerate, onToolConfirm, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onFileUpload, uploadAttachment, models = [], agents = [], selectedAgentId: controlledAgentId, onSelectedAgentIdChange, onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
+export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, onSessionChange, onSessionRename, onSessionDelete, onNewSession, onSend, onRegenerate, onToolConfirm, approvalMode, onApprovalModeChange, approvalModePending = false, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onSkillCreate, onFileUpload, uploadAttachment, models = [], agents = [], selectedAgentId: controlledAgentId, onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
   const [view, setView] = useState<'chat' | 'history'>('chat');
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [handledConfirmation, setHandledConfirmation] = useState<string | null>(null);
   const [confirmError, setConfirmError] = useState('');
   const [expanded, setExpanded] = useState(false);
-  const [picker, setPicker] = useState<'add' | 'apps' | 'skills' | 'models' | 'effort' | 'agents' | null>(null);
+  const [picker, setPicker] = useState<'add' | 'apps' | 'skills' | 'models' | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
@@ -310,7 +313,6 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const skillsPropRef = useRef(skills);
 
   const [localModelId, setLocalModelId] = useState(models[0]?.id);
-  const [localAgentId, setLocalAgentId] = useState<string | null>(null);
   const [localEffort, setLocalEffort] = useState(models[0]?.reasoningEfforts?.[0] || '中');
   const [attachments, setAttachments] = useState<Record<string, File[]>>({});
   const [attachmentPreviews, setAttachmentPreviews] = useState<Record<string, string>>({});
@@ -335,10 +337,9 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
   const modelId = controlledModelId ?? localModelId;
   const selectedModel = models.find((model) => model.id === modelId) ?? models[0];
-  const selectableAgents = useMemo(() => agents.filter((agent) => (agent.type || 'main_agent') === 'main_agent' && agent.selectable !== false && agent.enabled !== false), [agents]);
-  const requestedAgentId = controlledAgentId ?? localAgentId;
-  const selectedAgent = selectableAgents.find((agent) => agent.id === requestedAgentId);
-  const agentId = selectedAgent?.id;
+  const requestedAgentId = activeSession?.agentId ?? controlledAgentId;
+  const selectedAgent = agents.find(agent => agent.id === requestedAgentId);
+  const agentId = requestedAgentId;
   const supportedEfforts = selectedModel?.reasoningEfforts ?? [];
   const preferredEffort = controlledEffort ?? localEffort;
   const effort = supportedEfforts.includes(preferredEffort) ? preferredEffort : supportedEfforts[0];
@@ -391,12 +392,11 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
 
   if (!open) return null;
   const setModelId = (id: string) => { setLocalModelId(id); onSelectedModelIdChange?.(id); };
-  const setAgentId = (id: string) => { setLocalAgentId(id || null); onSelectedAgentIdChange?.(id); setPicker(null); };
   const setEffort = (value: string) => { setLocalEffort(value); onSelectedReasoningEffortChange?.(value); };
   const copy = async (value: string, id: string) => { try { await navigator.clipboard.writeText(value); setCopyState(id); setCopyNotice('已复制'); window.clearTimeout(copyTimer.current); copyTimer.current = window.setTimeout(() => { setCopyState((current) => current === id ? '' : current); setCopyNotice(''); }, 1200); } catch { setError('复制失败，请手动选择文本复制'); } };
   const submit = async () => {
     const content = draft.trim();
-    if ((!content && !files.length) || !activeSession || !onSend || isGenerating || submitting.current) return;
+    if ((!content && !files.length) || !activeSession || !onSend || isGenerating || approvalModePending || submitting.current) return;
     submitting.current = true; setPending(true); setError('');
     try {
       const imageFiles = files.filter((file) => file.type.startsWith('image/'));
@@ -420,7 +420,7 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
     setUploadKind(kind);
     const input = fileInput.current;
     if (!input) return;
-    input.accept = kind === 'skill' ? skillFileAccept : 'image/*,.png,.jpg,.jpeg,.webp,.gif';
+    input.accept = kind === 'skill' ? skillFileAccept : uploadAttachment ? '' : 'image/*,.png,.jpg,.jpeg,.webp,.gif';
     input.multiple = kind === 'file';
     input.click();
   };
@@ -458,8 +458,8 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
 
   return <ImagePreviewContext.Provider value={openImagePreview}><div className={`darl-agent-expanded-backdrop${expanded ? ' is-visible' : ''}`} aria-hidden="true" onClick={() => setExpanded(false)} /><aside ref={sidebarRef} className={`darl-agent-sidebar${expanded ? ' darl-agent-sidebar--expanded' : ''} ${className}`} role={expanded ? 'dialog' : 'complementary'} aria-modal={expanded ? 'true' : undefined} aria-label="Agent 辅助侧栏" onKeyDown={(event) => { if (event.key === 'Escape') { setPicker(null); setExpanded(false); } }}>
     <header className="darl-agent-header">
-      {view === 'history' ? <Button variant="ghost" size="icon" aria-label="返回当前对话" onClick={() => setView('chat')}><ArrowLeft size={17} /></Button> : <span className="darl-agent-brand-mark"><Bot size={17} /></span>}
-      <div className="darl-agent-heading"><strong>{view === 'history' ? '历史记录' : '网站助手'}</strong>{view === 'chat' && <span><i />辅助 Agent</span>}</div>
+      {view === 'history' ? <Button variant="ghost" size="icon" aria-label="返回当前对话" onClick={() => setView('chat')}><ArrowLeft size={17} /></Button> : <span className="darl-agent-brand-mark">{selectedAgent ? <AgentAvatar agent={selectedAgent} /> : <Bot size={17} />}</span>}
+      <div className="darl-agent-heading"><strong>{view === 'history' ? '历史记录' : selectedAgent?.name || (agentId ? 'Agent 不可用' : '网站助手')}</strong>{view === 'chat' && <span><i />辅助 Agent</span>}</div>
       <div className="darl-agent-header-actions">
         {view === 'chat' && <Button variant="ghost" size="icon" aria-label="新开对话" title="新开对话" onClick={createSession}><Plus size={17} /></Button>}
         {view === 'chat' && <Button variant="ghost" size="icon" aria-label="查看历史记录" title="历史记录" onClick={() => setView('history')}><History size={17} /></Button>}
@@ -475,37 +475,36 @@ export function AgentSidebar({ open, onOpenChange, sessions, activeSessionId, on
       {!filteredSessions.length && <p className="darl-agent-empty">没有匹配的对话</p>}
     </section> : <>
       <section ref={messagesRef} className="darl-agent-messages" aria-live="polite" onScroll={(event) => { const element = event.currentTarget; followOutput.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>
-        {!activeMessages.length && <div className="darl-agent-empty-state"><span className="darl-agent-empty-icon"><Sparkles size={22} /></span><h2>需要我帮你做什么？</h2><p>选择应用和 Skill，把它们插入消息中。</p></div>}
+        {!activeMessages.length && <div className="darl-agent-empty-state"><span className="darl-agent-empty-icon"><Sparkles size={22} /></span><h2>需要我帮你做什么？</h2><p>输入 @ 联系其他 Agent，或引用应用和 Skill。</p></div>}
         {activeMessages.map((message) => <article key={message.id} className={`darl-agent-message darl-agent-message--${message.role}`}>
           <div className="darl-agent-message-label">{message.role === 'user' ? '你' : 'Agent'}</div>
-          <div className="darl-agent-message-body">{message.streaming && !message.content && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{hasSubAgentActivity(message.timeline) ? <ExecutionTimeline events={message.timeline!} calls={message.toolCalls} /> : message.toolCalls?.map((call) => <ToolCallCard key={call.id} call={call} />)}{message.error && <AgentErrorCard error={message.error} />}{message.attachments?.map((attachment, index) => { const name = attachmentName(attachment); const fileId = typeof attachment === 'string' ? undefined : attachment.fileId; const url = fileId ? `/api/files/${fileId}` : typeof attachment === 'string' ? undefined : attachment.url; return url?.startsWith('data:image/') || url?.startsWith('http') || url?.startsWith('/api/files/') ? <figure className="darl-agent-image-attachment" key={`${name}-${index}`}><button type="button" className="darl-agent-image-trigger" onClick={() => openImagePreview({ src: url, alt: name })} title="点击放大预览"><img src={url} alt={name} loading="lazy" /></button></figure> : <span className="darl-agent-chip" key={`${name}-${index}`}><Paperclip size={12} />{name}</span>; })}</div>
+          <div className="darl-agent-message-body">{message.streaming && !message.content && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{hasSubAgentActivity(message.timeline) ? <ExecutionTimeline events={message.timeline!} calls={message.toolCalls} /> : message.toolCalls?.map((call) => <ToolCallCard key={call.id} call={call} />)}{message.error && <AgentErrorCard error={message.error} />}{message.attachments?.map((attachment, index) => { const name = attachmentName(attachment); const fileId = typeof attachment === 'string' ? undefined : attachment.fileId; const url = fileId ? `/api/files/${fileId}` : typeof attachment === 'string' ? undefined : attachment.url; const isImage = typeof attachment !== 'string' && (!attachment.type || attachment.type.startsWith('image/')); return isImage && url && /^(?:data:image\/|https?:\/\/|\/api\/files\/)/.test(url) ? <figure className="darl-agent-image-attachment" key={`${name}-${index}`}><button type="button" className="darl-agent-image-trigger" onClick={() => openImagePreview({ src: url, alt: name })} title="点击放大预览"><img src={url} alt={name} loading="lazy" /></button></figure> : <span className="darl-agent-chip" key={`${name}-${index}`}><Paperclip size={12} />{fileId ? <a href={`/api/files/${fileId}?download=1`}>{name}</a> : name}</span>; })}</div>
           {message.role === 'assistant' && !message.streaming && <div className="darl-agent-message-actions"><Button variant="ghost" size="sm" onClick={() => void copy(message.content, message.id)}><Clipboard size={13} />{copyState === message.id ? '已复制' : '复制'}</Button>{onRegenerate && <Button variant="ghost" size="sm" disabled={isGenerating} onClick={() => onRegenerate(message.id)}><RefreshCw size={13} />重新生成</Button>}</div>}
         </article>)}
         <div className="darl-agent-scroll-controls" aria-label="消息导航"><Button variant="ghost" size="icon" aria-label="滚动到顶部" title="滚动到顶部" onClick={() => scrollMessages('top')}><ArrowUp size={15} /></Button><Button variant="ghost" size="icon" aria-label="滚动到底部" title="滚动到底部" onClick={() => scrollMessages('bottom')}><ArrowDown size={15} /></Button></div>
       </section>
       <footer className="darl-agent-composer-shell">
 
-        <div className="darl-agent-contexts">{files.map((file, index) => { const preview = attachmentPreviews[`${file.name}:${file.size}:${file.lastModified}`]; return <span className="darl-agent-chip darl-agent-attachment-chip" key={index}>{preview && <img src={preview} alt="" /> }{!preview && <Paperclip size={12} />}{!preview && file.name}<button aria-label={`移除附件 ${file.name}`} onClick={() => setAttachments((current) => ({ ...current, [draftKey]: files.filter((_, i) => i !== index) }))}><X size={12} /></button></span>; })}</div><div className="darl-agent-composer"><AgentComposerInput applications={applications} skills={availableSkills} key={draftKey} value={draft} onChange={setDraft} onSubmit={() => void submit()} insertion={insertion} onInserted={() => setInsertion(null)} />
-          <div className="darl-agent-composer-controls"><Button variant="ghost" size="icon" aria-label="添加材料或能力" aria-expanded={picker === 'add'} onClick={() => setPicker(picker === 'add' ? null : 'add')}><Plus size={17} /></Button><span className="darl-agent-composer-spacer" />{selectableAgents.length > 0 && <Button variant="outline" size="sm" title="选择 Agent" onClick={() => setPicker(picker === 'agents' ? null : 'agents')}><span>{selectedAgent?.name || '选择 Agent'}</span><ChevronDown size={13} /></Button>}{models.length > 0 && <Button variant="outline" size="sm" title="选择模型" onClick={() => setPicker(picker === 'models' ? null : 'models')}><span>{selectedModel?.name || '选择模型'}</span><ChevronDown size={13} /></Button>}{supportedEfforts.length > 0 && <Button variant="outline" size="sm" title="选择推理等级" onClick={() => setPicker(picker === 'effort' ? null : 'effort')}><span>思考：{effort}</span><ChevronDown size={13} /></Button>}{isGenerating ? <Button variant="outline" size="icon" aria-label="停止生成" onClick={onStop}><Square size={14} /></Button> : <Button variant="default" size="icon" aria-label="发送消息" disabled={(!draft.trim() && !files.length) || !onSend || !activeSession || pending} onClick={submit}><Send size={16} /></Button>}</div>
+        <div className="darl-agent-contexts">{files.map((file, index) => { const preview = attachmentPreviews[`${file.name}:${file.size}:${file.lastModified}`]; return <span className="darl-agent-chip darl-agent-attachment-chip" key={index}>{preview && <img src={preview} alt="" /> }{!preview && <Paperclip size={12} />}{!preview && file.name}<button aria-label={`移除附件 ${file.name}`} onClick={() => setAttachments((current) => ({ ...current, [draftKey]: files.filter((_, i) => i !== index) }))}><X size={12} /></button></span>; })}</div><div className="darl-agent-composer"><AgentComposerInput agents={agents.filter(agent => agent.id !== agentId && agent.enabled !== false && agent.callable !== false)} applications={applications} skills={availableSkills} key={draftKey} value={draft} onChange={setDraft} onSubmit={() => void submit()} insertion={insertion} onInserted={() => setInsertion(null)} />
+          {approvalMode && onApprovalModeChange && <div className="darl-agent-approval-row"><ApprovalModeSelector value={approvalMode} onChange={onApprovalModeChange} disabled={isGenerating || pending || approvalModePending} /></div>}
+          <div className="darl-agent-composer-controls"><Button variant="ghost" size="icon" aria-label="添加材料或能力" aria-expanded={picker === 'add'} onClick={() => setPicker(picker === 'add' ? null : 'add')}><Plus size={17} /></Button><span className="darl-agent-composer-spacer" />{models.length > 0 && <Button variant="outline" size="sm" className="darl-agent-model-trigger" title="选择模型与思考等级" aria-expanded={picker === 'models'} onClick={() => setPicker(picker === 'models' ? null : 'models')}><span>{selectedModel?.name || '选择模型'}</span>{effort && <small>· {effort}</small>}<ChevronDown size={13} /></Button>}{isGenerating ? <Button variant="outline" size="icon" aria-label="停止生成" onClick={onStop}><Square size={14} /></Button> : <Button variant="default" size="icon" aria-label="发送消息" disabled={(!draft.trim() && !files.length) || !onSend || !activeSession || pending || approvalModePending} onClick={submit}><Send size={16} /></Button>}</div>
         </div>
-        {error && <p role="alert">{error}</p>}<small className="darl-agent-composer-note">@ 应用或 Skill · Enter 发送</small>
+        {error && <p role="alert">{error}</p>}<small className="darl-agent-composer-note">@ Agent、应用或 Skill · Enter 发送</small>
       </footer>
       {copyNotice && <div className="darl-agent-copy-toast" role="status" aria-live="polite">{copyNotice}</div>}
     </>}
 
-    {picker === 'add' && <Picker title="添加" onClose={closePicker}><div className="darl-agent-add-list"><button type="button" onClick={() => openFilePicker('file')}><Paperclip size={16} /><span><strong>上传图片</strong><small>支持 PNG、JPEG、WebP 和 GIF</small></span></button><button type="button" onClick={() => setPicker('apps')}><Wrench size={16} /><span><strong>选择应用</strong><small>启用网站的 MCP 工具</small></span></button><button type="button" onClick={() => setPicker('skills')}><Sparkles size={16} /><span><strong>选择 Skill</strong><small>选择可复用的工作流程</small></span></button></div></Picker>}
+    {picker === 'add' && <Picker title="添加" onClose={closePicker}><div className="darl-agent-add-list"><button type="button" onClick={() => openFilePicker('file')}><Paperclip size={16} /><span><strong>{uploadAttachment ? '上传文件' : '上传图片'}</strong><small>{uploadAttachment ? '上传图片、文档或其他任务材料' : '支持 PNG、JPEG、WebP 和 GIF'}</small></span></button><button type="button" onClick={() => setPicker('apps')}><Wrench size={16} /><span><strong>选择应用</strong><small>启用网站的 MCP 工具</small></span></button><button type="button" onClick={() => setPicker('skills')}><Sparkles size={16} /><span><strong>选择 Skill</strong><small>选择可复用的工作流程</small></span></button></div></Picker>}
     {picker === 'apps' && <Picker title="选择应用" onClose={closePicker}><div className="darl-agent-picker-list">{applications.map((app) => <button key={app.id} type="button" className="darl-agent-picker-row" aria-pressed={applicationIds.includes(app.id)} disabled={app.status !== undefined && app.status !== 'connected'} onClick={() => toggleApplication(app.id)}><span className="darl-agent-picker-icon">{app.icon || <Wrench size={15} />}</span><span className="darl-agent-picker-copy"><strong>{app.name}</strong><small>{app.description || `${app.tools?.length || 0} 个工具`} · {statusText(app.status)}</small></span>{applicationIds.includes(app.id) && <Check size={16} />}</button>)}{!applications.length && <p className="darl-agent-empty">暂无可用应用</p>}</div></Picker>}
-    {picker === 'skills' && <Picker title="选择 Skill" onClose={closePicker}><div className="darl-agent-picker-toolbar"><span>已安装的 Skill</span><span className="darl-agent-picker-toolbar-actions"><button type="button" onClick={() => openFilePicker('skill')}><Upload size={14} />上传</button></span></div><div className="darl-agent-picker-list">{availableSkills.map((skill) => <button key={skill.id} type="button" className="darl-agent-picker-row" aria-pressed={skillIds.includes(skill.id)} onClick={() => toggleSkill(skill.id)}><span className="darl-agent-picker-icon darl-agent-picker-icon--skill"><Sparkles size={15} /></span><span className="darl-agent-picker-copy"><strong>{skill.name}</strong><small>{skill.description || '可复用的 Agent 工作流程'}{skill.version ? ` · v${skill.version}` : ''}</small></span>{skillIds.includes(skill.id) && <Check size={16} />}</button>)}{!availableSkills.length && <p className="darl-agent-empty">暂无 Skill</p>}</div></Picker>}
-    {picker === 'models' && <Picker title="选择模型" onClose={closePicker}><div className="darl-agent-picker-list">{models.map((model) => <button key={model.id} type="button" className="darl-agent-picker-row" onClick={() => { setModelId(model.id); setPicker(null); }}><span className="darl-agent-picker-icon"><Bot size={15} /></span><span className="darl-agent-picker-copy"><strong>{model.name}</strong><small>{model.description || '对话模型'}</small></span>{model.id === modelId && <Check size={16} />}</button>)}</div></Picker>}
-    {picker === 'agents' && <Picker title="选择 Agent" className="darl-agent-picker--agents" onClose={closePicker}><div className="darl-agent-picker-cards">{selectableAgents.map((agent) => <button key={agent.id} type="button" className={`darl-agent-picker-card${agent.id === agentId ? ' is-selected' : ''}`} onClick={() => setAgentId(agent.id)}><div className="darl-agent-picker-card-visual"><AgentPickerAvatar agent={agent} />{agent.id === agentId && <span className="darl-agent-picker-card-check"><Check size={14} /></span>}</div><span className="darl-agent-picker-card-copy"><strong>{agent.name}</strong><small>{agent.description || '专业 Agent'}</small><em>{agent.builtIn ? '系统默认' : agent.isDefault ? '默认' : '已启用'}</em></span></button>)}</div>{!selectableAgents.length && <p className="darl-agent-empty">暂无可用主 Agent</p>}</Picker>}
-    {picker === 'effort' && selectedModel && <Picker title="思考强度" onClose={closePicker}><div className="darl-agent-effort-list">{supportedEfforts.map((value) => <button type="button" key={value} data-selected={value === effort} onClick={() => { setEffort(value); setPicker(null); }}><strong>{value}</strong><small>{value === '低' ? '更快响应' : value === '高' ? '更深入分析' : '平衡速度和质量'}</small>{value === effort && <Check size={15} />}</button>)}</div></Picker>}
-    <input ref={fileInput} aria-label="选择上传文件" type="file" hidden multiple={uploadKind === 'file'} onChange={(event) => { const files = Array.from(event.target.files ?? []); const first = files[0]; if (uploadKind === 'skill' && files.length) void Promise.resolve().then(async () => { const imported = await importSkillPackage(files); await onSkillImport?.(imported); if (first) await onSkillUpload?.(first); setLocalSkills((current) => [...current.filter((item) => item.id !== imported.id), imported]); }).catch((reason) => setError(reason instanceof Error ? reason.message : '导入失败')); if (uploadKind === 'file' && files.length) { const images = files.filter((file) => file.type.startsWith('image/')); if (images.length !== files.length) setError('仅支持图片附件，请选择 PNG、JPEG、WebP 或 GIF'); if (images.length) { setAttachments((current) => ({ ...current, [draftKey]: [...(current[draftKey] ?? []), ...images] })); if (onFileUpload) void Promise.resolve().then(() => onFileUpload(images)).catch(() => setError('附件处理失败')); } } setPicker(null); event.currentTarget.value = ''; }} accept={uploadKind === 'skill' ? skillFileAccept : 'image/*,.png,.jpg,.jpeg,.webp,.gif'} />
+    {picker === 'skills' && <Picker title="选择 Skill" onClose={closePicker}><div className="darl-agent-picker-toolbar"><span>已安装的 Skill</span><span className="darl-agent-picker-toolbar-actions">{onSkillCreate && <button type="button" disabled={isGenerating || pending || approvalModePending} onClick={() => { setPicker(null); void Promise.resolve().then(onSkillCreate).catch(reason => setError(reason instanceof Error ? reason.message : '无法开始创建 Skill')); }}><Sparkles size={14} />通过对话创建</button>}<button type="button" onClick={() => openFilePicker('skill')}><Upload size={14} />上传</button></span></div><div className="darl-agent-picker-list">{availableSkills.map((skill) => <button key={skill.id} type="button" className="darl-agent-picker-row" aria-pressed={skillIds.includes(skill.id)} onClick={() => toggleSkill(skill.id)}><span className="darl-agent-picker-icon darl-agent-picker-icon--skill"><Sparkles size={15} /></span><span className="darl-agent-picker-copy"><strong>{skill.name}</strong><small>{skill.description || '可复用的 Agent 工作流程'}{skill.version ? ` · v${skill.version}` : ''}</small></span>{skillIds.includes(skill.id) && <Check size={16} />}</button>)}{!availableSkills.length && <p className="darl-agent-empty">暂无 Skill</p>}</div></Picker>}
+    {picker === 'models' && <Picker title="模型与思考等级" onClose={closePicker}><div className="darl-agent-picker-list">{models.map((model) => <button key={model.id} type="button" className="darl-agent-picker-row" aria-pressed={model.id === selectedModel?.id} onClick={() => { setModelId(model.id); if (!model.reasoningEfforts?.length) setPicker(null); }}><span className="darl-agent-picker-icon"><Bot size={15} /></span><span className="darl-agent-picker-copy"><strong>{model.name}</strong><small>{model.description || '对话模型'}</small></span>{model.id === selectedModel?.id && <Check size={16} />}</button>)}</div>{supportedEfforts.length > 0 && <fieldset className="darl-agent-model-efforts"><legend>思考等级</legend><div className="darl-agent-effort-list">{supportedEfforts.map(value => <Button key={value} variant="ghost" size="sm" aria-pressed={value === effort} onClick={() => { setEffort(value); setPicker(null); }}>{value}{value === effort && <Check size={14} />}</Button>)}</div></fieldset>}</Picker>}
+    <input ref={fileInput} aria-label="选择上传文件" type="file" hidden multiple={uploadKind === 'file'} onChange={(event) => { const files = Array.from(event.target.files ?? []); const first = files[0]; if (uploadKind === 'skill' && files.length) void Promise.resolve().then(async () => { const imported = await importSkillPackage(files); await onSkillImport?.(imported); if (first) await onSkillUpload?.(first); setLocalSkills((current) => [...current.filter((item) => item.id !== imported.id), imported]); }).catch((reason) => setError(reason instanceof Error ? reason.message : '导入失败')); if (uploadKind === 'file' && files.length) { const acceptedFiles = uploadAttachment ? files : files.filter((file) => file.type.startsWith('image/')); if (acceptedFiles.length !== files.length) setError('仅支持图片附件，请选择 PNG、JPEG、WebP 或 GIF'); if (acceptedFiles.length) { setAttachments((current) => ({ ...current, [draftKey]: [...(current[draftKey] ?? []), ...acceptedFiles] })); if (onFileUpload) void Promise.resolve().then(() => onFileUpload(acceptedFiles)).catch(() => setError('附件处理失败')); } } setPicker(null); event.currentTarget.value = ''; }} accept={uploadKind === 'skill' ? skillFileAccept : uploadAttachment ? undefined : 'image/*,.png,.jpg,.jpeg,.webp,.gif'} />
   </aside>
     <InteractiveConfirmDialog
       open={Boolean(pendingConfirmation && onToolConfirm && pendingConfirmation.id !== handledConfirmation)}
       onOpenChange={(open) => { if (!open) void confirmAction(false); }}
-      title={isMediaConfirmation ? `确认生成${mediaKind}` : '确认执行 MCP 工具'}
-      description={isMediaConfirmation ? '请核对以下生成设置，提交后将开始生成并可能产生费用。' : '即将调用外部工具，请核对操作与参数。'}
+      title={isMediaConfirmation ? `确认生成${mediaKind}` : '确认执行工具'}
+      description={isMediaConfirmation ? '请核对以下生成设置，提交后将开始生成并可能产生费用。' : '请核对以下工具、操作与参数。'}
       questions={[]}
       showCancel
       cancelText="拒绝"

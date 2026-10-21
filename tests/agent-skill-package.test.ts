@@ -34,4 +34,18 @@ describe('Agent Skill package', () => {
   it('rejects a package without a manifest', async () => {
     await expect(importSkillPackage([file('内容', 'notes.md')])).rejects.toThrow('缺少 SKILL.md');
   });
+
+  it('keeps root dependency files and binary resources in arbitrary directories', async () => {
+    const skill = await importSkillPackage([
+      file('---\nname: generic\ndescription: 通用工具\n---\n\n读取配套文件。', 'generic/SKILL.md'),
+      file('{"type":"module"}', 'generic/package.json'),
+      file('requests', 'generic/requirements.txt'),
+      { name: 'generic/templates/data.bin', size: 3, arrayBuffer: async () => new Uint8Array([0, 255, 1]).buffer } as File,
+    ]);
+    expect(skill.resources).toEqual(expect.arrayContaining([
+      { path: 'package.json', content: '{"type":"module"}' },
+      { path: 'requirements.txt', content: 'requests' },
+      { path: 'templates/data.bin', content: 'AP8B', encoding: 'base64' },
+    ]));
+  });
 });

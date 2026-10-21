@@ -6,6 +6,13 @@ const markdownFile = (content: string, name = 'SKILL.md') => ({ name, type: 'tex
 const importedMarkdown = '---\nname: 审查\ndescription: 检查代码\n---\n\n逐项检查。';
 
 describe('SkillManager', () => {
+  it('replaces the folder entry with host conversation creation and reports failures', async () => {
+    render(<SkillManager open skills={[]} onClose={() => {}} onSave={() => {}} onDelete={() => {}} onImport={() => {}} onFavoriteChange={() => {}} onCreateViaChat={() => { throw new Error('请先配置文本模型'); }} />);
+    expect(screen.queryByRole('button', { name: '文件夹' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '通过对话创建' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('请先配置文本模型'));
+  });
+
   it('allows disabling automatic invocation while keeping manual @ references', async () => {
     const skill: AgentSkill = { id: 'summary', name: '客户摘要', description: '整理客户信息', instructions: '整理输入。', scope: 'custom', allowImplicitInvocation: true };
     const onSave = vi.fn().mockResolvedValue(undefined);

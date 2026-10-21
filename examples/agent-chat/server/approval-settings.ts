@@ -1,12 +1,26 @@
-/** Project-wide default-off automatic approval toggles. */
-export interface AutoConfirmSettings { image: boolean; video: boolean; mcp: boolean }
-export const DEFAULT_AUTO_CONFIRM: AutoConfirmSettings = { image: false, video: false, mcp: false };
-export function validateAutoConfirmSettings(value: unknown): AutoConfirmSettings {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('二次确认设置无效');
+import type { AgentApprovalMode } from '../../../src/components/agent-sidebar/types';
+
+export const DEFAULT_APPROVAL_MODE: AgentApprovalMode = 'auto';
+export function validateApprovalSettings(value: unknown): { mode: AgentApprovalMode } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('审批设置无效');
   const entry = value as Record<string, unknown>;
-  if (['image', 'video', 'mcp'].some(key => typeof entry[key] !== 'boolean') || Object.keys(entry).some(key => !['image', 'video', 'mcp'].includes(key))) throw new Error('二次确认设置必须包含图片、视频和 MCP 的布尔值');
-  return { image: entry.image as boolean, video: entry.video as boolean, mcp: entry.mcp as boolean };
+  if (typeof entry.mode !== 'string' || !['ask', 'auto', 'full'].includes(entry.mode) || Object.keys(entry).some(key => key !== 'mode')) throw new Error('请选择有效的审批模式');
+  return { mode: entry.mode as AgentApprovalMode };
 }
-export function shouldConfirmMcp(risk: 'read'|'write'|'dangerous', config: AutoConfirmSettings): boolean {
-  return risk === 'dangerous' || (risk === 'write' && !config.mcp);
+
+/** Unknown operations stay interactive. This is an approval policy, not a shell sandbox. */
+export function shouldConfirm(mode: AgentApprovalMode, risk: 'read' | 'write' | 'dangerous', lowRisk = false): boolean {
+  if (mode === 'full' || risk === 'read') return false;
+  return mode === 'ask' || risk === 'dangerous' || !lowRisk;
+}
+
+export function isLowRiskCommand(command: unknown): boolean {
+  return typeof command === 'string' && command.split('&&').every(part => isLowRiskInvocation(part.trim()));
+}
+
+function isLowRiskInvocation(line: string): boolean {
+  if (/^(?:pwd|(?:node|python|python3|git|npm|npx|pip|pip3) --version)$/.test(line)) return true;
+  // Recognize a single ls invocation, including options and quoted paths, not a shell program.
+  if (/[;&|<>$`\r\n\0\\(){}]/.test(line)) return false;
+  return /^(?:ls|\/(?:usr\/)?bin\/ls)(?:[ \t]+(?:[^\s"'\\]+|"[^"]*"|'[^']*'))*$/.test(line);
 }

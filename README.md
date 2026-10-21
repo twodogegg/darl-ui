@@ -49,7 +49,7 @@ Agent Chat 的素材上传、命名字体、项目封面和媒体结果统一通
 - 只保存子任务及最终回复，**不会**跨子 Agent 复制上下文，也不持久化原始 MCP 工具结果、隐藏推理或密钥。子 Agent 的提示词、Skills 和 MCP 工具每次从当前配置重新确认；模型使用当前聊天选择的文本模型。
 - 子历史按子模型的上下文预算与 Agent 上下文策略压缩；失败、取消或超时不写入虚假成功回复。同一子会话的并行调用在本地进程内排队，SQLite 版本校验防止其他写入者静默覆盖。
 - 当前示例仅面向**本地单用户**。子会话使用固定 `local` 作用域；部署为多用户服务之前必须接入真实的宿主用户鉴权与隔离，不能把请求头视为身份凭据。
-- 此功能支持主 Agent **间接续聊**子 Agent；子会话的独立列表、可选多线程切换和 UI 历史查看仍是后续扩展。
+- 此功能支持主 Agent **间接续聊**协作 Agent；子会话的独立列表、可选多线程切换和 UI 历史查看仍是后续扩展。
 
 ### 真实模型示例
 
@@ -60,10 +60,18 @@ Agent Chat 的素材上传、命名字体、项目封面和媒体结果统一通
 复制 `.env.example` 为 `.env.local`，配置服务端 `AGENT_CHAT_API_KEY`；默认地址 `https://api.darl.cn/v1`，默认模型 `deepseek-v4.1-flash`。也可直接在示例的「设置 → 模型」中管理提供方、API 协议、模型类型和推理强度。推理强度填写模型实际支持的值，如 `low, medium, high`；留空则不发送此参数。
 
 - 支持 OpenAI Chat Completions / Responses 流式文本协议、多轮对话、停止、重新生成、新对话和历史搜索。
-- 示例服务端使用 AI SDK Core 和 OpenAI-compatible Provider 运行模型与工具循环；MCP 通过已有 SDK 动态转换为 AI SDK 工具，执行确认仍由宿主处理。每次请求从本地 SQLite 恢复并重建模型上下文，不启用 coding CLI、本机文件工具；这些依赖仅用于宿主示例，不进入组件库浏览器产物。
+- 示例服务端使用 AI SDK Core 和 OpenAI-compatible Provider 运行模型与工具循环；MCP 通过已有 SDK 动态转换为 AI SDK 工具，执行确认仍由宿主处理。每次请求从本地 SQLite 恢复并重建模型上下文，由宿主提供本机文件和 Shell 工具；这些执行能力仅属于宿主示例，不进入组件库浏览器产物。
 - Markdown 使用开源的 `react-markdown`、`remark-gfm` 和 `rehype-sanitize` 渲染；回复中的 `md` / `markdown` 代码块会显示为编译后的内容，复制按钮仍复制原始 Markdown。
-- 系统提示词首次从 `examples/agent-chat/prompts/system.md` 写入本地 SQLite，之后由数据库管理；缺失、空白或过长时报错，代码没有内置默认值。专业 Agent 的提示词在 Agents 编辑器中单独配置。选中的 Skill 指令在发送时追加。
+- 系统提示词首次从 `examples/agent-chat/prompts/system.md` 写入本地 SQLite，之后由数据库管理；缺失、空白或过长时报错，代码没有内置默认值。专业 Agent 的提示词在 Agents 编辑器中单独配置。Skill 名称和描述在每轮请求中组成目录，完整指令与资源由模型通过工具按需读取。运行规则从 `examples/agent-chat/prompts/skill-runtime.md` 加载。
 - 对话、Skills、提供方、模型配置和 Agent 配置保存在 Git 忽略的 `.local/agent-chat/data.sqlite`；浏览器只负责调用本机 API，不保存聊天历史。
+- 本机执行环境提供技能目录/按需加载、文件列举/分页读取/写入、附件导入、Shell 命令、进程查询/停止和文件交付。技能正文及二进制资源由服务端读取已保存版本，浏览器只传 Skill ID。允许自动调用的技能仅发送目录；关闭自动调用的技能需用户显式引用。
+- 网站默认提供 Anthropic 的 `skill-creator`，所有主 / 子 Agent 都能按需加载。上游完整技能包（含许可）位于 `examples/agent-chat/skills/skill-creator/`，来自 [claude-plugins-official](https://github.com/anthropics/claude-plugins-official/tree/d1adba47161a271799de7b548225d929310046bd/plugins/skill-creator/skills/skill-creator)，固定版本 `d1adba47161a271799de7b548225d929310046bd`，原文件未修改。Claude CLI 专属评测仍依赖对应软件与账号，不属于网站自带能力。
+- 在聊天的「选择 Skill」弹层或「管理 Skill」窗口点击「通过对话创建」，会新开一条对话并自动引用 skill-creator，原聊天及草稿保持不变。也可以直接对话「创建一个整理会议行动项的 Skill」或发送技能链接要求安装。Agent 用现有文件 / 命令工具生成或下载完整包，再调用 `builtin_create_skill` 安装进网站 Skills 库；安装复用手动导入校验，不执行包内脚本，不写电脑全局技能目录。默认模式自动批准新增技能，覆盖已有技能需明确 ID、当前版本并确认；内置技能内容只读。同包重复安装复用已有 ID。
+- Skills 由 `/api/skills` 单独保存到 SQLite，`/api/state` 只写会话，读状态时合并技能目录；旧版会话中的 Skills 首次自动迁移。手动导入与 Agent 创建共用保存逻辑，创建后发送 `skills-changed` 事件刷新界面，当轮即可加载，新对话及刷新后仍可用。
+- 工作区保存在 `.local/agent-chat/workspaces/`，按聊天及 Agent 分目录，文件跨请求和服务重启保留；导入的技能按内容版本落盘，带 shebang 的脚本及 Shell 脚本可直接执行。命令默认超时 120 秒、最大 10 分钟；调用最多等待 10 秒后返回进程 ID，继续用查询工具获取输出与真实退出码。成功回复后后台命令可继续运行至超时；停止、断连或请求失败会终止本轮启动的命令。重启服务后进程不恢复。
+- 命令运行在后端操作系统用户下，**不是沙箱**；文件工具校验工作区路径和符号链接，Shell 本身仍具有系统用户权限。子进程只继承 PATH、HOME、语言、临时目录等基础环境，不转发后端提供方密钥；需要特定凭证、CLI、系统软件或 MCP 的技能仍需配置真实依赖。执行工具仅向本机/局域网同源请求提供，不适合直接暴露到公网。
+- 「设置 → Tools」可查看实际工具目录；输入框或「设置 → 审批模式」统一控制工具执行。默认“帮我批准”，工作区文件操作自动执行；导入 Skill 不会自动执行。用户拒绝或主动停止使用 `cancelled` 状态，页面显示普通状态提示；命令失败、网络错误和超时仍保留错误提示。通过 `publish_file` 保存产物后取得 `/api/files/:id?download=1` 下载链接，HTML 等主动内容作为附件交付。
+- 宿主提供 `uploadAttachment` 后，聊天文件选择器支持任意文件；未提供时仍只接受图片。示例将附件保存为 fileId 并告知模型，模型可导入工作区处理；仅图片发送给视觉模型，其他文件不冒充图片预览。
 - MediaWorkspace 宿主可通过 `/api/media-tasks` 保存单用户任务、批次和结果；协议凭据与生成结果仍由宿主 API 管理。
 - 获取模型目录后需确认模型类型、启用状态并保存；新发现的模型默认禁用，接口返回的 ID 无法证明其媒体或推理能力。
 - 支持通过 Streamable HTTP 接入 MCP 应用和真实多步工具调用；AgentSidebar 支持图片附件预览、发送到支持视觉输入的文本模型，以及 MCP 图片结果回传；模型目录仍可设置图片 / 视频 / 音频类型，聊天仅列出启用的文本模型。
@@ -87,10 +95,10 @@ MCP 连接由宿主示例的服务端管理。将配置保存为 Git 忽略的 `
 
 `apiKey` 可省略，用于无需鉴权的服务；URL 不接受内嵌凭证或查询参数。`readOnlyTools` 是宿主核实后的只读工具名单，无需这类覆盖时省略。工具 schema、名称和参数从 MCP 动态发现，设置 → 应用 / MCP 可查看连接状态和重新连接。聊天中用 `@` 引用一次应用，其工具在该对话后续消息中持续可用；服务端根据用户消息中的应用引用，每轮重新提供工具定义。刷新恢复后仍有效，新对话不继承，重新生成仅使用该轮之前的历史；已从服务端配置移除的历史应用会被忽略。同名工具通过服务端命名空间区分。询问应用用途或用法时，默认依据工具目录简短回答；只有明确需要真实数据或执行操作时才调用工具，避免额外浏览示例素材和无关文档。
 
-- 模型的 Chat Completions 和 Responses 两种协议均支持工具调用，最多 8 轮、合计最多 128 个工具。工具失败会回传模型，界面以紧凑记录展示应用、工具名和状态，不展开原始参数和结果；执行确认时展示待确认参数。
+- 模型的 Chat Completions 和 Responses 两种协议均支持工具调用，启用本机执行工具时最多 32 轮，否则默认最多 8 轮（显式联系较多 Agent 时预留一轮汇总）；MCP 应用合计最多 128 个工具，另加宿主内置工具。工具失败会回传模型，界面以紧凑记录展示应用、工具名和状态，不展开原始参数和结果；执行确认时展示待确认参数。
 - 工具失败在服务端同时写入 stderr 和 `.local/agent-chat/logs/failure.log`（每行一条 JSON，含 requestId、runId、toolCallId、错误码、耗时，凭证会被脱敏），便于在浏览器之外回溯失败原因。
-- 「设置 → 二次确认」可分别开启图片、视频与普通 MCP 工具的免确认开关；默认为关闭，保存在本机 SQLite。主 Agent 与子 Agent 复用这些开关；MCP `destructiveHint` 标记的破坏性工具始终要求确认。图片、视频与 MCP 共用 `InteractiveConfirmDialog` 弹窗，拒绝/停止/超时不会触发待批准的调用。
-- 默认情况下，除标记为只读或经宿主核实列入 `readOnlyTools` 的工具外，其他 MCP 调用均等待用户允许或拒绝。确认在服务端执行，停止、断连、超时后失效，不因刷新自动重试写操作。
+- 输入框与「设置 → 审批模式」共用三档设置，通过 `/api/approval-settings` 保存到 SQLite，替代原有逐项免确认开关。请求批准（`ask`）：只读操作直接执行，其余操作询问。帮我批准（`auto`，默认）：自动执行工作区文件操作、`pwd`、`ls`（含常见选项、指定目录与带引号路径）、常见运行时版本查询及这些只读命令的 `&&` 组合，以及同时声明 `destructiveHint: false` 与 `openWorldHint: false` 的非破坏 MCP 写操作；任意脚本、复杂命令、未知/危险 MCP 操作和付费媒体生成仍询问。完全访问（`full`）：当前工具能力内不再逐次确认，包括危险 MCP 操作和图片/视频费用。完全访问不扩大文件工具的工作区范围，也不提供操作系统沙箱。主 Agent 与子 Agent 共用每轮开始时的模式，切换从下一轮请求生效。图片、视频与 MCP 共用 `InteractiveConfirmDialog` 弹窗，拒绝/停止/超时不会触发待批准的调用。
+- MCP 风险基于动态发现的 annotations 与宿主 `readOnlyTools` 配置判定，未声明安全性的写操作在“帮我批准”模式下仍询问。确认在服务端执行，停止、断连、超时后失效，不因刷新自动重试写操作。
 - MCP 凭证不返回浏览器。原始工具结果只回传给模型，聊天界面和会话历史保存调用摘要；仅待确认操作向界面发送参数。
 - 当前只支持 Streamable HTTP 和可选 Bearer 凭证；OAuth、stdio、旧版 HTTP+SSE、MCP Apps 内嵌界面及文件授权尚未接入。示例仍仅供本机开发，生产环境的用户身份、会话存储和工具权限由宿主提供。
 
@@ -275,7 +283,7 @@ import '@darl/ui/styles.css';
 
 ## AgentSidebar｜网站辅助 Agent 侧栏
 
-演示入口：`http://localhost:5188/#agent-sidebar`。右侧会话面板包含新对话、历史搜索与切换、会话重命名与删除（需二次确认）、消息发送、应用 / Skill 选择、模型及其推理强度选择；消息较长时可直接跳到顶部或底部，也可以展开为居中的大对话窗口。回复操作只有复制和重新生成；整条复制保留原始 Markdown，代码块单独复制代码。Markdown 使用 GFM 渲染，并支持将 `md` / `markdown` 围栏内容渲染为可读内容。
+演示入口：`http://localhost:5188/#agent-sidebar`。右侧会话面板包含新对话、历史搜索与切换、会话重命名与删除（需二次确认）、消息发送、应用 / Skill 选择、模型与思考等级的合并选择入口；消息较长时可直接跳到顶部或底部，也可以展开为居中的大对话窗口。回复操作只有复制和重新生成；整条复制保留原始 Markdown，代码块单独复制代码。Markdown 使用 GFM 渲染，并支持将 `md` / `markdown` 围栏内容渲染为可读内容。
 
 ```tsx
 import { AgentSidebar } from '@darl/ui';
@@ -293,6 +301,9 @@ import '@darl/ui/styles.css';
   onSend={sendMessage}
   onRegenerate={regenerateMessage}
   onToolConfirm={confirmToolCall}
+  approvalMode={approvalMode}
+  onApprovalModeChange={saveApprovalMode}
+  approvalModePending={approvalSaving}
   applications={applications}
   skills={skills}
   onSkillImport={saveImportedSkill}
@@ -302,7 +313,9 @@ import '@darl/ui/styles.css';
 />
 ```
 
-`sessions` 包含会话 ID、标题和消息；`applications`、`skills`、`models` 全部由宿主提供。工具记录通过消息的 `toolCalls` 传入，参数和结果支持任意 JSON，不绑定具体 MCP；普通记录仅显示应用、工具名、状态及失败原因，不提供原始 JSON 展开入口。`onToolConfirm(toolCallId, approved)` 接收用户对 `confirmation` 状态调用的允许或拒绝，宿主必须在服务端落实该决定；确认前会自动展示参数，失败可重试。`onSend` 收到会话 ID、正文、应用 / Skill ID、有效模型及推理强度、可选本地附件 `files` 和已编码的图片 `attachments`；组件会在输入区显示缩略图，图片消息可以不带正文。宿主应把 `attachments` 转换为模型供应商的视觉输入，并在 `AgentMessage.attachments` 中回传图片 URL 以显示结果。失败保留草稿并显示错误。模型不提供 `reasoningEfforts` 时隐藏推理选择。`isGenerating/onStop` 可连接宿主生成状态。完整类型从 `@darl/ui` 导出。
+`sessions` 包含会话 ID、标题、消息和可选的固定 `agentId`；`applications`、`skills`、`models` 全部由宿主提供。工具记录通过消息的 `toolCalls` 传入，参数和结果支持任意 JSON，不绑定具体 MCP；普通记录仅显示应用、工具名、状态及失败原因，不提供原始 JSON 展开入口。`onToolConfirm(toolCallId, approved)` 接收用户对 `confirmation` 状态调用的允许或拒绝，宿主必须在服务端落实该决定；确认前会自动展示参数，失败可重试。`onSend` 的正文保留 Agent 稳定 ID 引用，宿主应解析本轮用户消息并校验可调用目录；此外收到会话 ID、应用 / Skill ID、有效模型及推理强度、可选本地附件 `files` 和已编码的图片 `attachments`；组件会在输入区显示缩略图，图片消息可以不带正文。宿主应把 `attachments` 转换为模型供应商的视觉输入，并在 `AgentMessage.attachments` 中回传图片 URL 以显示结果。失败保留草稿并显示错误。模型与思考等级共用一个入口，弹层中先选模型，再选择该模型支持的等级；模型不提供 `reasoningEfforts` 时隐藏等级选项且不发送旧值。`isGenerating/onStop` 可连接宿主生成状态。完整类型从 `@darl/ui` 导出。
+
+`approvalMode` 为宿主控制的 `ask | auto | full`；同时提供 `onApprovalModeChange` 后显示输入框审批菜单。回调可返回 Promise，保存失败会保留原选择并显示错误。`approvalModePending` 在宿主读取/保存策略时阻止切换及发送；生成中无法切换。组件仅展示策略，宿主必须服务端持久化并统一执行；示例会拒绝客户端模式与服务端设置不一致的聊天请求。独立的 `ApprovalModeSelector` 可在宿主设置页复用，组件库不会自行批准任何调用。Playground 的选择只作用于本地 UI 演示。
 
 `AgentMessage.timeline` 可接收按流式顺序排列的 `AgentExecutionEvent`。事件只包含通用的 `source`、`status`、`name`、`runId`、`parentRunId`、`agentId`、时间戳、耗时和安全错误摘要；`source: 'agent'` 会区分主 Agent 与子 Agent，`source: 'tool'` 显示 MCP 工具。侧栏默认折叠时间线，展开后按父子运行关系缩进，并显示真实耗时、重试、确认、失败、取消和超时；原始参数和结果仍只在确认卡片中按既有规则展示，不进入时间线事件。
 
@@ -310,15 +323,15 @@ import '@darl/ui/styles.css';
 
 `onSessionDelete` 用于删除会话：组件在历史记录每一行提供删除按钮，点击后弹出二次确认，宿主确认后负责移除会话并切换 `activeSessionId`；删除失败时弹窗保留并显示错误。
 
-`onSkillImport` 用于接管聊天侧栏的 Skill 上传；Skill 的编辑、导入、收藏和删除统一由「设置 → Skills」页面接管。
+`onSkillCreate` 用于接管聊天侧栏的「通过对话创建」，`SkillManager.onCreateViaChat` 提供同一入口（设置后替代工具栏的文件夹按钮），由宿主启动真实对话；未提供回调时保持原有界面。`onSkillImport` 用于接管聊天侧栏的 Skill 上传；Skill 的编辑、导入、收藏和删除统一由「设置 → Skills」页面接管。
 
-组件保留各会话的本地草稿和待发送附件，支持 DarlUIProvider 主题。桌面固定在右侧，手机端全屏。Skill 管理器在「设置 → Skills」中支持新建、编辑、收藏、删除，以及导入 `SKILL.md` 或包含 `references/`、`scripts/`、`assets/`、`agents/` 的 ZIP / 文件集合；导入会校验 frontmatter、资源路径和大小，不执行 Skill 内的脚本。Skill 版本在保存时递增，真实存储由宿主通过 `onSkillImport/onSkillSave/onSkillDelete` 接管。演示中的历史和 Skill 保存在当前页面内存中，示例回复和工具记录均为本地演示，附件不上传。真实模型、MCP 执行、账号鉴权和服务端历史留给宿主接入。
+组件保留各会话的本地草稿和待发送附件，支持 DarlUIProvider 主题。桌面固定在右侧，手机端全屏。Skill 管理器在「设置 → Skills」中支持新建、编辑、收藏、删除，以及导入 `SKILL.md` 或单个 Skill 目录的 ZIP / 文件集合；支持配套的 `references/`、`scripts/`、`assets/`、`agents/`、根目录依赖清单和其他资源文件。导入会校验 frontmatter、资源路径和大小，忽略 `.git`、`node_modules` 等缓存，不在导入时执行脚本。Skill 版本在保存时递增，真实存储由宿主通过 `onSkillImport/onSkillSave/onSkillDelete` 接管。演示中的历史和 Skill 保存在当前页面内存中，示例回复和工具记录均为本地演示，附件不上传。真实模型、MCP 执行、账号鉴权和服务端历史留给宿主接入。
 
 应用和 Skill 从选择面板插入输入光标处，作为正文内引用，不显示输入框上方标签，也不自动传入当前页面。输入 `@` 引用应用或 Skill；继续输入名称或简介关键词可以筛选，上下方向键选择，Enter / Tab 插入，Esc 关闭建议。应用引用为蓝色，Skill 引用为紫色，可用 `--darl-agent-app` / `--darl-agent-skill` 覆盖。引用编码为 `[显示名称](app:ID)` / `[显示名称](skill:ID)`，发送时从正文派生应用和 Skill ID；删除引用即取消本次使用。
 
 ## AgentPlaza｜主 Agent 广场
 
-`AgentPlaza` 只展示服务端标记为 `main_agent` 且允许用户选择的 Agent；`sub_agent` 不会出现在广场，也不会被 `AgentSidebar` 的用户选择器展示。卡片只包含头像、名称和用途描述，点击后由宿主打开对应对话。
+`AgentPlaza` 只展示服务端标记为 `main_agent` 且允许用户选择的 Agent；`sub_agent` 不会出现在广场。卡片使用 1:1 图片，展示头像、名称和用途描述；点击后由宿主新建绑定该 Agent 的会话。`AgentSidebar` 顶部显示当前会话的头像和名称，不提供 Agent 切换；`AgentSession.agentId` 优先于兼容的 `selectedAgentId`，原 `onSelectedAgentIdChange` 已弃用。示例的新对话入口会返回广场，历史会话和刷新保持原 Agent，服务端拒绝同一已绑定会话的跨 Agent 聊天请求。
 
 演示入口：`http://localhost:5188/#agent-plaza`；真实 Agent Chat 示例也提供「Agent 广场」入口。
 
@@ -335,7 +348,13 @@ import { AgentPlaza } from '@darl/ui';
 
 ## Agent 配置与 Sub Agent 委派
 
-`examples/agent-chat` 的设置中心提供独立的 Agents 页面。每个 Agent 在服务端保存名称和系统提示词；模型与推理强度在聊天输入框旁按当前会话选择。Skills 与 MCP 应用对所有 Agent 默认可用，无需逐个授权；API Key 仍只保存在服务端。设置默认 Agent 后，聊天可以直接选择专业 Agent，也可以由主 Agent 通过 AI SDK 7 `ToolLoopAgent` 按需委派给其他已启用的 Agent。
+输入 `@` 后可按名称选择其他 Agent，再写需要沟通的问题，例如“@文案 Agent 请检查这段文案，再帮我汇总建议”。用户消息保存为 `[名称](agent:稳定ID)`，显示为内联标签；当前主 Agent 继续负责会话，实际联系被提及的对象并汇总回复。可以联系允许调用的其他主 Agent，也可以联系 Sub Agent；当前 Agent、停用或 `callable: false` 的对象不进入建议，服务端再次校验。每轮最多显式联系 8 个 Agent。
+
+Agent 的 `@` 只对当前用户消息生效，历史提及不会每轮重复触发；再次 `@` 同一对象会续接该协作对话自己的历史，新主聊天保持隔离。已有 Sub Agent 的自主委派保留；其他主 Agent 仅在本轮被显式提及时提供调用工具。时间线展示真实联系、执行、完成或失败，协作工具沿用本轮审批模式，停止会中止正在进行的联系。被联系的 Agent 本轮不再递归委派，防止相互调用循环。仅收到真实调用结果后才能汇总，失败和取消如实显示。
+
+实现复用现有 AI SDK `ToolLoopAgent` 与 SQLite 子会话。显式联系通过工具选择约束确保实际尝试；主 Agent 可以继续追问同一对象。该方式对应 [OpenAI 的 agents-as-tools 模式](https://openai.github.io/openai-agents-js/guides/multi-agent/)和 [LangChain 的主管/子 Agent 模式](https://docs.langchain.com/oss/javascript/langchain/multi-agent/subagents)，保留当前会话负责人。
+
+`examples/agent-chat` 的设置中心提供独立的 Agents 页面。每个 Agent 在服务端保存名称和系统提示词；模型与推理强度在聊天输入框旁按当前会话选择。Skills 与 MCP 应用对所有 Agent 默认可用，无需逐个授权；API Key 仍只保存在服务端。从 Agent 广场选择专业 Agent 后开启固定身份的会话，也可以由主 Agent 通过 AI SDK 7 `ToolLoopAgent` 按需委派给其他已启用的 Agent。
 
 设置中心的模型页面顶部同时提供默认媒体模型设置，目前只配置图片和视频：默认图片为 `gpt-image-2`（2K、16:9），也可以选择 `gpt-image-2.5` 或 `gemini-3-pro-image-preview`；默认视频为 `minimax-h3-flash`（480、16:9）。图片产品选项只有画幅、1K/2K/4K 档位和参考图数量；视频清晰度用 H3 协议值 480/768。配置保存在示例服务的本地 SQLite 中；文本模型在聊天输入框旁选择。
 

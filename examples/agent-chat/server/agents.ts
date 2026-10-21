@@ -1,3 +1,4 @@
+import { referenceIds } from '../../../src/components/agent-sidebar/references';
 import type { AgentConfig, AgentContextStrategy, AgentSource, AgentType } from '../../../src/index';
 import type { LocalStorage } from './storage';
 
@@ -80,3 +81,15 @@ export function loadAgents(store: LocalStorage): StoredAgent[] {
 }
 
 export function publicAgent(agent: StoredAgent): AgentConfig { return { ...agent, skillIds: [...(agent.skillIds || [])] }; }
+
+/** Only the latest user turn can request a contact; labels are never used as identity. */
+export function mentionedAgents(text: string, agents: StoredAgent[], currentAgentId?: string): StoredAgent[] {
+  const ids = referenceIds(text, 'agent');
+  if (ids.length > 8) throw new Error('一次最多联系 8 个 Agent');
+  return ids.map(id => {
+    if (id === currentAgentId) throw new Error('当前主 Agent 无需联系自己，请选择其他 Agent');
+    const agent = agents.find(agent => agent.id === id && agent.enabled !== false && agent.callable !== false);
+    if (!agent) throw new Error('提及的 Agent 不存在、已停用或不允许调用，请重新选择');
+    return agent;
+  });
+}

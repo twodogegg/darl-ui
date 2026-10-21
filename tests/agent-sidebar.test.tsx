@@ -7,6 +7,37 @@ const skills: AgentSkill[] = [{ id: 'summary', name: '客户摘要', description
 const sessions: AgentSession[] = [{ id: 'one', title: '已有对话', updatedAt: '今天', messages: [{ id: 'assistant', role: 'assistant', content: '## 标题\n\n**加粗**\n\n```ts\nconst answer = true\n```' }] }];
 
 describe('AgentSidebar', () => {
+  it('offers conversation-based Skill creation without losing the current draft', async () => {
+    let created = 0;
+    render(<AgentSidebar open onOpenChange={() => {}} sessions={sessions} activeSessionId="one" skills={skills} onSkillCreate={() => { created += 1; }} />);
+    const input = screen.getByRole('textbox', { name: '输入消息' });
+    input.textContent = '原来的草稿'; fireEvent.input(input);
+    fireEvent.click(screen.getByRole('button', { name: '添加材料或能力' }));
+    fireEvent.click(screen.getByRole('button', { name: /选择 Skill/ }));
+    fireEvent.click(screen.getByRole('button', { name: '通过对话创建' }));
+    await waitFor(() => expect(created).toBe(1));
+    expect(input).toHaveTextContent('原来的草稿');
+    expect(screen.queryByRole('button', { name: '通过对话创建' })).not.toBeInTheDocument();
+  });
+
+  it('shows cancellation and refusal as neutral states while keeping real failures visible', () => {
+    const cancelled: AgentErrorInfo = { code: 'REQUEST_CANCELLED', stage: 'cancellation', message: '生成已停止', retryable: false, suggestion: '' };
+    const rejected: AgentErrorInfo = { ...cancelled, code: 'TOOL_REJECTED', message: '已拒绝此操作，未执行。' };
+    const failed: AgentErrorInfo = { code: 'COMMAND_FAILED', stage: 'runtime', message: '命令退出码为 7', retryable: false, suggestion: '检查命令输出' };
+    const { container } = render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[{ id: 'one', title: '状态', messages: [{ id: 'answer', role: 'assistant', content: '', error: cancelled, toolCalls: [
+      { id: 'stopped', appId: 'runtime', appName: '执行环境', toolName: 'run', status: 'cancelled' },
+      { id: 'rejected', appId: 'runtime', appName: '执行环境', toolName: 'write', status: 'cancelled', errorInfo: rejected },
+      { id: 'failed', appId: 'runtime', appName: '执行环境', toolName: 'run', status: 'error', errorInfo: failed },
+    ] }] }]} activeSessionId="one" />);
+    expect(screen.getByText('已停止')).toBeInTheDocument();
+    expect(screen.getByText('已拒绝')).toBeInTheDocument();
+    expect(screen.getByText('生成已停止')).toHaveAttribute('role', 'status');
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(screen.getByRole('alert')).toHaveTextContent('命令退出码为 7');
+    expect(container.querySelectorAll('.darl-agent-tool-call--cancelled')).toHaveLength(2);
+    expect(screen.queryByText('已取消失败')).not.toBeInTheDocument();
+  });
+
   it('renders structured request errors with stage and trace identifiers', () => {
     const error: AgentErrorInfo = { code: 'MCP_CONNECTION_FAILED', stage: 'mcp-connection', message: '无法连接 MCP 应用', requestId: 'req-123', runId: 'run-456', retryable: true, suggestion: '检查应用地址后重试。' };
     render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[{ id: 'error', title: '失败', messages: [{ id: 'answer', role: 'assistant', content: '', error }] }]} activeSessionId="error" />);
@@ -46,7 +77,7 @@ describe('AgentSidebar', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('确认请求失败');
     fireEvent.click(screen.getByRole('button', { name: '拒绝' }));
     await waitFor(() => expect(onToolConfirm).toHaveBeenLastCalledWith('write-call', false));
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '确认执行 MCP 工具' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '确认执行工具' })).not.toBeInTheDocument());
   });
 
   it('媒体生成确认展示可读参数，像素尺寸映射为 1K/2K，并提供红色拒绝按钮', () => {
@@ -85,6 +116,24 @@ describe('AgentSidebar', () => {
     expect(reject.className).toContain('darl-button--destructive');
     fireEvent.click(reject);
     await waitFor(() => expect(onToolConfirm).toHaveBeenCalledWith('write-call', false));
+  });
+
+  it('@ 联系其他主 Agent 和子 Agent，保持当前身份并按 ID 提交引用', async () => {
+    const onSend = vi.fn();
+    const agents = [{ id: 'main', name: '当前助手' }, { id: 'peer', name: '协作伙伴', type: 'main_agent' as const }, { id: 'child', name: '校对专家', type: 'sub_agent' as const }, { id: 'off', name: '已停用', enabled: false }, { id: 'private', name: '不可调用', callable: false }];
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[{ ...sessions[0], agentId: 'main' }]} agents={agents} onSend={onSend} />);
+    const editor = screen.getByRole('textbox', { name: '输入消息' });
+    const node = document.createTextNode('@'); editor.append(node);
+    const range = document.createRange(); range.setStart(node, 1); range.collapse(true);
+    window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range); fireEvent.input(editor);
+    expect(screen.getAllByRole('option')).toHaveLength(2);
+    expect(screen.getByRole('option', { name: /校对专家/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /当前助手|已停用|不可调用/ })).not.toBeInTheDocument();
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(editor.querySelector('.darl-agent-inline-reference--agent')).toHaveTextContent('@协作伙伴');
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'main', content: '[协作伙伴](agent:peer)' })));
   });
 
   it('输入 @ 时显示能力建议并可插入引用', () => {
@@ -151,23 +200,43 @@ describe('AgentSidebar', () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('查一下客户'), applicationIds: ['crm'], skillIds: ['summary'], modelId: 'model', reasoningEffort: '低' })));
   });
 
-  it('以角色卡选择并切换主 Agent，不显示额外的主 Agent 占位项', async () => {
+  it('只显示会话绑定的 Agent 头像，不提供切换入口，切换历史会话时保持身份', async () => {
     const onSend = vi.fn();
-    const agents = [{ id: 'art', name: '美术 Agent', description: '处理美术任务' }, { id: 'writer', name: '文案 Agent', description: '处理文案任务' }];
-    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" onSend={onSend} agents={agents} models={[{ id: 'model', name: '通用模型', reasoningEfforts: ['低', '高'] }]} />);
-    fireEvent.click(screen.getByRole('button', { name: '选择 Agent' }));
-    expect(screen.queryByRole('button', { name: /主 Agent/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /美术 Agent/ }));
-    expect(screen.getByRole('button', { name: /通用模型/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /思考：/ })).toBeInTheDocument();
+    const agents = [{ id: 'art', name: '美术 Agent', avatar: '/art.png' }, { id: 'writer', name: '文案 Agent', avatar: '✍️' }];
+    const boundSessions = [{ ...sessions[0], agentId: 'art' }, { id: 'two', title: '文案对话', agentId: 'writer', messages: [] }];
+    const props = { open: true, onOpenChange: vi.fn(), onSend, agents, sessions: boundSessions, selectedAgentId: 'writer', models: [{ id: 'model', name: '通用模型', reasoningEfforts: ['低', '高'] }] };
+    const { rerender } = render(<AgentSidebar {...props} activeSessionId="one" />);
+    expect(screen.getByAltText('美术 Agent头像')).toHaveAttribute('src', '/art.png');
+    expect(screen.queryByRole('button', { name: /美术 Agent|选择 Agent/ })).not.toBeInTheDocument();
     fireEvent.input(screen.getByRole('textbox', { name: '输入消息' }), { target: { textContent: '设计一个角色' } });
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
     await waitFor(() => expect(onSend).toHaveBeenLastCalledWith(expect.objectContaining({ agentId: 'art' })));
-    fireEvent.click(screen.getByRole('button', { name: /美术 Agent/ }));
-    fireEvent.click(screen.getByRole('button', { name: /文案 Agent/ }));
+    rerender(<AgentSidebar {...props} activeSessionId="two" />);
+    expect(screen.getByText('文案 Agent')).toBeInTheDocument();
+    expect(screen.queryByAltText('美术 Agent头像')).not.toBeInTheDocument();
     fireEvent.input(screen.getByRole('textbox', { name: '输入消息' }), { target: { textContent: '写一段文案' } });
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
     await waitFor(() => expect(onSend).toHaveBeenLastCalledWith(expect.objectContaining({ agentId: 'writer' })));
+  });
+
+  it('从同一个入口选择模型和思考等级，切换到无推理模型后不提交旧等级', async () => {
+    const onSend = vi.fn();
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} onSend={onSend} models={[{ id: 'fast', name: '快速模型', reasoningEfforts: ['低'] }, { id: 'deep', name: '深入模型', reasoningEfforts: ['中', '高'] }, { id: 'plain', name: '普通模型' }]} />);
+    expect(screen.queryByRole('button', { name: /思考：/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /快速模型/ }));
+    const picker = screen.getByRole('dialog', { name: '模型与思考等级' });
+    fireEvent.click(within(picker).getByRole('button', { name: /深入模型/ }));
+    fireEvent.click(within(picker).getByRole('button', { name: '高' }));
+    expect(screen.getByRole('button', { name: /深入模型 · 高/ })).toBeInTheDocument();
+    fireEvent.input(screen.getByRole('textbox', { name: '输入消息' }), { target: { textContent: '深入分析' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await waitFor(() => expect(onSend).toHaveBeenLastCalledWith(expect.objectContaining({ modelId: 'deep', reasoningEffort: '高' })));
+    fireEvent.click(screen.getByRole('button', { name: /深入模型/ }));
+    fireEvent.click(screen.getByRole('button', { name: /普通模型 对话模型/ }));
+    expect(screen.queryByRole('dialog', { name: '模型与思考等级' })).not.toBeInTheDocument();
+    fireEvent.input(screen.getByRole('textbox', { name: '输入消息' }), { target: { textContent: '直接回答' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await waitFor(() => expect(onSend).toHaveBeenLastCalledWith(expect.objectContaining({ modelId: 'plain', reasoningEffort: undefined })));
   });
 
   it('可以只发送图片并把图片编码交给宿主', async () => {
@@ -184,6 +253,22 @@ describe('AgentSidebar', () => {
     expect(screen.getByRole('button', { name: '移除附件 参考图.png' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
     await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ content: '', files: [image], attachments: [expect.objectContaining({ name: '参考图.png', type: 'image/png', data: expect.stringMatching(/^data:image\/png;base64,/) })] })));
+  });
+
+  it('宿主接管上传后可发送普通文件，并将其展示为下载链接', async () => {
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    const attachment = { name: 'numbers.csv', type: 'text/csv', size: 8, fileId: 'csv-file', url: '/api/files/csv-file' };
+    const uploadAttachment = vi.fn().mockResolvedValue(attachment);
+    const { rerender } = render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" onSend={onSend} uploadAttachment={uploadAttachment} />);
+    fireEvent.click(screen.getByRole('button', { name: '添加材料或能力' }));
+    fireEvent.click(screen.getByRole('button', { name: /上传文件/ }));
+    const file = new File(['value\n1'], 'numbers.csv', { type: 'text/csv' });
+    fireEvent.change(screen.getByLabelText('选择上传文件'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ files: [file], uploadedAttachments: [attachment] })));
+    rerender(<AgentSidebar open onOpenChange={vi.fn()} sessions={[{ id: 'one', title: '文件', messages: [{ id: 'file-message', role: 'user', content: '', attachments: [attachment] }] }]} activeSessionId="one" />);
+    expect(screen.getByRole('link', { name: 'numbers.csv' })).toHaveAttribute('href', '/api/files/csv-file?download=1');
+    expect(screen.queryByRole('img', { name: 'numbers.csv' })).not.toBeInTheDocument();
   });
 
   it('渲染 Agent 返回的图片附件', () => {

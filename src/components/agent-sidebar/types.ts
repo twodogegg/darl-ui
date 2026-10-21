@@ -1,7 +1,7 @@
 import type { AgentModelCapabilities, AgentModelType } from '../settings/types';
 
 export type AgentMessageRole = 'user' | 'assistant';
-export type AgentToolStatus = 'pending' | 'running' | 'retrying' | 'success' | 'error' | 'confirmation';
+export type AgentToolStatus = 'pending' | 'running' | 'retrying' | 'success' | 'error' | 'confirmation' | 'cancelled';
 
 /** Fixed streaming protocol values used to render generic Agent activity. */
 export type AgentExecutionSource = 'agent' | 'tool';
@@ -27,7 +27,7 @@ export interface AgentExecutionEvent {
   error?: AgentErrorInfo;
 }
 
-export type AgentErrorStage = 'model' | 'mcp-connection' | 'mcp-tool' | 'delegation' | 'tool-validation' | 'validation' | 'cancellation' | 'timeout';
+export type AgentErrorStage = 'model' | 'mcp-connection' | 'mcp-tool' | 'runtime' | 'delegation' | 'tool-validation' | 'validation' | 'cancellation' | 'timeout';
 
 export interface AgentErrorInfo {
   code: string;
@@ -161,6 +161,8 @@ export interface AgentMessage {
 
 export interface AgentSession {
   id: string;
+  /** Fixed when the host starts a conversation from its Agent directory. */
+  agentId?: string;
   title: string;
   updatedAt?: string;
   messages: AgentMessage[];
@@ -180,6 +182,8 @@ export interface AgentSendRequest {
   agentId?: string | null;
 }
 
+export type AgentApprovalMode = 'ask' | 'auto' | 'full';
+
 export interface AgentSidebarProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -196,12 +200,19 @@ export interface AgentSidebarProps {
   onRegenerate?: (messageId: string) => void;
   /** Host confirms or rejects a pending tool call. The host must enforce the decision. */
   onToolConfirm?: (toolCallId: string, approved: boolean) => void | Promise<void>;
+  /** Controlled by the host, which must persist and enforce this policy server-side. */
+  approvalMode?: AgentApprovalMode;
+  onApprovalModeChange?: (mode: AgentApprovalMode) => void | Promise<void>;
+  /** Blocks sending while the host loads or saves the approval policy. */
+  approvalModePending?: boolean;
   applications?: AgentApplication[];
   skills?: AgentSkill[];
   onSkillUpload?: (file: File) => void | Promise<void>;
   onSkillImport?: (skill: AgentSkill) => void | Promise<void>;
+  /** Opens the host's conversation-based Skill creation flow. */
+  onSkillCreate?: () => void | Promise<void>;
   onFileUpload?: (files: File[]) => void | Promise<void>;
-  /** Host stores attachment bytes and returns a stable reference for the message. */
+  /** Host stores attachment bytes and returns a stable reference. When supplied, the file picker also accepts non-image files. */
   uploadAttachment?: (file: File) => Promise<AgentAttachment>;
   models?: AgentModel[];
   selectedApplicationIds?: string[];
@@ -214,6 +225,7 @@ export interface AgentSidebarProps {
   onSelectedReasoningEffortChange?: (effort: string) => void;
   agents?: Array<{ id: string; name: string; avatar?: string; description?: string; type?: 'main_agent' | 'sub_agent'; selectable?: boolean; callable?: boolean; enabled?: boolean; isDefault?: boolean; builtIn?: boolean }>;
   selectedAgentId?: string | null;
+  /** @deprecated Select an Agent before opening the conversation; the sidebar only displays it. */
   onSelectedAgentIdChange?: (id: string) => void;
   pageContext?: string;
   className?: string;

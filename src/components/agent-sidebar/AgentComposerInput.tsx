@@ -1,21 +1,17 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '../ui/Button';
-import type { AgentApplication, AgentSkill } from './types';
+import type { AgentApplication, AgentSidebarProps, AgentSkill } from './types';
 
-// References have a stable identifier; their visible label stays inside the sentence.
-export const referencePattern = /\[([^\]]+)\]\((app|skill):([^\s)]+)\)/g;
-function decodeId(value: string) { try { return decodeURIComponent(value); } catch { return value; } }
-export function referenceIds(value: string, kind: 'app' | 'skill') {
-  return [...new Set(Array.from(value.matchAll(referencePattern)).filter((match) => match[2] === kind).map((match) => decodeId(match[3])))];
-}
+import { referencePattern } from './references';
+export { referenceIds } from './references';
 function read(node: Node): string {
   if (node instanceof HTMLElement && node.dataset.reference) return node.dataset.reference;
   if (node.nodeName === 'BR') return '\n';
   const text = Array.from(node.childNodes).map(read).join('');
   return node.nodeType === Node.TEXT_NODE ? node.textContent || '' : text + (node.nodeName === 'DIV' ? '\n' : '');
 }
-export function AgentComposerInput({ value, onChange, onSubmit, insertion, onInserted, applications = [], skills = [] }: {
-  applications?: AgentApplication[]; skills?: AgentSkill[];
+export function AgentComposerInput({ value, onChange, onSubmit, insertion, onInserted, applications = [], skills = [], agents = [] }: {
+  applications?: AgentApplication[]; skills?: AgentSkill[]; agents?: AgentSidebarProps['agents'];
   value: string; onChange: (value: string) => void; onSubmit: () => void;
   insertion: { token: string; key: number } | null; onInserted: () => void;
 }) {
@@ -27,7 +23,7 @@ export function AgentComposerInput({ value, onChange, onSubmit, insertion, onIns
   const [mention, setMention] = useState<{ query: string } | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const listId = useId();
-  const options = [...applications.filter((item) => !item.status || item.status === 'connected').map((item) => ({ ...item, kind: 'app' as const })), ...skills.map((item) => ({ ...item, kind: 'skill' as const }))]
+  const options = [...agents.map(item => ({ ...item, kind: 'agent' as const })), ...applications.filter((item) => !item.status || item.status === 'connected').map((item) => ({ ...item, kind: 'app' as const })), ...skills.map((item) => ({ ...item, kind: 'skill' as const }))]
     .filter((item) => `${item.name} ${item.description ?? ''}`.toLowerCase().includes(mention?.query.toLowerCase() ?? ''));
   const detectMention = () => {
     if (composing.current) return;
@@ -115,7 +111,7 @@ export function AgentComposerInput({ value, onChange, onSubmit, insertion, onIns
   useLayoutEffect(() => {
     if (mention) document.getElementById(`${listId}-${activeIndex}`)?.scrollIntoView?.({ block: 'nearest' });
   }, [activeIndex, listId, mention]);
-  return <div className="darl-agent-editor-shell"><div ref={editor} contentEditable suppressContentEditableWarning role="textbox" aria-label="输入消息" aria-multiline="true" aria-autocomplete="list" aria-expanded={Boolean(mention)} aria-controls={mention ? listId : undefined} aria-activedescendant={mention && options[activeIndex] ? `${listId}-${activeIndex}` : undefined} className="darl-agent-editor" data-placeholder="输入消息，@ 引用应用或 Skill…" onInput={sync} onCompositionStart={() => { composing.current = true; setMention(null); }} onCompositionEnd={() => { composing.current = false; sync(); }} onKeyUp={(event) => { remember(); if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) detectMention(); }} onMouseUp={() => { remember(); detectMention(); }} onBlur={() => { remember(); setMention(null); }} onPaste={(event) => {
+  return <div className="darl-agent-editor-shell"><div ref={editor} contentEditable suppressContentEditableWarning role="textbox" aria-label="输入消息" aria-multiline="true" aria-autocomplete="list" aria-expanded={Boolean(mention)} aria-controls={mention ? listId : undefined} aria-activedescendant={mention && options[activeIndex] ? `${listId}-${activeIndex}` : undefined} className="darl-agent-editor" data-placeholder="输入消息，@ 联系 Agent、引用应用或 Skill…" onInput={sync} onCompositionStart={() => { composing.current = true; setMention(null); }} onCompositionEnd={() => { composing.current = false; sync(); }} onKeyUp={(event) => { remember(); if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) detectMention(); }} onMouseUp={() => { remember(); detectMention(); }} onBlur={() => { remember(); setMention(null); }} onPaste={(event) => {
     event.preventDefault(); const selection = window.getSelection(); if (!selection?.rangeCount) return;
     const range = selection.getRangeAt(0); range.deleteContents(); const text = document.createTextNode(event.clipboardData.getData('text/plain')); range.insertNode(text); range.setStartAfter(text); range.collapse(true); remember(); sync();
   }} onKeyDown={(event) => {
@@ -128,10 +124,10 @@ export function AgentComposerInput({ value, onChange, onSubmit, insertion, onIns
     }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); onSubmit(); }
   }} />{mention && <div className="darl-agent-mention-menu">
-    <div className="darl-agent-mention-heading">@ 引用应用或 Skill</div>
+    <div className="darl-agent-mention-heading">@ 联系 Agent · 引用应用或 Skill</div>
     <div id={listId} role="listbox" aria-label="能力建议">
-      {options.map((item, index) => <Button key={`${item.kind}:${item.id}`} variant="ghost" role="option" id={`${listId}-${index}`} aria-selected={activeIndex === index} className="darl-agent-mention-option" onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}><span className={`darl-agent-inline-reference darl-agent-inline-reference--${item.kind}`}>@</span><span><strong>{item.name}</strong><small>{item.kind === 'app' ? '应用 · ' : 'Skill · '}{item.description}</small></span></Button>)}
-      {!options.length && <p className="darl-agent-empty">没有匹配的应用或 Skill</p>}
+      {options.map((item, index) => <Button key={`${item.kind}:${item.id}`} variant="ghost" role="option" id={`${listId}-${index}`} aria-selected={activeIndex === index} className="darl-agent-mention-option" onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}><span className={`darl-agent-inline-reference darl-agent-inline-reference--${item.kind}`}>@</span><span><strong>{item.name}</strong><small>{item.kind === 'agent' ? 'Agent · ' : item.kind === 'app' ? '应用 · ' : 'Skill · '}{item.description}</small></span></Button>)}
+      {!options.length && <p className="darl-agent-empty">没有匹配的 Agent、应用或 Skill</p>}
     </div>
   </div>}</div>;
 }

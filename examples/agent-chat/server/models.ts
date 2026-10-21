@@ -68,11 +68,14 @@ export interface FunctionTool { name: string; description?: string; parameters: 
 export interface FunctionCall { id: string; name: string; arguments: string }
 export interface ToolExecution {
   tools: FunctionTool[];
+  maxSteps?: number;
   execute: (call: FunctionCall, signal?: AbortSignal) => Promise<string>;
 }
 
 export interface AgentDelegation {
   name: string;
+  /** Explicit mentions must be attempted before the main Agent can finish. */
+  required?: boolean;
   description: string;
   execute: (task: string, context: Array<Record<string, unknown>>, signal: AbortSignal) => Promise<StructuredAgentResult>;
 }
@@ -148,7 +151,7 @@ export async function* generate(provider: StoredProvider, model: AgentModelConfi
     system: instructions,
     messages: modelMessages(messages.map(sourceBoundMessage)),
     tools: model.capabilities?.tools === false ? undefined : aiTools(execution, signal),
-    stopWhen: stepCountIs(8),
+    stopWhen: stepCountIs(execution?.maxSteps ?? 8),
     toolCallConcurrency: 1,
     maxRetries: 2,
     abortSignal: signal,
@@ -162,6 +165,7 @@ export async function* generate(provider: StoredProvider, model: AgentModelConfi
   signal.throwIfAborted();
   const finishReason = await result.finishReason;
   if (finishReason === 'length') throw new Error('已达到模型输出长度限制');
+  if (finishReason === 'tool-calls') throw failure('runtime', 'TOOL_STEP_LIMIT', '已达到本轮工具调用上限，任务尚未结束。工作区文件已保留，可继续对话。', false);
   if (!hasText) throw new Error('模型没有返回文本内容');
 }
 
@@ -185,11 +189,17 @@ function loopTools(execution: ToolExecution | undefined, delegations: AgentDeleg
 function createToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, delegations?: AgentDelegation[]) {
   const reasoning = reasoningValue(effort);
   const providerOptionsName = provider.protocol === 'openai-responses' ? 'openai' : provider.id;
+  const pending = new Set(delegations?.filter(item => item.required).map(item => item.name));
+  const tracked = delegations?.map(item => ({ ...item, execute: (...args: Parameters<AgentDelegation['execute']>) => { pending.delete(item.name); return item.execute(...args); } }));
   return new ToolLoopAgent({
     model: languageModel(provider, model),
     instructions,
-    tools: model.capabilities?.tools === false ? {} : loopTools(execution, delegations, signal),
-    stopWhen: stepCountIs(8),
+    tools: model.capabilities?.tools === false ? {} : loopTools(execution, tracked, signal),
+    prepareStep: () => {
+      const name = pending.values().next().value;
+      return name ? { activeTools: [name], toolChoice: { type: 'tool' as const, toolName: name } } : {};
+    },
+    stopWhen: stepCountIs(Math.max(execution?.maxSteps ?? 8, pending.size + 1)),
     toolCallConcurrency: 1,
     maxRetries: 2,
     ...(reasoning ? { providerOptions: { [providerOptionsName]: { reasoningEffort: reasoning } } } : {}),
@@ -205,7 +215,9 @@ export async function* generateWithToolLoop(provider: StoredProvider, model: Age
   let hasText = false;
   for await (const text of checkedText(result.textStream)) { hasText = true; yield text; }
   signal.throwIfAborted();
-  if ((await result.finishReason) === 'length') throw new Error('已达到模型输出长度限制');
+  const finishReason = await result.finishReason;
+  if (finishReason === 'length') throw new Error('已达到模型输出长度限制');
+  if (finishReason === 'tool-calls') throw failure('runtime', 'TOOL_STEP_LIMIT', '已达到本轮工具调用上限，任务尚未结束。工作区文件已保留，可继续对话。', false);
   if (!hasText) throw new Error('模型没有返回文本内容');
 }
 
@@ -216,5 +228,6 @@ export async function runToolLoopAgent(provider: StoredProvider, model: AgentMod
   if (!messages.length) throw new Error('子 Agent 对话不能为空');
   const result = await agent.generate({ messages: modelMessages(messages.map(sourceBoundMessage)), abortSignal: signal });
   signal.throwIfAborted();
+  if (result.finishReason === 'tool-calls') throw failure('runtime', 'TOOL_STEP_LIMIT', '子 Agent 已达到本轮工具调用上限，任务尚未结束。', false);
   return structuredAgentResult(result.text);
 }
