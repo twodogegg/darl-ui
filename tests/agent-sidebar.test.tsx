@@ -7,6 +7,21 @@ const skills: AgentSkill[] = [{ id: 'summary', name: '客户摘要', description
 const sessions: AgentSession[] = [{ id: 'one', title: '已有对话', updatedAt: '今天', messages: [{ id: 'assistant', role: 'assistant', content: '## 标题\n\n**加粗**\n\n```ts\nconst answer = true\n```' }] }];
 
 describe('AgentSidebar', () => {
+  it('embeds host-controlled drafts, references and result actions without losing remote updates', async () => {
+    const send = vi.fn();
+    const changed = vi.fn();
+    const props = { open: true, embedded: true, onOpenChange: () => {}, sessions, activeSessionId: 'one', onSend: send, onDraftChange: changed };
+    const { rerender, container } = render(<AgentSidebar {...props} draft="数据库草稿" composerHeader={<span>当前画布引用</span>} renderMessageActions={() => <button>定位成果</button>} />);
+    expect(container.querySelector('.darl-agent-sidebar--embedded')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '输入消息' })).toHaveTextContent('数据库草稿');
+    expect(screen.getByRole('button', { name: '定位成果' })).toBeInTheDocument();
+    rerender(<AgentSidebar {...props} draft="远端新版本" />);
+    expect(screen.getByRole('textbox', { name: '输入消息' })).toHaveTextContent('远端新版本');
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith(expect.objectContaining({ content: '远端新版本' })));
+    expect(screen.getByRole('textbox', { name: '输入消息' })).toHaveTextContent('远端新版本');
+  });
+
   it('offers conversation-based Skill creation without losing the current draft', async () => {
     let created = 0;
     render(<AgentSidebar open onOpenChange={() => {}} sessions={sessions} activeSessionId="one" skills={skills} onSkillCreate={() => { created += 1; }} />);

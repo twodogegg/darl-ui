@@ -88,6 +88,7 @@ export interface AgentConfig {
 export interface AgentsSettingsCardProps {
   agents: AgentConfig[];
   skills?: Array<{ id: string; name: string; enabled?: boolean }>;
+  applications?: Array<{ id: string; name: string }>;
   onSave?: (agent: AgentConfig) => void | Promise<void>;
   onDelete?: (agentId: string) => void | Promise<void>;
 }

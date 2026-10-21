@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { AgentModelCapabilities, AgentModelType } from '../settings/types';
 
 export type AgentMessageRole = 'user' | 'assistant';
@@ -229,6 +230,16 @@ export interface AgentSendRequest {
 export type AgentApprovalMode = 'ask' | 'auto' | 'full';
 
 export interface AgentSidebarProps {
+  /** Embed the same chat inside a host panel or canvas node. */
+  embedded?: boolean;
+  draft?: string;
+  onDraftChange?: (value: string) => void;
+  references?: Array<{ id: string; name: string; description?: string }>;
+  onReference?: (id: string) => void;
+  composerHeader?: ReactNode;
+  composerFooter?: ReactNode;
+  messageHeader?: ReactNode;
+  renderMessageActions?: (message: AgentMessage) => ReactNode;
   voice?: AgentVoice;
   open: boolean;
   onOpenChange: (open: boolean) => void;

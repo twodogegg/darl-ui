@@ -10,8 +10,8 @@ function read(node: Node): string {
   const text = Array.from(node.childNodes).map(read).join('');
   return node.nodeType === Node.TEXT_NODE ? node.textContent || '' : text + (node.nodeName === 'DIV' ? '\n' : '');
 }
-export function AgentComposerInput({ value, onChange, onSubmit, insertion, onInserted, applications = [], skills = [], agents = [] }: {
-  applications?: AgentApplication[]; skills?: AgentSkill[]; agents?: AgentSidebarProps['agents'];
+export function AgentComposerInput({ value, onChange, onSubmit, insertion, onInserted, applications = [], skills = [], agents = [], references = [], onReference }: {
+  applications?: AgentApplication[]; skills?: AgentSkill[]; agents?: AgentSidebarProps['agents']; references?: AgentSidebarProps['references']; onReference?: (id: string) => void;
   value: string; onChange: (value: string) => void; onSubmit: () => void;
   insertion: { token: string; key: number } | null; onInserted: () => void;
 }) {
@@ -23,7 +23,7 @@ export function AgentComposerInput({ value, onChange, onSubmit, insertion, onIns
   const [mention, setMention] = useState<{ query: string } | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const listId = useId();
-  const options = [...agents.map(item => ({ ...item, kind: 'agent' as const })), ...applications.filter((item) => !item.status || item.status === 'connected').map((item) => ({ ...item, kind: 'app' as const })), ...skills.map((item) => ({ ...item, kind: 'skill' as const }))]
+  const options = [...references.map(item => ({ ...item, kind: 'node' as const })), ...agents.map(item => ({ ...item, kind: 'agent' as const })), ...applications.filter((item) => !item.status || item.status === 'connected').map((item) => ({ ...item, kind: 'app' as const })), ...skills.map((item) => ({ ...item, kind: 'skill' as const }))]
     .filter((item) => `${item.name} ${item.description ?? ''}`.toLowerCase().includes(mention?.query.toLowerCase() ?? ''));
   const detectMention = () => {
     if (composing.current) return;
@@ -102,6 +102,7 @@ export function AgentComposerInput({ value, onChange, onSubmit, insertion, onIns
   const choose = (index: number) => {
     const item = options[index];
     if (!item || !mention) return;
+    if (item.kind === 'node') onReference?.(item.id);
     insertToken(`[${item.name.replace(/[\[\]]/g, '')}](${item.kind}:${encodeURIComponent(item.id)})`, mentionRange.current);
   };
   useLayoutEffect(() => {
@@ -126,7 +127,7 @@ export function AgentComposerInput({ value, onChange, onSubmit, insertion, onIns
   }} />{mention && <div className="darl-agent-mention-menu">
     <div className="darl-agent-mention-heading">@ 联系 Agent · 引用应用或 Skill</div>
     <div id={listId} role="listbox" aria-label="能力建议">
-      {options.map((item, index) => <Button key={`${item.kind}:${item.id}`} variant="ghost" role="option" id={`${listId}-${index}`} aria-selected={activeIndex === index} className="darl-agent-mention-option" onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}><span className={`darl-agent-inline-reference darl-agent-inline-reference--${item.kind}`}>@</span><span><strong>{item.name}</strong><small>{item.kind === 'agent' ? 'Agent · ' : item.kind === 'app' ? '应用 · ' : 'Skill · '}{item.description}</small></span></Button>)}
+      {options.map((item, index) => <Button key={`${item.kind}:${item.id}`} variant="ghost" role="option" id={`${listId}-${index}`} aria-selected={activeIndex === index} className="darl-agent-mention-option" onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}><span className={`darl-agent-inline-reference darl-agent-inline-reference--${item.kind}`}>@</span><span><strong>{item.name}</strong><small>{item.kind === 'agent' ? 'Agent · ' : item.kind === 'app' ? '应用 · ' : item.kind === 'node' ? '画布节点 · ' : 'Skill · '}{item.description}</small></span></Button>)}
       {!options.length && <p className="darl-agent-empty">没有匹配的 Agent、应用或 Skill</p>}
     </div>
   </div>}</div>;

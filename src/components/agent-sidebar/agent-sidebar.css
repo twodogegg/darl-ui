@@ -382,3 +382,7 @@
 .darl-agent-speech-transcript p { white-space:pre-wrap; overflow-wrap:anywhere; }
 
 .darl-agent-voice-controls .darl-switch > span { pointer-events:none; }
+
+.darl-agent-sidebar--embedded { position: relative; inset: auto; z-index: auto; width: 100%; height: 100%; min-height: 0; border: 0; box-shadow: none; }
+.darl-agent-sidebar--embedded.darl-agent-sidebar--expanded { position: fixed; z-index: 40; inset: 4vh auto 4vh 50%; width: min(1100px, 90vw); height: 92vh; }
+.darl-agent-inline-reference--node { color: var(--darl-agent-primary); }
