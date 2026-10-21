@@ -283,7 +283,7 @@ import '@darl/ui/styles.css';
 
 ## AgentSidebar｜网站辅助 Agent 侧栏
 
-演示入口：`http://localhost:5188/#agent-sidebar`。右侧会话面板包含新对话、历史搜索与切换、会话重命名与删除（需二次确认）、消息发送、应用 / Skill 选择、模型与思考等级的合并选择入口；消息较长时可直接跳到顶部或底部，也可以展开为居中的大对话窗口。回复操作只有复制和重新生成；整条复制保留原始 Markdown，代码块单独复制代码。Markdown 使用 GFM 渲染，并支持将 `md` / `markdown` 围栏内容渲染为可读内容。
+演示入口：`http://localhost:5188/#agent-sidebar`。右侧会话面板包含新对话、历史搜索与切换、会话重命名与删除（需二次确认）、消息发送、应用 / Skill 选择、模型与思考等级的合并选择入口；消息较长时可直接跳到顶部或底部，也可以展开为居中的大对话窗口。回复操作提供复制和重新生成；配置语音适配器后还可播放独立语音内容；整条复制保留原始 Markdown，代码块单独复制代码。Markdown 使用 GFM 渲染，并支持将 `md` / `markdown` 围栏内容渲染为可读内容。
 
 ```tsx
 import { AgentSidebar } from '@darl/ui';
@@ -316,6 +316,16 @@ import '@darl/ui/styles.css';
 `sessions` 包含会话 ID、标题、消息和可选的固定 `agentId`；`applications`、`skills`、`models` 全部由宿主提供。工具记录通过消息的 `toolCalls` 传入，参数和结果支持任意 JSON，不绑定具体 MCP；普通记录仅显示应用、工具名、状态及失败原因，不提供原始 JSON 展开入口。`onToolConfirm(toolCallId, approved)` 接收用户对 `confirmation` 状态调用的允许或拒绝，宿主必须在服务端落实该决定；确认前会自动展示参数，失败可重试。`onSend` 的正文保留 Agent 稳定 ID 引用，宿主应解析本轮用户消息并校验可调用目录；此外收到会话 ID、应用 / Skill ID、有效模型及推理强度、可选本地附件 `files` 和已编码的图片 `attachments`；组件会在输入区显示缩略图，图片消息可以不带正文。宿主应把 `attachments` 转换为模型供应商的视觉输入，并在 `AgentMessage.attachments` 中回传图片 URL 以显示结果。失败保留草稿并显示错误。模型与思考等级共用一个入口，弹层中先选模型，再选择该模型支持的等级；模型不提供 `reasoningEfforts` 时隐藏等级选项且不发送旧值。`isGenerating/onStop` 可连接宿主生成状态。完整类型从 `@darl/ui` 导出。
 
 `approvalMode` 为宿主控制的 `ask | auto | full`；同时提供 `onApprovalModeChange` 后显示输入框审批菜单。回调可返回 Promise，保存失败会保留原选择并显示错误。`approvalModePending` 在宿主读取/保存策略时阻止切换及发送；生成中无法切换。组件仅展示策略，宿主必须服务端持久化并统一执行；示例会拒绝客户端模式与服务端设置不一致的聊天请求。独立的 `ApprovalModeSelector` 可在宿主设置页复用，组件库不会自行批准任何调用。Playground 的选择只作用于本地 UI 演示。
+
+可选 `voice: AgentVoice` 适配器为侧栏增加语音回复开关、居中大弹窗的音色搜索/分页/试听和语音输入。`enabled/onEnabledChange`、`voiceId/voiceName/onVoiceChange` 由宿主持久化；`loadVoices(query, page, signal, filters?)` 返回 `{ voices: [{ id, name, description?, tags?, languages?, previewUrl? }], hasMore }`。可选 `catalogFilters` 由宿主提供语言、默认语言、排序与分组标签选项，组件将选择值作为 `{ language, sort, tags }` 传给 `loadVoices`；筛选改变时取消旧请求并从第一页重新查询。音色目录桌面端最多三列，手机端单列，搜索和筛选栏保持可见。试听直接播放 `previewUrl` 指向的已有音频，Fish 示例读取 `samples[].audio`，不调用 TTS；无样本时禁用试听，加载失败显示错误，切换试听或关闭弹窗会停止并释放音频。`synthesize(text, voiceId, signal)` 返回 `{ body: ReadableStream<Uint8Array>, sampleRate }`，音频必须是有符号 16 位小端、单声道 PCM；播放器先缓冲约 0.5 秒音频，再边收边播，不等待完整文件。`transcribe(file, signal)` 可选，返回识别文字并追加到当前会话草稿，用户编辑后发送。录音最长 2 分钟，音频不超过 25MB；麦克风需要 HTTPS 或 localhost。
+
+`onSend` 在配置语音时附带当前轮 `voiceMode`。宿主应按轮给 Agent 注入语音规则；`AgentMessage.outputs` 按顺序接收 `{ output_type: 'text' | 'speech', content: string }`，`content` 拼接文字输出，语音内容单独显示可展开的文稿。新回复在 `streaming: true` 时追加的 speech 输出会自动进入播放队列；历史恢复或事后开启开关不会自动朗读。语音可单独输出，不要求复制文字全文。关闭开关、关闭侧栏、切换会话/音色、停止生成或录音都会清理当前播放和请求；手动停止后不会自动续播本条消息剩余语音。
+
+真实 Fish Audio 示例位于 `examples/agent-chat`：设置 `FISH_API_KEY` 或在「设置 → 语音」保存密钥，再在聊天框选择音色、试听并开启语音回复。默认 TTS 为 `s2.1-pro-free`，可切换 `s2.1-pro` / `s2-pro`；ASR 为 `transcribe-1-pro`。免费模型受供应商当前政策限制。配置保存在宿主 SQLite，密钥不返回浏览器。`/api/voice/settings` 管理配置，`/api/voice/voices` 读取真实音色目录，`/api/voice/transcribe` 接收原始音频，`/api/voice/speech` 代理 PCM 流。
+
+语音模式的模型输出采用 JSON Lines，每行一个完整输出对象；服务端验证并立即发送 NDJSON `{ type: 'output', output }` 事件，文字与语音并行交付，不向页面泄露半截 JSON。较长回复按语义分段，以便早开始播放。提示词读取 `examples/agent-chat/prompts/voice.md`；Fish S2 标签完整用法保存在 `prompts/voice-tags.json`，同一会话、同一模型首次使用语音时提供完整指南，成功完成后在宿主 SQLite 记住指南版本，后续只发送简短摘要。切换模型或指南更新后重新加载；失败或取消不记为加载成功。刷新页面及重启服务不会重复发送已经加载的完整指南。语音原文保留方括号情绪/语气/停顿提示并传给 TTS，显示和复制的语音文稿隐藏控制标签。语音模式规则只影响当前主 Agent 的用户回复，不修改子 Agent 的执行要求。普通文字模式沿用原有流式协议。语音输出文案随消息保存并带入后续对话，原始录音和合成音频不长期保存，重播会重新调用 TTS。实际首声时间仍包含模型、网络和 TTS 延迟；0.5 秒是音频预缓冲量，不是总延迟保证。流格式错误时会显示错误并保留已收到内容；只读文字或只输出语音均可。
+
+接口依据：[Fish TTS](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech)、[Fish ASR](https://docs.fish.audio/features/speech-to-text)。本地并行开发可在 `.env.local` 设置 `AGENT_CHAT_PORT`、`PLAYGROUND_PORT`，保持固定端口和 `npm run dev` 同时启动。
 
 `AgentMessage.timeline` 可接收按流式顺序排列的 `AgentExecutionEvent`。事件只包含通用的 `source`、`status`、`name`、`runId`、`parentRunId`、`agentId`、时间戳、耗时和安全错误摘要；`source: 'agent'` 会区分主 Agent 与子 Agent，`source: 'tool'` 显示 MCP 工具。侧栏默认折叠时间线，展开后按父子运行关系缩进，并显示真实耗时、重试、确认、失败、取消和超时；原始参数和结果仍只在确认卡片中按既有规则展示，不进入时间线事件。
 

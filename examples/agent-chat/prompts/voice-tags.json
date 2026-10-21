@@ -1,0 +1,14 @@
+{
+  "title": "Fish Audio 语音标签",
+  "summary": "Fish S2 使用方括号自然语言提示，例如 [friendly]、[excited]、[soft tone]、[emphasis]、[break]。情绪通常放在句首，强调放在词前，停顿放在需要的位置。按内容自然选择，允许不用标签，不逐句重复或堆砌；只写在 speech.content，text 不带控制标签。S2 不使用 S1 的圆括号格式。",
+  "instructions": [
+    "适用当前支持的 s2.1-pro-free、s2.1-pro、s2-pro。方括号中是给 TTS 的表达提示，不是要说出来的文字。S2 支持开放的自然语言描述，不限于固定枚举；建议使用简短清楚的英文描述，中文正文正常保留。",
+    "情绪标签通常放在它控制的句子开头。[friendly] 可用于友善回应，[excited] 表达确实值得高兴的事情，[sympathetic] 表达关切，[curious] 自然提问。也可以用 [warm and reassuring] 或 [slightly surprised] 等短描述，根据上下文选择，不把任意情绪套给所有回答。",
+    "语气可以放在相应位置：[soft tone] 表达温和轻柔，[whispering] 用于确实需要低声的表达，[emphasis] 紧靠需要强调的词或短语。普通解释不使用喊叫、尖叫或夸张的戏剧腔。",
+    "[break] 和 [long-break] 表示短暂停顿和较长停顿。[chuckling]、[laughing]、[sighing] 等用于确实合适的自然人声；不为增加表现力而强行插入笑声、叹气或背景音。",
+    "一个句子通常一个主要情绪就足够；可以在转折处换语气，不叠加互相冲突的提示，不每句都重复同一标签。标签可省略，不把打标签变成固定模板。",
+    "独立输出示例：{\"output_type\":\"speech\",\"content\":\"[friendly] 好，我们先看看你最关心的部分。[break] 这里需要注意的是 [emphasis] 时间安排。\"}。这是写法示例，不是每轮要复用的话术。",
+    "speech 每段仍表达完整意思，并及时输出换行供流式播放。每段由独立 TTS 请求合成，需要特别表达的语气应在该段注明，不假定上一段的情绪状态会自动延续。文字和文件交付规则不变。"
+  ],
+  "source": "https://docs.fish.audio/developer-guide/core-features/emotions"
+}

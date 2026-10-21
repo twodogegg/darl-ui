@@ -93,6 +93,7 @@ export function AgentSidebarDemo() {
     <DefaultModelSelector models={mediaModels} kinds={['image', 'video']} value={defaultModelSelection} onChange={setDefaultModelSelection} open={defaultModelsOpen} onOpenChange={setDefaultModelsOpen} onComplete={(selection: DefaultModelSelection) => { setDefaultModelSelection(selection); setDefaultModelsOpen(false); }} />
     <Button variant="outline" onClick={previewConfirmation}>演示工具确认</Button>
     <Button variant="outline" onClick={previewMediaConfirmation}>演示生成确认</Button>
+    <p className="demo-mock-hint">语音输入、流式语音回复、音色选择与试听使用真实 Fish Audio 服务，请在 <a href="http://localhost:5197" target="_blank" rel="noreferrer">Agent Chat 示例</a> 中配置并体验。</p>
     <p className="demo-mock-hint"><ExternalLink aria-hidden="true" />本地演示不会调用真实网站工具，也不会上传 Skill 文件。</p>
   </div>;
 }

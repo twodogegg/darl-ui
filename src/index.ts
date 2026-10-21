@@ -14,7 +14,7 @@ export { AgentPlaza } from './components/agent-plaza/AgentPlaza';
 export type { AgentPlazaProps } from './components/agent-plaza/AgentPlaza';
 export { SkillManager } from './components/agent-sidebar/SkillManager';
 export { importSkillPackage, parseSkillMarkdown, skillMarkdown, newSkillDraft } from './components/agent-sidebar/skill-package';
-export type { AgentApprovalMode, AgentSidebarProps, AgentApplication, AgentAttachment, AgentErrorInfo, AgentErrorStage, AgentExecutionEvent, AgentExecutionSource, AgentExecutionStatus, AgentImageAttachment, AgentMessage, AgentModel, AgentSession, AgentSkill, AgentSkillDraft, AgentSkillResource, AgentTool, AgentToolCall, AgentSendRequest, AgentMessageRole, AgentToolStatus } from './components/agent-sidebar/types';
+export type { AgentVoice, AgentVoiceOption, AgentVoiceFilters, AgentOutput, AgentApprovalMode, AgentSidebarProps, AgentApplication, AgentAttachment, AgentErrorInfo, AgentErrorStage, AgentExecutionEvent, AgentExecutionSource, AgentExecutionStatus, AgentImageAttachment, AgentMessage, AgentModel, AgentSession, AgentSkill, AgentSkillDraft, AgentSkillResource, AgentTool, AgentToolCall, AgentSendRequest, AgentMessageRole, AgentToolStatus } from './components/agent-sidebar/types';
 export { SettingsPage } from './components/settings/SettingsPage';
 export { AgentsSettingsCard } from './components/settings/AgentsSettingsCard';
 export { ModelSettingsCard } from './components/settings/ModelSettingsCard';

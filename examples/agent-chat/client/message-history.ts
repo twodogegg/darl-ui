@@ -8,6 +8,11 @@ export function finishToolCalls(calls: AgentToolCall[] | undefined, error?: Agen
     : call);
 }
 
+export function messageTextForModel(message: AgentMessage): string {
+  const speech = message.role === 'assistant' ? message.outputs?.filter((output) => output.output_type === 'speech').map((output) => output.content).join('\n') : '';
+  return [message.content, speech ? `[语音回复]\n${speech}` : '', toolHistoryForModel(message)].filter(Boolean).join('\n\n');
+}
+
 function formatOutput(value: unknown): string {
   if (value === undefined) return '';
   if (typeof value === 'string') return value.slice(0, MAX_TOOL_OUTPUT);

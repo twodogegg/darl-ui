@@ -14,6 +14,7 @@ import '@darl/ui/styles.css';
   onSessionDelete={deleteSession}
   onNewSession={createSession}
   onSend={sendMessage}
+  voice={voiceAdapter}
   onRegenerate={regenerateMessage}
   onToolConfirm={confirmToolCall}
   approvalMode={approvalMode}
@@ -77,6 +78,11 @@ const streamExample = `{"type":"meta","requestId":"request-id","runId":"run-id"}
 {"type":"text","text":"正在创建技能。"}
 {"type":"tool","call":{"id":"call-id","appId":"builtin:runtime","appName":"内置 / Skill 与执行环境","toolName":"builtin_create_skill","toolTitle":"创建 / 安装 Skill","status":"success"}}
 {"type":"skills-changed"}
+{"type":"done"}
+
+// 开启语音模式时，Agent 分别生成文字与语音文案
+{"type":"output","output":{"output_type":"text","content":"适合阅读的完整内容"}}
+{"type":"output","output":{"output_type":"speech","content":"适合听的交流内容"}}
 {"type":"done"}`;
 
 const imageExample = `// 在完整聊天请求中转换附件；沿用 sessionId、模型和历史

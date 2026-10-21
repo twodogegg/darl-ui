@@ -143,10 +143,51 @@ export interface AgentImageAttachment {
   fileId?: string;
 }
 
+export interface AgentOutput {
+  output_type: 'text' | 'speech';
+  content: string;
+}
+
+export interface AgentVoiceOption {
+  id: string;
+  name: string;
+  description?: string;
+  tags?: string[];
+  languages?: string[];
+  /** Existing sample audio from the host; no synthesis is requested for previews. */
+  previewUrl?: string;
+}
+
+export interface AgentVoiceFilters {
+  language?: string;
+  tags?: string[];
+  sort?: string;
+}
+
+export interface AgentVoice {
+  enabled: boolean;
+  onEnabledChange: (enabled: boolean) => void;
+  voiceId: string;
+  voiceName?: string;
+  onVoiceChange: (voice: AgentVoiceOption) => void;
+  /** Optional host-defined catalog controls; filters are applied by loadVoices. */
+  catalogFilters?: {
+    languages: Array<{ value: string; label: string }>;
+    defaultLanguage?: string;
+    sorts: Array<{ value: string; label: string }>;
+    tagGroups: Array<{ label: string; options: Array<{ value: string; label: string }> }>;
+  };
+  loadVoices: (query: string, page: number, signal: AbortSignal, filters?: AgentVoiceFilters) => Promise<{ voices: AgentVoiceOption[]; hasMore: boolean }>;
+  /** Streaming signed 16-bit little-endian mono PCM. Credentials stay in the host. */
+  synthesize: (text: string, voiceId: string, signal: AbortSignal) => Promise<{ body: ReadableStream<Uint8Array>; sampleRate: number }>;
+  transcribe?: (file: File, signal: AbortSignal) => Promise<string>;
+}
+
 export interface AgentMessage {
   id: string;
   role: AgentMessageRole;
   content: string;
+  outputs?: AgentOutput[];
   createdAt?: string;
   streaming?: boolean;
   attachments?: Array<string | AgentAttachment>;
@@ -169,6 +210,7 @@ export interface AgentSession {
 }
 
 export interface AgentSendRequest {
+  voiceMode?: boolean;
   files?: File[];
   attachments?: AgentImageAttachment[];
   /** Uploaded non-image attachments. Hosts may persist these without pretending the model can read them. */
@@ -185,6 +227,7 @@ export interface AgentSendRequest {
 export type AgentApprovalMode = 'ask' | 'auto' | 'full';
 
 export interface AgentSidebarProps {
+  voice?: AgentVoice;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sessions: AgentSession[];

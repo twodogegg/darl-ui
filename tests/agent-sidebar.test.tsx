@@ -38,6 +38,38 @@ describe('AgentSidebar', () => {
     expect(screen.queryByText('已取消失败')).not.toBeInTheDocument();
   });
 
+  it('opens a viewport dialog and cancels catalog loading when Escape returns focus', async () => {
+    let catalogSignal: AbortSignal | undefined;
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[]} voice={{
+      enabled: false, voiceId: '', onEnabledChange: vi.fn(), onVoiceChange: vi.fn(),
+      loadVoices: (_query, _page, signal) => { catalogSignal = signal; return new Promise(() => {}); },
+      synthesize: async () => { throw new Error('No audio requested by this test'); },
+    }} />);
+    const trigger = screen.getByRole('button', { name: '选择音色' });
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole('dialog', { name: '选择音色' });
+    expect(dialog).toHaveClass('darl-agent-voice-dialog');
+    expect(within(dialog).getByRole('textbox', { name: '搜索音色' })).toBeInTheDocument();
+    await waitFor(() => expect(catalogSignal).toBeDefined());
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '选择音色' })).not.toBeInTheDocument());
+    expect(catalogSignal?.aborted).toBe(true);
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it('hides Fish controls in speech transcripts while preserving written brackets', () => {
+    const history: AgentSession[] = [{ id: 'voice', title: '语音', messages: [
+      { id: 'spoken', role: 'assistant', content: '', outputs: [{ output_type: 'speech', content: '[soft tone] 你好，我在这里。' }] },
+      { id: 'both', role: 'assistant', content: '[文字注释] 保持可见。', outputs: [{ output_type: 'speech', content: '[warm and reassuring] 我们慢慢来。[break] 不用着急。' }] },
+    ] }];
+    const { container } = render(<AgentSidebar open onOpenChange={vi.fn()} sessions={history} activeSessionId="voice" />);
+    expect(screen.getByText('你好，我在这里。')).toBeInTheDocument();
+    expect(container).toHaveTextContent('[文字注释] 保持可见。');
+    expect(container).toHaveTextContent(/我们慢慢来。\s*不用着急。/);
+    expect(container).not.toHaveTextContent('[soft tone]');
+    expect(container).not.toHaveTextContent('[warm and reassuring]');
+    expect(container).not.toHaveTextContent('[break]');
+  });
   it('renders structured request errors with stage and trace identifiers', () => {
     const error: AgentErrorInfo = { code: 'MCP_CONNECTION_FAILED', stage: 'mcp-connection', message: '无法连接 MCP 应用', requestId: 'req-123', runId: 'run-456', retryable: true, suggestion: '检查应用地址后重试。' };
     render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[{ id: 'error', title: '失败', messages: [{ id: 'answer', role: 'assistant', content: '', error }] }]} activeSessionId="error" />);
