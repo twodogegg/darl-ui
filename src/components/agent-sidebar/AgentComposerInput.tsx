@@ -25,7 +25,7 @@ export function AgentComposerInput({ value, onChange, onSubmit, onPasteImages, i
   const [activeIndex, setActiveIndex] = useState(0);
   const listId = useId();
   const options = [...references.map(item => ({ ...item, kind: 'node' as const })), ...agents.map(item => ({ ...item, kind: 'agent' as const })), ...applications.filter((item) => !item.status || item.status === 'connected').map((item) => ({ ...item, kind: 'app' as const })), ...skills.map((item) => ({ ...item, kind: 'skill' as const }))]
-    .filter((item) => `${item.name} ${item.description ?? ''}`.toLowerCase().includes(mention?.query.toLowerCase() ?? ''));
+    .filter((item) => [item.name, item.kind === 'skill' ? item.slug : ''].some((name) => name?.toLowerCase().includes(mention?.query.toLowerCase() ?? '')));
   const detectMention = () => {
     if (composing.current) return;
     const selection = window.getSelection();
@@ -137,7 +137,7 @@ export function AgentComposerInput({ value, onChange, onSubmit, onPasteImages, i
   }} />{mention && <div className="darl-agent-mention-menu">
     <div className="darl-agent-mention-heading">@ 联系 Agent · 引用应用或 Skill</div>
     <div id={listId} role="listbox" aria-label="能力建议">
-      {options.map((item, index) => <Button key={`${item.kind}:${item.id}`} variant="ghost" role="option" id={`${listId}-${index}`} aria-selected={activeIndex === index} className="darl-agent-mention-option" onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}><span className={`darl-agent-inline-reference darl-agent-inline-reference--${item.kind}`}>@</span><span><strong>{item.name}</strong><small>{item.kind === 'agent' ? 'Agent · ' : item.kind === 'app' ? '应用 · ' : item.kind === 'node' ? '画布节点 · ' : 'Skill · '}{item.description}</small></span></Button>)}
+      {options.map((item, index) => <Button key={`${item.kind}:${item.id}`} variant="ghost" role="option" id={`${listId}-${index}`} aria-selected={activeIndex === index} className="darl-agent-mention-option" onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}><span className={`darl-agent-inline-reference darl-agent-inline-reference--${item.kind}`}>@</span><span><strong>{item.name}{item.kind === 'skill' && item.slug && item.slug !== item.name ? ` (${item.slug})` : ''}</strong><small>{item.kind === 'agent' ? 'Agent · ' : item.kind === 'app' ? '应用 · ' : item.kind === 'node' ? '画布节点 · ' : 'Skill · '}{item.description}</small></span></Button>)}
       {!options.length && <p className="darl-agent-empty">没有匹配的 Agent、应用或 Skill</p>}
     </div>
   </div>}</div>;

@@ -47,7 +47,7 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
       if (filter === 'favorite' && !skill.favorite) return false;
       if (filter === 'mine' && !mine) return false;
       if (filter === 'builtin' && mine) return false;
-      return !text || `${skill.name} ${skill.description || ''} ${skill.id}`.toLocaleLowerCase().includes(text);
+      return !text || [skill.name, skill.slug].some((name) => name?.toLocaleLowerCase().includes(text));
     });
   }, [filter, query, skills]);
 
@@ -206,7 +206,7 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
         </aside>
         <section className="darl-agent-skill-editor">
           <div className="darl-agent-skill-editor-heading"><div><span className="darl-agent-manager-eyebrow">{selectedId ? 'EDIT SKILL' : 'NEW SKILL'}</span><h3>{draft.name || '新建 Skill'}</h3></div><div className="darl-agent-skill-editor-actions">{selected && !isBuiltin && <Button variant="ghost" size="sm" onClick={() => void remove()}><Trash2 data-icon="inline-start" />删除</Button>}</div></div>
-          <div className="darl-agent-skill-form"><label><span>名称</span><input value={draft.name || ''} disabled={isBuiltin} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="例如：代码审查" /></label><label><span>描述</span><textarea value={draft.description || ''} disabled={isBuiltin} rows={2} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="说明什么时候使用这个 Skill" /></label><div className="darl-agent-skill-auto-invocation"><Switch aria-label="允许自动调用" checked={draft.allowImplicitInvocation !== false} onChange={(event) => setDraft({ ...draft, allowImplicitInvocation: event.target.checked })}>允许自动调用</Switch><small>关闭后，只有在聊天中手动 @ 引用时才会使用。</small></div></div>
+          <div className="darl-agent-skill-form"><label><span>Skill 原名</span><input value={draft.slug || draft.name || ''} readOnly /></label><label><span>显示名称</span><input value={draft.name || ''} disabled={isBuiltin} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="例如：代码审查" /></label><label><span>描述</span><textarea value={draft.description || ''} disabled={isBuiltin} rows={2} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="说明什么时候使用这个 Skill" /></label><div className="darl-agent-skill-auto-invocation"><Switch aria-label="允许自动调用" checked={draft.allowImplicitInvocation !== false} onChange={(event) => setDraft({ ...draft, allowImplicitInvocation: event.target.checked })}>允许自动调用</Switch><small>关闭后，只有在聊天中手动 @ 引用时才会使用。</small></div></div>
           <div className="darl-agent-skill-files">
             <aside><div className="darl-agent-skill-files-heading"><strong>文件 <span>{resources.length + 1}</span></strong><Button variant="ghost" size="sm" disabled={isBuiltin} onClick={() => { let index = resources.length + 1; while (resources.some((resource) => resource.path === `references/resource-${index}.md`)) index += 1; const path = `references/resource-${index}.md`; setDraft({ ...draft, resources: [...resources, { path, content: '' }] }); setResourcePath(path); setFileMode('edit'); }}><Plus data-icon="inline-start" />资源</Button></div>
               <SkillFileTree key={draft.id} paths={['SKILL.md', ...resources.map((resource) => resource.path)]} selectedPath={filePath} onSelect={selectFile} />

@@ -350,7 +350,7 @@ import '@darl/ui/styles.css';
 
 组件保留各会话的本地草稿和待发送附件，支持 DarlUIProvider 主题。桌面固定在右侧，手机端全屏。Skill 管理器在「设置 → Skills」中支持新建、编辑、收藏、删除，以及导入 `SKILL.md` 或单个 Skill 目录的 ZIP / 文件集合；支持配套的 `references/`、`scripts/`、`assets/`、`agents/`、根目录依赖清单和其他资源文件。文件按目录分层显示并可折叠；Markdown 默认渲染预览，支持切换源码编辑、表格、代码块和包内相对链接及图片，内置 Skill 的源码只读。导入会校验 frontmatter、资源路径和大小，忽略 `.git`、`node_modules` 等缓存，不在导入时执行脚本。Skill 版本在保存时递增，真实存储由宿主通过 `onSkillImport/onSkillSave/onSkillDelete` 接管。演示中的历史和 Skill 保存在当前页面内存中，示例回复和工具记录均为本地演示，附件不上传。真实模型、MCP 执行、账号鉴权和服务端历史留给宿主接入。
 
-应用和 Skill 从选择面板插入输入光标处，作为正文内引用，不显示输入框上方标签，也不自动传入当前页面。输入 `@` 引用应用或 Skill；继续输入名称或简介关键词可以筛选，上下方向键选择，Enter / Tab 插入，Esc 关闭建议。应用引用为蓝色，Skill 引用为紫色，可用 `--darl-agent-app` / `--darl-agent-skill` 覆盖。引用编码为 `[显示名称](app:ID)` / `[显示名称](skill:ID)`，发送时从正文派生应用和 Skill ID；删除引用即取消本次使用。
+应用和 Skill 从选择面板插入输入光标处，作为正文内引用，不显示输入框上方标签，也不自动传入当前页面。输入 `@` 引用应用或 Skill；继续输入名称可以筛选，Skill 同时支持原名（`SKILL.md` 的 `name`，保存在 `slug`）和显示名称，忽略大小写，不匹配描述。管理 Skill 分别展示只读原名与可编辑显示名称，搜索也只匹配这两个名称。上下方向键选择，Enter / Tab 插入，Esc 关闭建议。应用引用为蓝色，Skill 引用为紫色，可用 `--darl-agent-app` / `--darl-agent-skill` 覆盖。引用编码为 `[显示名称](app:ID)` / `[显示名称](skill:ID)`，发送时从正文派生应用和 Skill ID；删除引用即取消本次使用。
 
 ## AgentPlaza｜主 Agent 广场
 

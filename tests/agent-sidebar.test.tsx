@@ -204,6 +204,34 @@ describe('AgentSidebar', () => {
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 
+  it.each(['@darl', '@DARL-STUDIO', '@本入剧出'])('matches Skill package and display names for %s and inserts its stable ID', async (query) => {
+    const onSend = vi.fn();
+    const skill: AgentSkill = { id: 'studio', slug: 'darl-studio', name: '本入剧出网站操作', description: 'paperboat' };
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one" skills={[skill]} onSend={onSend} />);
+    const editor = screen.getByRole('textbox', { name: '输入消息' });
+    const node = document.createTextNode(query); editor.append(node);
+    const range = document.createRange(); range.setStart(node, query.length); range.collapse(true);
+    window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range); fireEvent.input(editor);
+    expect(screen.getAllByRole('option')).toHaveLength(1);
+    expect(screen.getByRole('option')).toHaveTextContent('本入剧出网站操作 (darl-studio)');
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(editor.querySelector('.darl-agent-inline-reference--skill')).toHaveTextContent('@本入剧出网站操作');
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ content: '[本入剧出网站操作](skill:studio)', skillIds: ['studio'] })));
+  });
+
+  it('does not match @ suggestions by descriptions', () => {
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} activeSessionId="one"
+      applications={apps} skills={skills} agents={[{ id: 'writer', name: '写作助手', description: '整理客户信息' }]} />);
+    const editor = screen.getByRole('textbox', { name: '输入消息' });
+    const node = document.createTextNode('@客户信息'); editor.append(node);
+    const range = document.createRange(); range.setStart(node, node.length); range.collapse(true);
+    window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range); fireEvent.input(editor);
+    expect(screen.queryByRole('option')).not.toBeInTheDocument();
+    expect(screen.getByText('没有匹配的 Agent、应用或 Skill')).toBeInTheDocument();
+  });
+
   it('Backspace 和 Delete 可以整块删除 MCP / Skill 引用并同步状态', () => {
     const appChanges = vi.fn();
     const skillChanges = vi.fn();

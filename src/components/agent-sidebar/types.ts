@@ -59,9 +59,11 @@ export interface AgentApplication {
 
 export interface AgentSkill {
   id: string;
+  /** Display name, which can differ from the package name. */
   name: string;
   description?: string;
   version?: string;
+  /** Original name from SKILL.md frontmatter; also used for @ matching. */
   slug?: string;
   /** Original YAML metadata, preserved when exporting SKILL.md. */
   frontmatter?: string;

@@ -17,6 +17,29 @@ describe('SkillManager', () => {
     ],
   };
 
+  it('shows the original Skill name and preserves it when editing the display name', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<SkillManager open skills={[{ ...documentSkill, slug: 'document-tools' }]} onClose={vi.fn()} onSave={onSave} onDelete={vi.fn()} onImport={vi.fn()} onFavoriteChange={vi.fn()} />);
+    expect(screen.getByLabelText('Skill 原名')).toHaveValue('document-tools');
+    expect(screen.getByLabelText('Skill 原名')).toHaveAttribute('readonly');
+    expect(screen.getByLabelText('显示名称')).toHaveValue('文档技能');
+    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: '文档助手' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ id: 'documents', slug: 'document-tools', name: '文档助手' })));
+  });
+
+  it('searches by original or display name without matching descriptions', () => {
+    render(<SkillManager open skills={[{ ...documentSkill, slug: 'document-tools' }]} onClose={vi.fn()} onSave={vi.fn()} onDelete={vi.fn()} onImport={vi.fn()} onFavoriteChange={vi.fn()} />);
+    const search = screen.getByRole('textbox', { name: '搜索 Skill' });
+    const list = document.querySelector('.darl-agent-skill-list')!;
+    for (const value of ['DOCUMENT-TOOLS', '文档技能']) {
+      fireEvent.change(search, { target: { value } });
+      expect(list).toHaveTextContent('文档技能');
+    }
+    fireEvent.change(search, { target: { value: '阅读和编辑' } });
+    expect(list).toHaveTextContent('没有匹配的 Skill');
+  });
+
   it('previews Markdown safely and opens relative resource links with tables, code and packaged images', () => {
     render(<SkillManager open skills={[documentSkill]} onClose={vi.fn()} onSave={vi.fn()} onDelete={vi.fn()} onImport={vi.fn()} onFavoriteChange={vi.fn()} />);
     expect(screen.getByRole('heading', { name: '使用说明' })).toBeInTheDocument();
