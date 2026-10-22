@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LocalStorage } from '../examples/agent-chat/server/storage';
 import { FileStore } from '../examples/agent-chat/server/file-storage';
 import { ProjectStore } from '../examples/agent-chat/server/project-store';
-import { StudioStore } from '../examples/agent-chat/server/studio';
+import { StudioStore, STUDIO_TOOLS } from '../examples/agent-chat/server/studio';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import { removeEpisode } from '../examples/agent-chat/client/studio/scenes';
 import { assetImageRequest } from '../examples/agent-chat/client/studio/art';
 import { studioPositions, type StudioChange } from '../examples/agent-chat/studio-schema';
@@ -26,6 +27,45 @@ afterEach(() => rmSync(directory, { recursive: true, force: true }));
 const shots = (count = 40): StudioChange[] => Array.from({ length: count }, (_, index) => ({ resource: 'shots', op: 'create', id: `shot-${index}`, position: index, values: { episodeId: 'episode-1', sceneId: 'scene-1', description: `动作 ${index}`, duration: 3 } }));
 
 describe('shared short drama business service', () => {
+  it('discovers required fields and reports the invalid query field with available choices', () => {
+    expect(store.query({ resource: 'assets', describe: true })).toMatchObject({ requiredOnCreate: ['projectId', 'name'], valuesSchema: { properties: { projectId: { type: 'string', minLength: 1 } } } });
+    expect(() => store.query({ resource: 'episodes', fields: ['plannedEpisodes'] })).toThrow('episodes.fields=["plannedEpisodes"]');
+    expect(() => store.query({ resource: 'episodes', fields: ['plannedEpisodes'] })).toThrow('projectId, number');
+  });
+
+  it('rejects missing associations in the tool schema before execution, while permitting partial updates', () => {
+    const validate = new AjvJsonSchemaValidator().getValidator(STUDIO_TOOLS[1].parameters);
+    const change = { resource: 'assets', op: 'create', id: 'character', values: { name: '角色' } };
+    const check = (changes: unknown[]) => validate({ requestId: 'schema-check', changes });
+    const missingProject = check([change]);
+    expect(missingProject.valid).toBe(false);
+    expect(missingProject.errorMessage).toContain('projectId');
+    expect(check([{ ...change, values: { ...change.values, projectId } }]).valid).toBe(true);
+    const shot = { resource: 'shots', op: 'create', id: 'shot', values: { episodeId: 'episode-1', sceneId: 'scene-1', dialogue: [{ type: '角色', text: '你好' }] } };
+    expect(check([shot]).valid).toBe(false);
+    expect(check([shot]).errorMessage).toContain('assetId');
+    expect(check([{ ...shot, values: { ...shot.values, dialogue: [{ type: '旁白', text: '门开了' }] } }]).valid).toBe(true);
+    expect(check([{ resource: 'shots', op: 'update', id: 'shot', version: 1, values: { duration: 4 } }]).valid).toBe(true);
+    expect(check([{ resource: 'shots', op: 'delete', id: 'shot', version: 1 }]).valid).toBe(true);
+    expect(check([{ resource: 'shots', op: 'update', id: 'shot', values: { duration: 4 } }]).valid).toBe(false);
+    expect(check([{ resource: 'shots', op: 'update', id: 'shot', version: 1, values: { projectId } }]).valid).toBe(false);
+    expect(validate({ requestId: 'undo', undoBatchId: 'prior' }).valid).toBe(true);
+  });
+
+  it('locates missing references and saves character assets with their shots in one atomic batch', () => {
+    const shot: StudioChange = { ...shots(1)[0], values: { ...shots(1)[0].values, dialogue: [{ type: '角色', text: '你好' }] } };
+    expect(() => store.apply('missing-character', [shot])).toThrow('shots[shot-0].dialogue[0].assetId 必填');
+    expect(store.snapshot().shots).toHaveLength(0);
+    expect(() => store.apply('missing-project', [{ resource: 'assets', id: 'character', op: 'create', values: { name: '角色' } }])).toThrow('assets[character].projectId 必填');
+    const boundShot = { ...shot, values: { ...shot.values, dialogue: [{ type: '角色', assetId: 'character', text: '你好' }, { type: '旁白', text: '门开了' }] } };
+    expect(() => store.apply('unknown-character', [boundShot])).toThrow('shots[shot-0].dialogue[0].assetId：引用的 assets 记录 character 不存在');
+    const changes: StudioChange[] = [boundShot, { resource: 'assets', id: 'character', op: 'create', values: { projectId, name: '角色' } }];
+    store.apply('character-and-shot', changes);
+    expect(store.snapshot().shots[0].dialogue).toEqual(boundShot.values.dialogue);
+    expect(store.snapshot().assets[0].projectId).toBe(projectId);
+    expect(store.apply('character-and-shot', changes).changed).toHaveLength(2);
+  });
+
   it('starts without invented projects/assets/results and persists real batches with field filtering and pagination', () => {
     expect(store.snapshot().assets).toEqual([]);
     expect(store.snapshot().clips).toEqual([]);

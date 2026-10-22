@@ -2,7 +2,7 @@ import type { ModelProvider, AgentModelConfig } from '../../../src/index';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
-import { dynamicTool, jsonSchema, stepCountIs, streamText, ToolLoopAgent, type LanguageModel, type ModelMessage, type OutputInterface } from 'ai';
+import { dynamicTool, jsonSchema, stepCountIs, streamText, ToolLoopAgent, wrapLanguageModel, type LanguageModel, type ModelMessage, type OutputInterface } from 'ai';
 import { failure } from './errors';
 import { sourceBoundMessage, structuredAgentResult, type StructuredAgentResult } from './context';
 import { recordLanguageModel } from './model-records';
@@ -127,12 +127,20 @@ function reasoningValue(effort: string | undefined) {
   return effort && ({ 低: 'low', 中: 'medium', 高: 'high' }[effort] || effort);
 }
 
-export function languageModel(provider: StoredProvider, model: AgentModelConfig): LanguageModel {
+export function languageModel(provider: StoredProvider, model: AgentModelConfig, onActivity?: () => void): LanguageModel {
   if (!provider.apiKey) throw new Error('请先在设置中保存 API Key');
-  if (provider.protocol === 'openai-responses') {
-    return recordLanguageModel(createOpenAI({ baseURL: provider.baseUrl, apiKey: provider.apiKey, name: provider.id }).responses(model.id), provider, model);
-  }
-  return recordLanguageModel(createOpenAICompatible({ baseURL: provider.baseUrl, apiKey: provider.apiKey, name: provider.id, includeUsage: true }).chatModel(model.id), provider, model);
+  const upstreamModel = provider.protocol === 'openai-responses'
+    ? createOpenAI({ baseURL: provider.baseUrl, apiKey: provider.apiKey, name: provider.id }).responses(model.id)
+    : createOpenAICompatible({ baseURL: provider.baseUrl, apiKey: provider.apiKey, name: provider.id, includeUsage: true }).chatModel(model.id);
+  const observed = onActivity ? wrapLanguageModel({ model: upstreamModel, middleware: {
+    wrapGenerate: async ({ doGenerate }) => { onActivity(); const result = await doGenerate(); onActivity(); return result; },
+    wrapStream: async ({ doStream }) => {
+      onActivity();
+      const result = await doStream();
+      return { ...result, stream: result.stream.pipeThrough(new TransformStream({ transform(part, controller) { onActivity(); controller.enqueue(part); } })) };
+    },
+  } }) : upstreamModel;
+  return recordLanguageModel(observed, provider, model);
 }
 
 export function modelMessages(messages: ChatMessage[]): ModelMessage[] {
@@ -153,7 +161,7 @@ export function aiTools(execution: ToolExecution | undefined, signal: AbortSigna
     inputSchema: jsonSchema(tool.parameters as Parameters<typeof jsonSchema>[0], {
       validate: (input) => {
         const result = mcpSchemaValidator.getValidator(tool.parameters as Parameters<typeof jsonSchema>[0])(input);
-        return result.valid ? { success: true, value: result.data } : { success: false, error: failure('tool-validation', 'TOOL_ARGUMENT_INVALID', '工具参数不符合要求', false) };
+        return result.valid ? { success: true, value: result.data } : { success: false, error: failure('tool-validation', 'TOOL_ARGUMENT_INVALID', `${tool.name} 工具参数不符合要求：${result.errorMessage?.slice(0, 4000) || '请检查参数 schema'}`, false) };
       },
     }),
     execute: async (input, options) => {
@@ -166,13 +174,13 @@ export function aiTools(execution: ToolExecution | undefined, signal: AbortSigna
   })]));
 }
 
-export async function* generate(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, output?: OutputInterface) {
+export async function* generate(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, output?: OutputInterface, onActivity?: () => void) {
   signal.throwIfAborted();
   if (!messages.length) throw new Error('对话消息不能为空');
   const reasoning = reasoningValue(effort);
   const providerOptionsName = provider.protocol === 'openai-responses' ? 'openai' : provider.id;
   const result = streamText({
-    model: languageModel(provider, model),
+    model: languageModel(provider, model, onActivity),
     system: instructions,
     messages: modelMessages(messages.map(sourceBoundMessage)),
     tools: model.capabilities?.tools === false ? undefined : aiTools(execution, signal),
@@ -212,13 +220,13 @@ function loopTools(execution: ToolExecution | undefined, delegations: AgentDeleg
   return tools;
 }
 
-function createToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, delegations?: AgentDelegation[], output?: OutputInterface) {
+function createToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, delegations?: AgentDelegation[], output?: OutputInterface, onActivity?: () => void) {
   const reasoning = reasoningValue(effort);
   const providerOptionsName = provider.protocol === 'openai-responses' ? 'openai' : provider.id;
   const pending = new Set(delegations?.filter(item => item.required).map(item => item.name));
   const tracked = delegations?.map(item => ({ ...item, execute: (...args: Parameters<AgentDelegation['execute']>) => { pending.delete(item.name); return item.execute(...args); } }));
   return new ToolLoopAgent({
-    model: languageModel(provider, model),
+    model: languageModel(provider, model, onActivity),
     instructions,
     output,
     tools: model.capabilities?.tools === false ? {} : loopTools(execution, tracked, signal),
@@ -234,10 +242,10 @@ function createToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, 
 }
 
 /** Stream a configured Agent. Each call receives only the messages passed by the host. */
-export async function* generateWithToolLoop(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, delegations?: AgentDelegation[], output?: OutputInterface) {
+export async function* generateWithToolLoop(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, delegations?: AgentDelegation[], output?: OutputInterface, onActivity?: () => void) {
   signal.throwIfAborted();
   if (!messages.length) throw new Error('对话消息不能为空');
-  const agent = createToolLoopAgent(provider, model, instructions, effort, signal, execution, delegations, output);
+  const agent = createToolLoopAgent(provider, model, instructions, effort, signal, execution, delegations, output, onActivity);
   const result = await agent.stream({ messages: modelMessages(messages.map(sourceBoundMessage)), abortSignal: signal });
   let hasText = false;
   for await (const text of execution?.onIntermediateText ? agentStepText(result.fullStream, execution.onIntermediateText) : checkedText(result.textStream)) { hasText = true; yield text; }
@@ -249,9 +257,9 @@ export async function* generateWithToolLoop(provider: StoredProvider, model: Age
 }
 
 /** Execute one isolated child context and return only its final text. */
-export async function runToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution) {
+export async function runToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, onActivity?: () => void) {
   signal.throwIfAborted();
-  const agent = createToolLoopAgent(provider, model, instructions, effort, signal, execution);
+  const agent = createToolLoopAgent(provider, model, instructions, effort, signal, execution, undefined, undefined, onActivity);
   if (!messages.length) throw new Error('子 Agent 对话不能为空');
   const result = await agent.generate({ messages: modelMessages(messages.map(sourceBoundMessage)), abortSignal: signal });
   signal.throwIfAborted();

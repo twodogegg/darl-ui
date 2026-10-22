@@ -1,9 +1,10 @@
 import promptCatalog from '../prompts/studio-prompt-catalog.json';
 import { createHash, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { emptyStudioData, studioDefaults, studioFields, studioResource, validateStudioValues, type StudioChange, type StudioData, type StudioRecord, type StudioResource } from '../studio-schema';
+import { emptyStudioData, studioChangeSchema, studioDefaults, studioFields, studioRequiredOnCreate, studioResource, studioValueSchema, validateStudioValues, type StudioChange, type StudioData, type StudioRecord, type StudioResource } from '../studio-schema';
 import { ProjectStore } from './project-store';
 import { isLocalOrLanAddress } from './local-access';
+import { failure } from './errors';
 
 export class StudioConflict extends Error {}
 const recordId = (value: unknown) => {
@@ -40,7 +41,7 @@ export class StudioStore {
   query(input: Record<string, unknown>) {
     if (input.resource === 'styles') return { resource: 'styles', ...this.projects.styles() };
     const resource = studioResource(input.resource);
-    if (input.describe === true) return { resource, fields: ['id', '_version', ...studioFields[resource].split(' ')], defaults: studioDefaults[resource] || {}, versionField: '_version', operations: ['create', 'update', 'delete'], batchSemantics: 'atomic', maxBatch: 500, structures: { scenes: ['id', 'location', 'setting:内/外/内外', 'time', 'suggestedDuration:秒或空字符串', 'content'], dialogue: ['id', 'type:角色/旁白', 'assetId:角色资产编号，旁白留空', 'speaker', 'description', 'text'], outline: ['core', 'story', 'keep', 'remove', 'merge', 'risks', 'episodes', 'roles:[{id,name,position,relationships,arc}]', 'scenes:[{id,name,purpose}]'], variants: ['id', 'name', 'description', 'image', 'history:图片URL数组'] } };
+    if (input.describe === true) return { resource, fields: ['id', '_version', '_position', ...studioFields[resource].split(' ')], defaults: studioDefaults[resource] || {}, requiredOnCreate: studioRequiredOnCreate[resource] || [], valuesSchema: studioValueSchema(resource), versionField: '_version', operations: ['create', 'update', 'delete'], batchSemantics: 'atomic', maxBatch: 500, structures: { scenes: ['id', 'location', 'setting:内/外/内外', 'time', 'suggestedDuration:秒或空字符串', 'content'], dialogue: ['id', 'type:角色/旁白', 'assetId:角色类型必填，须引用当前项目的真实角色资产；旁白可省略', 'speaker', 'description', 'text'], outline: ['core', 'story', 'keep', 'remove', 'merge', 'risks', 'episodes', 'roles:[{id,name,position,relationships,arc}]', 'scenes:[{id,name,purpose}]'], variants: ['id', 'name', 'description', 'image', 'history:图片URL数组'] } };
     const data = this.snapshot();
     let items = data[resource];
     if (input.projectId !== undefined) {
@@ -59,7 +60,11 @@ export class StudioStore {
     }
     const offset = Number(input.cursor || 0), limit = Number(input.limit || 100);
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error('分页范围无效');
-    if (input.fields !== undefined && (!Array.isArray(input.fields) || input.fields.some(key => typeof key !== 'string' || !['id', '_version', '_position', ...studioFields[resource].split(' ')].includes(key)))) throw new Error('查询字段无效');
+    const allowedFields = ['id', '_version', '_position', ...studioFields[resource].split(' ')];
+    if (input.fields !== undefined && (!Array.isArray(input.fields) || input.fields.some(key => typeof key !== 'string' || !allowedFields.includes(key)))) {
+      const invalid = Array.isArray(input.fields) ? input.fields.filter(key => !allowedFields.includes(key)) : input.fields;
+      throw failure('tool-validation', 'STUDIO_FIELD_INVALID', `查询字段无效：${resource}.fields=${JSON.stringify(invalid)}。可用字段：${allowedFields.join(', ')}`, false);
+    }
     const page = items.slice(offset, offset + limit).map(item => input.fields ? Object.fromEntries(['id', '_version', ...input.fields as string[]].map(key => [key, item[key]])) : item);
     return { resource, items: page, total: items.length, nextCursor: offset + limit < items.length ? String(offset + limit) : null };
   }
@@ -89,6 +94,9 @@ export class StudioStore {
         if (change.op === 'delete') collection.splice(collection.indexOf(before!), 1);
         else {
           const values = validateStudioValues(resource, change.values);
+          if (change.op === 'create') for (const field of studioRequiredOnCreate[resource] || []) {
+            if (values[field] === undefined || values[field] === '') throw failure('tool-validation', 'STUDIO_FIELD_REQUIRED', `${resource}[${id}].${field} 必填；创建前请读取该资源的 describe 与关联记录。`, false);
+          }
           if (resource === 'projects' && change.op === 'create') {
             if (restore && this.db.prepare("SELECT id FROM workspace_projects WHERE id=? AND status='archived'").get(Number(id))) this.db.prepare("UPDATE workspace_projects SET status='active' WHERE id=?").run(Number(id));
             else {
@@ -181,20 +189,26 @@ export class StudioStore {
   }
   private validate(data: StudioData) {
     const byId = (resource: StudioResource, id: unknown) => data[resource].find(item => item.id === id);
-    const required = (resource: StudioResource, id: unknown) => { const item = byId(resource, id); if (!item) throw new Error(`引用的 ${resource} 记录 ${String(id)} 不存在`); return item; };
+    const required = (resource: StudioResource, id: unknown, path: string) => {
+      if (typeof id !== 'string' || !id.trim()) throw failure('tool-validation', 'STUDIO_FIELD_REQUIRED', `${path} 必填，须引用真实的 ${resource} 记录 ID。`, false);
+      const item = byId(resource, id);
+      if (!item) throw failure('tool-validation', 'STUDIO_REFERENCE_INVALID', `${path}：引用的 ${resource} 记录 ${id} 不存在，请先查询或在同批创建关联记录。`, false);
+      return item;
+    };
     const urls: unknown[] = [];
     for (const resource of Object.keys(data) as StudioResource[]) for (const item of data[resource]) {
-      if (['episodes', 'assets', 'films', 'history'].includes(resource)) required('projects', item.projectId);
+      const path = `${resource}[${item.id}]`;
+      if (['episodes', 'assets', 'films', 'history'].includes(resource)) required('projects', item.projectId, `${path}.projectId`);
       if (['shots', 'clips'].includes(resource)) {
-        const episode = required('episodes', item.episodeId);
+        const episode = required('episodes', item.episodeId, `${path}.episodeId`);
         if (!(episode.scenes as Array<{ id: string }>).some(scene => scene.id === item.sceneId)) throw new Error('分镜或片段引用了不存在的场次');
       }
       if (resource === 'projects') {
         if (item.planned !== null && (!Number.isInteger(item.planned) || Number(item.planned) < 1 || Number(item.planned) > 100)) throw new Error('计划集数应为1–100或留空');
         if (![item.durationMin,item.durationMax].every(value => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 60) || Number(item.durationMin) > Number(item.durationMax)) throw new Error('单集时长范围无效');
       }
-      if (['films','history'].includes(resource) && item.episodeId && required('episodes',item.episodeId).projectId !== item.projectId) throw new Error('关联剧集不属于当前项目');
-      if (resource === 'library' && item.folderId) required('folders',item.folderId);
+      if (['films','history'].includes(resource) && item.episodeId && required('episodes',item.episodeId, `${path}.episodeId`).projectId !== item.projectId) throw new Error('关联剧集不属于当前项目');
+      if (resource === 'library' && item.folderId) required('folders',item.folderId, `${path}.folderId`);
       if (resource === 'prompts' && !['default','replace'].includes(String(item.mode))) throw new Error('提示词模式无效');
       if (resource === 'episodes') {
         if (!Number.isInteger(item.number) || Number(item.number) < 1 || !finitePositive(item.duration)) throw new Error('剧集编号或目标时长无效');
@@ -210,28 +224,28 @@ export class StudioStore {
       }
       if (resource === 'shots') {
         if (!finitePositive(item.duration) || !Array.isArray(item.dialogue)) throw new Error('镜头时长或对白无效');
-        const episode = required('episodes', item.episodeId);
-        for (const line of item.dialogue as Array<Record<string, unknown>>) {
+        const episode = required('episodes', item.episodeId, `${path}.episodeId`);
+        for (const [index, line] of (item.dialogue as Array<Record<string, unknown>>).entries()) {
           if (!['角色', '旁白'].includes(String(line.type)) || typeof line.text !== 'string') throw new Error('对白类型或文本无效');
-          if (line.type === '角色') { const asset = required('assets', line.assetId); if (asset.type !== '角色' || asset.projectId !== episode.projectId) throw new Error('对白角色不属于当前项目'); }
+          if (line.type === '角色') { const asset = required('assets', line.assetId, `${path}.dialogue[${index}].assetId`); if (asset.type !== '角色' || asset.projectId !== episode.projectId) throw new Error(`${path}.dialogue[${index}].assetId：对白角色不属于当前项目`); }
         }
       }
       if (resource === 'assets') {
         if (!String(item.name || '').trim() || !['角色', '场景', '道具'].includes(String(item.type))) throw new Error('资产名称或类型无效');
-        for (const id of item.episodeIds as string[]) if (required('episodes', id).projectId !== item.projectId) throw new Error('资产关联剧集不属于当前项目');
-        if (item.voiceId) required('voices', item.voiceId);
+        for (const id of item.episodeIds as string[]) if (required('episodes', id, `${path}.episodeIds`).projectId !== item.projectId) throw new Error('资产关联剧集不属于当前项目');
+        if (item.voiceId) required('voices', item.voiceId, `${path}.voiceId`);
         if (data.assets.some(other => other.id !== item.id && other.projectId === item.projectId && other.type === item.type && String(other.name).trim() === String(item.name).trim())) throw new Error('同类型同名资产已存在，请复用已有记录');
       }
       if (resource === 'clips') {
-        const episode = required('episodes', item.episodeId);
+        const episode = required('episodes', item.episodeId, `${path}.episodeId`);
         if (!Array.isArray(item.shotIds) || new Set(item.shotIds).size !== item.shotIds.length) throw new Error('片段镜头列表无效');
         for (const id of item.shotIds as string[]) {
-          const shot = required('shots', id);
+          const shot = required('shots', id, `${path}.shotIds`);
           if (shot.episodeId !== item.episodeId || shot.sceneId !== item.sceneId) throw new Error('视频片段只能组合本场镜头');
           if (data.clips.some(other => other.id !== item.id && (other.shotIds as string[]).includes(id))) throw new Error('分镜已被其他片段使用');
         }
-        for (const id of item.assetIds as string[]) if (required('assets', id).projectId !== episode.projectId) throw new Error('片段资产不属于当前项目');
-        const duration = (item.shotIds as string[]).reduce((sum, id) => sum + Number(required('shots', id).duration), 0);
+        for (const id of item.assetIds as string[]) if (required('assets', id, `${path}.assetIds`).projectId !== episode.projectId) throw new Error('片段资产不属于当前项目');
+        const duration = (item.shotIds as string[]).reduce((sum, id) => sum + Number(required('shots', id, `${path}.shotIds`).duration), 0);
         if (Math.abs(Number(item.duration) - duration) > 0.011) throw new Error('片段时长必须等于关联镜头时长之和');
       }
       const collect = (value: unknown) => { if (typeof value === 'string' && (/^(?:data:|javascript:)/i.test(value))) throw new Error('媒体请先上传到文件服务'); if (value && typeof value === 'object') Object.values(value).forEach(collect); };
@@ -244,7 +258,7 @@ export class StudioStore {
 
 export const STUDIO_TOOLS = [
   { name: 'builtin_read_studio', title: '查询短剧创作数据', description: '按项目/剧集/场次批量读取大纲、剧本场次、资产、分镜、片段。先用 describe=true 获取该资源现有字段、默认值与编辑规则。返回真实 ID、_version、total 和 nextCursor；分页未读完不代表全部内容。', risk: 'read' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { resource: { type: 'string', enum: [...Object.keys(studioFields), 'styles'] }, describe: { type: 'boolean' }, projectId: { type: 'string' }, episodeId: { type: 'string' }, sceneId: { type: 'string' }, ids: { type: 'array', items: { type: 'string' }, maxItems: 500 }, fields: { type: 'array', items: { type: 'string' } }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500 } }, required: ['resource'], additionalProperties: false } },
-  { name: 'builtin_edit_studio', title: '批量修改短剧内容', description: '按读取到的字段白名单提交一组原子编辑，最多500项。修改/删除传最新 _version 作为 version；values 只含改变字段。资源字段与默认值先通过查询工具 describe 获取。创建项目的 id 为临时标识，返回实际编号；同批新剧集可用临时 projectId 关联。position 可调整记录排序。requestId 为唯一请求标识，重试沿用。关联变化放同批，失败整批回滚。undoBatchId 可撤销一组编辑，发生版本冲突则停止。生成任务用已有媒体工具。', risk: 'write' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { requestId: { type: 'string' }, undoBatchId: { type: 'string' }, changes: { type: 'array', minItems: 1, maxItems: 500, items: { type: 'object', properties: { resource: { type: 'string', enum: Object.keys(studioFields) }, op: { type: 'string', enum: ['create', 'update', 'delete'] }, id: { type: 'string' }, version: { type: 'integer', minimum: 1 }, position: { type: 'number' }, values: { type: 'object', additionalProperties: true } }, required: ['resource', 'op', 'id'], additionalProperties: false } } }, required: ['requestId'], additionalProperties: false } },
+  { name: 'builtin_edit_studio', title: '批量修改短剧内容', description: '按读取到的字段白名单提交一组原子编辑，最多500项。修改/删除传最新 _version 作为 version；values 只含改变字段。资源字段、类型、创建必填项与默认值先通过查询工具 describe 获取。角色对白必须引用当前项目真实角色资产；可把新资产与分镜放同批创建。创建项目的 id 为临时标识，返回实际编号；同批新剧集可用临时 projectId 关联。position 可调整记录排序。requestId 为唯一请求标识，重试沿用。关联变化放同批，失败整批回滚。undoBatchId 可撤销一组编辑，发生版本冲突则停止。生成任务用已有媒体工具。', risk: 'write' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { requestId: { type: 'string' }, undoBatchId: { type: 'string' }, changes: { type: 'array', minItems: 1, maxItems: 500, items: studioChangeSchema } }, required: ['requestId'], additionalProperties: false } },
 ] as const;
 
 export async function handleStudioRequest(req: IncomingMessage, res: ServerResponse, store: StudioStore): Promise<boolean> {

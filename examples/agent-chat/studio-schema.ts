@@ -57,6 +57,42 @@ export function studioResource(value: unknown): StudioResource {
 const idFields = new Set(['projectId', 'episodeId', 'sceneId', 'voiceId', 'folderId']);
 const arrayFields = new Set(['episodeIds', 'scenes', 'variants', 'history', 'references', 'dialogue', 'shotIds', 'assetIds', 'disabledVoiceIds', 'lastGenerationVoiceIds', 'imageHistory', 'storyboardHistory', 'blockingHistory', 'videos']);
 const numericFields = new Set(['number', 'duration', 'stage', 'planned', 'durationMin', 'durationMax', 'updated', 'group', 'style_catalog_id']);
+export const studioRequiredOnCreate: Partial<Record<StudioResource, string[]>> = {
+  projects: ['title', 'ratio', 'style_catalog_id'], episodes: ['projectId'], assets: ['projectId', 'name'],
+  shots: ['episodeId', 'sceneId'], clips: ['episodeId', 'sceneId'], films: ['projectId'], history: ['projectId'],
+};
+const dialogueSchema = {
+  type: 'object', properties: { id: { type: 'string' }, type: { type: 'string', enum: ['角色', '旁白'] },
+    assetId: { type: 'string', description: '角色对白必须引用当前项目的真实角色资产 ID；旁白可省略。' },
+    speaker: { type: 'string' }, description: { type: 'string' }, text: { type: 'string' } },
+  required: ['type', 'text'],
+  allOf: [{ if: { properties: { type: { const: '角色' } } }, then: { required: ['assetId'], properties: { assetId: { minLength: 1 } } } }],
+};
+/** Share the field contract between resource discovery and the model's edit schema. */
+export function studioValueSchema(resource: StudioResource): Record<string, unknown> {
+  return { type: 'object', additionalProperties: false, properties: Object.fromEntries(studioFields[resource].split(' ').map(key => {
+    let schema: Record<string, unknown> = { type: 'string' };
+    if (numericFields.has(key)) schema = { type: key === 'planned' ? ['number', 'null'] : 'number' };
+    if (arrayFields.has(key)) schema = { type: 'array' };
+    if (key === 'outline') schema = { type: 'object' };
+    if (key === 'favorite') schema = { type: 'boolean' };
+    if (key === 'projectId' || key === 'episodeId' || key === 'sceneId') schema = { type: 'string', minLength: 1, description: '关联记录的真实 ID；同批新建记录可用该记录的 ID。' };
+    if (key === 'dialogue') schema = { type: 'array', items: dialogueSchema };
+    return [key, schema];
+  })) };
+}
+export const studioChangeSchema = {
+  type: 'object', properties: { resource: { type: 'string', enum: Object.keys(studioFields) }, op: { type: 'string', enum: ['create', 'update', 'delete'] },
+    id: { type: 'string', minLength: 1 }, version: { type: 'integer', minimum: 1 }, position: { type: 'number' }, values: { type: 'object' } },
+  required: ['resource', 'op', 'id'], additionalProperties: false,
+  allOf: [
+    ...(Object.keys(studioFields) as StudioResource[]).map(resource => ({
+      if: { properties: { resource: { const: resource } } }, then: { properties: { values: studioValueSchema(resource) },
+        allOf: [{ if: { properties: { op: { const: 'create' } } }, then: { required: ['values'], properties: { values: { required: studioRequiredOnCreate[resource] || [] } } } }] },
+    })),
+    { if: { properties: { op: { enum: ['update', 'delete'] } } }, then: { required: ['version'] } },
+  ],
+};
 export function validateStudioValues(resource: StudioResource, values: unknown): Record<string, unknown> {
   if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('修改字段必须是对象');
   const allowed = new Set(studioFields[resource].split(' '));

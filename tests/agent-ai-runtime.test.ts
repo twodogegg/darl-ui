@@ -39,6 +39,7 @@ describe('AI SDK runtime integration boundary', () => {
     expect(tool?.type).toBe('dynamic');
     expect(tool?.inputSchema.jsonSchema).toEqual(parameters);
     expect(tool?.inputSchema.validate?.({}).success).toBe(false);
+    expect(tool?.inputSchema.validate?.({}).error?.message).toContain('scope');
     expect(tool?.inputSchema.validate?.({ scope: 'mine' }).success).toBe(true);
     await tool?.execute({ scope: 'mine' }, { toolCallId: 'call-1', messages: [], context: {} });
     expect(received).toEqual({ call: { id: 'call-1', name: 'mcp_0_0', arguments: '{"scope":"mine"}' }, aborted: false });
