@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { MediaWorkspace, toMediaModels, type GenerateRequest, type MediaInput, type MediaModel, type MediaStyleOption, type MediaTask, type MediaWorkspaceProps, type ModelConfiguration, type StyleCreateRequest, type PromptOptimizationRequest } from '@darl/ui';
+import { MediaWorkspace, toMediaModels, type GenerateRequest, type MediaInput, type MediaModel, type MediaStyleOption, type MediaTask, type MediaWorkspaceProps, type ModelConfiguration, type StyleCreateRequest } from '@darl/ui';
 import { Button } from '../../../src/components/ui/Button';
-import { jobGroups, jobToBatch, jobsToBatchId, jobsToTasks, type MediaJob } from './media-job-view';
+import { jobGroups, jobToBatch, jobsToBatchId, jobsToTasks, standaloneMediaJobs, type MediaJob } from './media-job-view';
+import { optimizeMediaPrompt } from './prompt-optimization';
 import { createWorkspaceStyle, styleOptionsFromCatalog, type StyleCatalog } from './workspace-styles';
 import type { UploadContext } from '../../../src/components/file-uploader/types';
 
@@ -61,17 +62,8 @@ export function MediaGenerationPage({ onBack, initialTaskId, renderReferencePick
     await request(`workspace/styles/${encodeURIComponent(style.id)}`, await styleForm(input), 'PATCH');
     await loadStyles();
   };
-  const optimizePrompt = async (input: PromptOptimizationRequest, { signal }: { signal: AbortSignal }) => {
-    const response = await fetch('/api/prompt-optimization', {
-      method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input, (_key, value) => value instanceof File ? { name: value.name, mimeType: value.type, size: value.size } : value),
-    }).catch(reason => { if (signal.aborted) throw reason; throw new Error('无法连接提示词优化服务，请检查网络后重试'); });
-    const result = await response.json();
-    if (!response.ok) throw new Error(typeof result.error === 'string' ? result.error : result.error?.message || '提示词优化失败');
-    return result.prompt as string;
-  };
-
   const mergeJobs = useCallback((jobs: MediaJob[]) => {
+    jobs = standaloneMediaJobs(jobs);
     setTasks((current) => {
       const groups = jobGroups(jobs);
       const batches = new Map(groups.map((group) => [jobsToBatchId(group), jobToBatch(group[0], group)]));
@@ -103,7 +95,7 @@ export function MediaGenerationPage({ onBack, initialTaskId, renderReferencePick
         if (!alive) return;
         setModels(supportedModels(configuration));
         setStyles(styleOptionsFromCatalog(styleCatalog.data || {}));
-        const loaded = jobsToTasks(jobs);
+        const loaded = jobsToTasks(standaloneMediaJobs(jobs));
         const draft = newTask();
         setTasks(loaded.length ? loaded : [draft]);
         setActiveTaskId(loaded.find(task => task.id === initialTaskId)?.id || loaded[0]?.id || draft.id);
@@ -245,7 +237,7 @@ export function MediaGenerationPage({ onBack, initialTaskId, renderReferencePick
       renderReferencePicker={renderReferencePicker}
       onCreateStyle={createStyle}
       onUpdateStyle={updateStyle}
-      onOptimizePrompt={optimizePrompt}
+      onOptimizePrompt={optimizeMediaPrompt}
       onRetry={(batchId) => { void retry(batchId); }}
       onRegenerate={(batchId) => { void retry(batchId); }}
       onFavoriteChange={favorite}

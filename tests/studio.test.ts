@@ -10,7 +10,8 @@ import { ProjectStore } from '../examples/agent-chat/server/project-store';
 import { StudioStore, STUDIO_TOOLS } from '../examples/agent-chat/server/studio';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import { removeEpisode } from '../examples/agent-chat/client/studio/scenes';
-import { assetImageRequest } from '../examples/agent-chat/client/studio/art';
+import { assetImageRequest, canBatchGenerate } from '../examples/agent-chat/client/studio/art';
+import { MediaJobStore } from '../examples/agent-chat/server/media-job-store';
 import { studioPositions, type StudioChange } from '../examples/agent-chat/studio-schema';
 
 let directory: string, store: StudioStore, projectId: string, files: FileStore;
@@ -181,11 +182,25 @@ describe('shared short drama business service', () => {
     expect(request.prompt).toContain('短发，圆脸');
     expect(request.prompt).toContain('黄色雨衣');
     expect(request.prompt).not.toContain('米色风衣');
+    expect(request.references).toEqual(['/api/files/main']);
     const edit = assetImageRequest(asset, { editPrompt: '只减淡阴影', image: '/api/files/history' });
     expect(edit.references).toEqual(['/api/files/history']);
     expect(edit.prompt).toContain('只减淡阴影');
     expect(edit.prompt).not.toContain('米色风衣');
     expect(() => assetImageRequest(asset, { view: '自定义' })).toThrow('自定义提示词');
+  });
+  it('continues variants after an active main job without duplicating active variants or standalone images', () => {
+    const jobs = new MediaJobStore(join(directory, 'data.sqlite'), files);
+    const asset = { id: 'asset-1', variants: [{ id: 'rain' }] };
+    const main = jobs.create({ modelId: 'gpt-image-2', type: 'image', prompt: '白纸折叠的小船', options: { studioTarget: { resource: 'assets', id: asset.id, field: 'image' } }, providerId: 'test', upstreamModelId: 'gpt-image-2', baseUrl: 'https://example.invalid' });
+    expect(canBatchGenerate(asset, jobs.list())).toBe(true);
+    expect(canBatchGenerate({ ...asset, variants: [] }, jobs.list())).toBe(false);
+    const variant = jobs.create({ ...main, options: { studioTarget: { resource: 'assets', id: asset.id, field: 'image', variantId: 'rain' } } });
+    expect(canBatchGenerate(asset, jobs.list())).toBe(false);
+    variant.status = 'cancelled'; jobs.put(variant);
+    expect(canBatchGenerate(asset, jobs.list())).toBe(true);
+    main.status = 'failed'; jobs.put(main);
+    expect(canBatchGenerate({ ...asset, variants: [] }, jobs.list())).toBe(true);
   });
   it('attaches completed outputs exactly once and preserves current selection if a target changed', async () => {
     store.apply('asset', [{ resource: 'assets', op: 'create', id: 'asset-1', values: { projectId, name: '纸船', type: '道具', description: '白纸折叠的小船' } }]);

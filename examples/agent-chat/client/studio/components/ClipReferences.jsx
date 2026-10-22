@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { ReferencePicker, MediaPreview } from './ui'
 import { useStore } from '../store'
-import { clipVoices } from '../storyboard'
+import { clipMediaReferences, clipVoices, referenceKey } from '../storyboard'
 
 export default function ClipReferences({ clip, projectId }) {
   const { data, patch } = useStore()
   const [picker, setPicker] = useState(null)
   const [preview, setPreview] = useState(null)
-  const assets = data.assets.filter((a) => clip.assetIds.includes(a.id))
+  const { assets, additional, images, frames } = clipMediaReferences(clip, data)
   const voices = clipVoices(clip, data)
   return (
     <>
@@ -15,11 +15,10 @@ export default function ClipReferences({ clip, projectId }) {
         {[
           [
             '图片',
-            assets.length +
-              clip.references.filter((r) => r.kind === 'image').length,
+            images.length,
           ],
-          ['视频', clip.references.filter((r) => r.kind === 'video').length],
-          ['音频', voices.filter((voice) => voice.enabled).length + clip.references.filter((r) => r.kind === 'audio' && !voices.some((voice) => voice.id === r.id)).length],
+          ['视频', additional.filter((r) => r.kind === 'video').length],
+          ['音频', voices.filter((voice) => voice.enabled).length + additional.filter((r) => r.kind === 'audio' && !voices.some((voice) => voice.id === r.id)).length],
         ].map(([name, count]) => (
           <span className="sb-ref-sum" key={name}>
             <span className="label">{name}</span>
@@ -36,10 +35,11 @@ export default function ClipReferences({ clip, projectId }) {
               <span className="sb-asset-chip" key={a.id}>
                 <button
                   className="sb-chip-open"
+                  disabled={!a.image}
                   onClick={() => setPreview({ name: a.name, url: a.image })}
                 >
-                  <img className="sb-asset-chip__thumb" src={a.image} alt="" />
-                  <span className="sb-asset-chip__name">{a.name}</span>
+                  {a.image && <img className="sb-asset-chip__thumb" src={a.image} alt="" />}
+                  <span className="sb-asset-chip__name">{a.name}{!a.image && '（未生成图片）'}</span>
                 </button>
                 <button
                   className="sb-asset-chip__remove"
@@ -59,6 +59,7 @@ export default function ClipReferences({ clip, projectId }) {
           </button>
         </div>
       ))}
+      {frames.length > 0 && <div className="sb-ref-row-wrap"><span className="sb-asset-label">分镜参考图</span>{frames.map(frame => <button className="sb-asset-chip" key={frame.id} onClick={() => setPreview(frame)}><img className="sb-asset-chip__thumb" src={frame.url} alt="" /><span>{frame.name}</span></button>)}</div>}
       <fieldset className="clip-voices">
         <legend>音色引用</legend>
         {voices.map((voice) => <div className="clip-voice-row" key={voice.id}>
@@ -69,8 +70,8 @@ export default function ClipReferences({ clip, projectId }) {
         <button className="sb-ref-upload" onClick={() => setPicker('音色')}>＋ 添加音色</button>
       </fieldset>
       <div className="sb-ref-row-wrap">
-        <span className="sb-asset-label">其他关联</span>
-        {clip.references.filter((r) => !voices.some((voice) => voice.id === r.id)).map((r) => (
+        <span className="sb-asset-label">其他参考素材</span>
+        {additional.filter((r) => !voices.some((voice) => voice.id === r.id)).map((r) => (
           <span className="sb-asset-chip" key={r.id}>
             <button className="sb-chip-open" onClick={() => setPreview(r)}>
               {r.kind === 'image' && (
@@ -83,7 +84,7 @@ export default function ClipReferences({ clip, projectId }) {
               aria-label={`移除${r.name}`}
               onClick={() =>
                 patch('clips', clip.id, {
-                  references: clip.references.filter((x) => x.id !== r.id),
+                  references: additional.filter((x) => referenceKey(x) !== referenceKey(r)),
                 })
               }
             >
@@ -115,7 +116,7 @@ export default function ClipReferences({ clip, projectId }) {
                   kind: 'image',
                   asset: true,
                 }))
-              : clip.references
+              : additional
           }
           onClose={() => setPicker(null)}
           onApply={(items) => {

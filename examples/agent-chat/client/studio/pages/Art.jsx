@@ -1,18 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { StyleSelector } from '@darl/ui'
+import { createWorkspaceStyle, styleOptionsFromCatalog } from '../../workspace-styles'
 import { Workflow, useProject } from '../components/Shell'
-import {
-  Button,
-  VoiceModal,
-  Confirm,
-  Modal,
-  Field,
-  Processing,
-} from '../components/ui'
-import { useStore, useAgentTask } from '../store'
+import { VoiceModal, Confirm } from '../components/ui'
+import { studioApi, useStore } from '../store'
 import { types } from '../data'
 import ArtAssetDrawer from '../components/ArtAssetDrawer'
-import { assetImageRequest, assetJob, jobLabel, pendingJob } from '../art'
+import { assetJob, canBatchGenerate, generateAssetBatch, jobLabel, pendingJob } from '../art'
 
 export default function Art() {
   const context = useProject()
@@ -26,39 +21,54 @@ export default function Art() {
 }
 function ArtWorkspace({ context }) {
   const { projectId } = context
-  const { data, update, patch, notify, generateMedia, mediaJobs, models, modelSelections, setModelSelections } = useStore()
+  const { data, update, patch, notify, generateMedia, mediaJobs, models, getModel, setModelSelections, reload } = useStore()
   const navigate = useNavigate()
   const [tab, setTab] = useState('全部')
   const [episodeId, setEpisodeId] = useState('')
-  const episode = context.episodes.find((item) => item.id === episodeId)
   const [editor, setEditor] = useState(null)
   const [voice, setVoice] = useState(null)
   const [deleting, setDeleting] = useState(null)
-  const [extraction, setExtraction] = useState(false)
-  const [mode, setMode] = useState('保留已有图片')
-  const [extractionMode, setExtractionMode] = useState('智能创建')
-  const [notes, setNotes] = useState('')
-  const [generationView, setGenerationView] = useState('按资产默认方案')
+  const [generationView, setGenerationView] = useState('')
   const [customPrompt, setCustomPrompt] = useState('')
-  const { busy, run, cancel } = useAgentTask()
-  const assets = data.assets.filter((a) => a.projectId === projectId && (!episodeId || a.episodeIds?.includes(episodeId) || data.clips.some((clip) => clip.episodeId === episodeId && clip.assetIds.includes(a.id)) || data.shots.some((shot) => shot.episodeId === episodeId && shot.dialogue.some((line) => line.assetId === a.id))))
-  function extract() {
-    const scriptText = episode?.script || context.episodes.map((e) => e.script).join('\n')
-    if (!scriptText.trim()) return notify('请先填写剧本正文')
-    run({ action: 'extract-assets', projectId, episodeId, notes, mode, extractionMode })
+  const [styles, setStyles] = useState([])
+  const [styleOpen, setStyleOpen] = useState(false)
+  const [styleBusy, setStyleBusy] = useState(false)
+  const selectedStyle = styles.find(style => style.id === String(context.project.style_catalog_id))
+  useEffect(() => {
+    const controller = new AbortController()
+    studioApi('workspace/styles', undefined, controller.signal).then(value => setStyles(styleOptionsFromCatalog(value.data))).catch(reason => { if (!controller.signal.aborted) notify(reason.message) })
+    return () => controller.abort()
+  }, [styleOpen])
+  async function saveStyle(style) {
+    if (!style || style.id === String(context.project.style_catalog_id)) return
+    setStyleBusy(true)
+    try {
+      const saved = await patch('projects', projectId, { style_catalog_id: Number(style.id) })
+      if (saved) notify(`项目视觉风格已设为「${style.name}」`)
+    } finally { setStyleBusy(false) }
   }
+  const assets = data.assets.filter((a) => a.projectId === projectId && (!episodeId || a.episodeIds?.includes(episodeId) || data.clips.some((clip) => clip.episodeId === episodeId && clip.assetIds.includes(a.id)) || data.shots.some((shot) => shot.episodeId === episodeId && shot.dialogue.some((line) => line.assetId === a.id))))
   const [batchBusy, setBatchBusy] = useState(false)
+  const batch = useRef(null)
+  useEffect(() => () => batch.current?.abort(), [])
   const visibleAssets = assets.filter(asset => tab === '全部' || asset.type === tab)
   async function generateBatch() {
-    if (batchBusy) return
+    if (batch.current) return
+    const controller = new AbortController()
+    batch.current = controller
     setBatchBusy(true)
-    const failed = [], succeeded = []
-    for (const asset of visibleAssets.filter(asset => !pendingJob(assetJob(mediaJobs, asset.id)))) {
-      try { await generateMedia({ ...assetImageRequest(asset, { view: generationView, customPrompt }), target: { resource: 'assets', id: asset.id, field: 'image' } }); succeeded.push(asset.id) }
-      catch (reason) { failed.push(`${asset.name}：${reason.message}`) }
+    try {
+      const { submitted, failed } = await generateAssetBatch(visibleAssets, {
+        jobs: mediaJobs, generateMedia, reload, view: generationView, customPrompt, styleId: context.project.style_catalog_id, signal: controller.signal,
+        readJob: (id, signal) => studioApi(`media-generation/jobs/${id}`, undefined, signal),
+      })
+      if (!controller.signal.aborted) notify(`已提交 ${submitted.length} 项${failed.length ? `；失败 ${failed.length} 项：${failed.join('；')}` : ''}`)
+    } catch (reason) {
+      if (!controller.signal.aborted) notify(reason.message)
+    } finally {
+      if (!controller.signal.aborted) setBatchBusy(false)
+      if (batch.current === controller) batch.current = null
     }
-    notify(`已提交 ${succeeded.length} 项${failed.length ? `；失败 ${failed.length} 项：${failed.join('；')}` : ''}`)
-    setBatchBusy(false)
   }
   return (
     <div className="page-art">
@@ -85,25 +95,18 @@ function ArtWorkspace({ context }) {
                 </nav>
               </div>
               <div className="art-toolbar__right">
-                <select
-                  className="model-select"
-                  aria-label="资产提取模式"
-                  value={extractionMode}
-                  onChange={event => setExtractionMode(event.target.value)}
-                  disabled={busy}
-                >
-                  <option>智能创建</option>
-                  <option>已有资产优先</option>
-                </select>
+                <button className="tool-btn art-style-select" aria-label="选择项目视觉风格" title={selectedStyle?.description} disabled={batchBusy || styleBusy} onClick={() => setStyleOpen(true)}>
+                  {styleBusy ? '正在保存风格…' : `视觉风格：${selectedStyle?.name || '请选择'}`}
+                </button>
                 <select
                   className="batch-view-select"
                   aria-label="批量生成模式"
                   value={generationView}
                   onChange={(e) => setGenerationView(e.target.value)}
-                  disabled={busy}
+                  disabled={batchBusy}
                 >
+                  <option value="">{{ 角色: '一致性图', 场景: '场景空镜', 道具: '道具图' }[tab] || '角色一致性图 / 场景空镜 / 道具图'}</option>
                   {[
-                    '按资产默认方案',
                     '一致性图',
                     '面部特写',
                     '场景四视图',
@@ -119,38 +122,30 @@ function ArtWorkspace({ context }) {
                     maxLength={5000}
                     placeholder="请输入自定义提示词"
                     value={customPrompt}
+                    disabled={batchBusy}
                     onChange={(e) => setCustomPrompt(e.target.value)}
                   />
                 )}
-                <select className="model-select" aria-label="图片模型" disabled={busy || batchBusy} value={modelSelections.image || ''} onChange={event => setModelSelections(current => ({ ...current, image: event.target.value }))}>
-                  <option value="">使用默认图片模型</option>
+                <select className="model-select" aria-label="图片模型" disabled={batchBusy} value={getModel('image')?.id || ''} onChange={event => setModelSelections(current => ({ ...current, image: event.target.value }))}>
+                  {!getModel('image') && <option value="">请选择图片模型</option>}
                   {models.filter(model => model.type === 'image').map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
                 </select>
                 <button
                   className="tool-btn"
-                  disabled={busy}
-                  onClick={() => setExtraction(true)}
-                >
-                  ↻　重新提取
-                </button>
-                <button
-                  className="tool-btn"
                   disabled={
-                    busy ||
-                    !visibleAssets.some(asset => !pendingJob(assetJob(mediaJobs, asset.id))) || batchBusy ||
+                    !visibleAssets.some(asset => canBatchGenerate(asset, mediaJobs)) || batchBusy || styleBusy || !selectedStyle ||
                     (generationView === '自定义' && !customPrompt.trim())
                   }
                   onClick={() =>
                     generateBatch()
                   }
                 >
-                  {batchBusy ? '正在提交…' : '☷　批量生成'}
+                  {batchBusy ? '批量生成中…' : '☷　批量生成'}
                 </button>
               </div>
             </header>
-            <Processing busy={busy && !extraction} cancel={cancel} />
             <section className="asset-scroll">
-              {!assets.some((asset) => tab === '全部' || asset.type === tab) && <p className="empty">当前范围暂无{tab === '全部' ? '资产' : tab}，可重新提取或添加资产。</p>}
+              {!visibleAssets.length && <p className="empty">当前范围暂无{tab === '全部' ? '资产，请切换分类添加资产' : `${tab}，可添加资产`}。</p>}
               <div className="asset-grid">
                 {assets
                   .filter((a) => tab === '全部' || a.type === tab)
@@ -292,50 +287,12 @@ function ArtWorkspace({ context }) {
             确认删除「{deleting.name}」？关联视频片段也会移除该资产。
           </Confirm>
         )}
-        {extraction && (
-          <Modal
-            title="重新提取资产"
-            onClose={() => {
-              cancel()
-              setExtraction(false)
-            }}
-            footer={
-              <>
-                <Button
-                  onClick={() => {
-                    cancel()
-                    setExtraction(false)
-                  }}
-                >
-                  取消
-                </Button>
-                <Button primary disabled={busy} onClick={extract}>
-                  开始提取
-                </Button>
-              </>
-            }
-          >
-            <p className="muted">
-              从真实剧本提取设定，同一主体复用已有资产。
-            </p>
-            <Field label="提取方式">
-              <select value={mode} onChange={(e) => setMode(e.target.value)}>
-                <option>保留已有图片</option>
-                <option>完全重做</option>
-              </select>
-            </Field>
-            <Field label="修改意见">
-              <textarea
-                rows={4}
-                maxLength={2000}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-              />
-            </Field>
-            <Processing busy={busy} cancel={cancel} />
-          </Modal>
-        )}
       </div>
+      <StyleSelector styles={styles} open={styleOpen} onOpenChange={setStyleOpen} value={String(context.project.style_catalog_id)} onChange={saveStyle} onCreate={async input => {
+        await createWorkspaceStyle(input)
+        const catalog = await studioApi('workspace/styles')
+        setStyles(styleOptionsFromCatalog(catalog.data))
+      }} />
     </div>
   )
 }

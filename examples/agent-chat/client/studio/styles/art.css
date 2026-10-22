@@ -131,6 +131,7 @@
   justify-content: space-between;
 }
 .page-art .tool-btn { padding: 0 14px; cursor: pointer; }
+.page-art .art-style-select { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .page-art .tool-btn:hover { border-color: var(--br-accent); color: var(--br-text-primary); }
 .page-art .tool-btn:disabled { cursor: not-allowed; opacity: .55; }
 .page-art .asset-tabs { display: flex; align-items: center; gap: 24px; white-space: nowrap; }
@@ -606,9 +607,9 @@
   }
   .page-art .art-page .art-toolbar__left { min-height: 34px; }
   .page-art .art-page .art-toolbar__right {
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     justify-content: flex-start;
-    overflow-x: auto;
+    overflow-x: visible;
     padding-bottom: 4px;
   }
   .page-art .art-page .art-toolbar__right > * { flex: 0 0 auto; }

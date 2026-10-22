@@ -20,7 +20,7 @@ export default function ArtAssetDrawer({
   defaultType,
   onClose,
 }) {
-  const { update, notify, generateMedia, reload, data, models, mediaJobs, mediaDefaults, modelSelections, setModelSelections } = useStore()
+  const { update, notify, generateMedia, reload, data, models, getModel, mediaJobs, mediaDefaults, setModelSelections } = useStore()
   const [form, setForm] = useState(
     asset || {
       id: id(),
@@ -68,7 +68,9 @@ export default function ArtAssetDrawer({
     setForm(liveAsset)
     setHistoryIndex(null)
   }, [liveAsset, form])
-  const model = models.find(item => item.id === (modelSelections.image || mediaDefaults.image?.modelId))
+  const model = getModel('image')
+  const resolution = options.resolution || (mediaDefaults.image?.modelId === model?.id ? mediaDefaults.image?.resolution : model?.defaults?.resolution) || model?.capabilities?.resolutions?.[0]
+  const aspectRatio = options.aspectRatio || data.projects.find(project => project.id === projectId)?.ratio || mediaDefaults.image?.aspectRatio || model?.defaults?.aspectRatio
   const job = assetJob(mediaJobs, form.id, selected)
   const generating = busy || uploading || pendingJob(job)
   const stale = liveAsset && liveAsset._version !== form._version
@@ -380,7 +382,7 @@ export default function ArtAssetDrawer({
             </label>
           )}
           <div className="asset-drawer__generator-row">
-            <select aria-label="图片模型" value={modelSelections.image || ''} onChange={event => { setModelSelections(current => ({ ...current, image: event.target.value })); setOptions({}) }}><option value="">使用默认图片模型</option>{models.filter(model => model.type === 'image').map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select>
+            <select aria-label="图片模型" value={model?.id || ''} onChange={event => { setModelSelections(current => ({ ...current, image: event.target.value })); setOptions({}) }}>{!model && <option value="">请选择图片模型</option>}{models.filter(model => model.type === 'image').map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select>
             <select
               aria-label="生成视图"
               value={view}
@@ -390,8 +392,8 @@ export default function ArtAssetDrawer({
                 <option key={v}>{v}</option>
               ))}
             </select>
-            {model?.capabilities?.resolutions?.length > 0 && <select aria-label="图片清晰度" value={options.resolution || ''} onChange={event => setOptions(current => ({ ...current, resolution: event.target.value }))}><option value="">默认清晰度（{mediaDefaults.image?.modelId === model.id ? mediaDefaults.image?.resolution : model.defaults?.resolution}）</option>{model.capabilities.resolutions.map(value => <option key={value}>{value}</option>)}</select>}
-            {model?.capabilities?.aspectRatios?.length > 0 && <select aria-label="图片画幅" value={options.aspectRatio || ''} onChange={event => setOptions(current => ({ ...current, aspectRatio: event.target.value }))}><option value="">跟随项目画幅</option>{model.capabilities.aspectRatios.map(value => <option key={value}>{value}</option>)}</select>}
+            {model?.capabilities?.resolutions?.length > 0 && <select aria-label="图片清晰度" value={resolution} onChange={event => setOptions(current => ({ ...current, resolution: event.target.value }))}>{model.capabilities.resolutions.map(value => <option key={value}>{value}</option>)}</select>}
+            {model?.capabilities?.aspectRatios?.length > 0 && <select aria-label="图片画幅" value={aspectRatio} onChange={event => setOptions(current => ({ ...current, aspectRatio: event.target.value }))}>{model.capabilities.aspectRatios.map(value => <option key={value}>{value}</option>)}</select>}
             {generating ? (
               <button className="cancel-generation" disabled>
                 {busy ? '正在提交…' : jobLabel(job)}

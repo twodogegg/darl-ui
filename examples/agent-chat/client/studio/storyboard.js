@@ -1,7 +1,40 @@
 import { sceneLabel } from './scenes'
+import { imageColumns } from './data'
+import { durations } from '../../../../src/components/media-workspace/model'
 
 export const shotNumber = (index) => String(index + 1).padStart(2, '0')
 export const totalDuration = (shots) => Math.round(shots.reduce((sum, shot) => sum + Number(shot.duration), 0) * 100) / 100
+export function videoDuration(seconds, model) {
+  const rounded = Math.ceil(seconds)
+  if (!Number.isFinite(rounded) || rounded <= 0) throw new Error('请关联有效时长的分镜')
+  const choices = model ? durations(model).filter(Number.isInteger).sort((a, b) => a - b) : []
+  if (!choices.length) return rounded
+  const supported = choices.find(value => value >= rounded)
+  if (supported === undefined) throw new Error(`片段时长超过模型上限 ${choices.at(-1)} 秒，请调整分镜组合`)
+  return supported
+}
+export const referenceKey = item => {
+  const url = typeof item === 'string' ? item : item?.url || ''
+  return item?.fileId || url.match(/\/api\/files\/([^/?]+)/)?.[1] || url.split('?')[0]
+}
+export function clipMediaReferences(clip, data) {
+  const assets = data.assets.filter(asset => clip.assetIds.includes(asset.id))
+  const frames = imageColumns.filter(column => clip[column.key]).map(column => ({ id: `${clip.id}-${column.key}`, name: column.label, kind: 'image', url: clip[column.key] }))
+  const imageRefs = [
+    ...frames,
+    ...assets.filter(asset => asset.image).map(asset => ({ id: asset.id, name: asset.name, kind: 'image', url: asset.image })),
+  ]
+  const seen = new Set(imageRefs.map(referenceKey))
+  const additional = []
+  for (const [index, raw] of clip.references.entries()) {
+    const ref = typeof raw === 'string' ? { url: raw, kind: 'image' } : raw
+    if (!ref?.url || seen.has(referenceKey(ref))) continue
+    seen.add(referenceKey(ref))
+    additional.push({ ...ref, id: ref.id || referenceKey(ref), name: ref.name || `${{ image: '图片', video: '视频', audio: '音频' }[ref.kind] || '素材'} ${index + 1}` })
+  }
+  const images = [...new Map([...imageRefs, ...additional.filter(ref => ref.kind === 'image')].map(ref => [referenceKey(ref), ref])).values()]
+  return { assets, additional, images, frames }
+}
 export const formatDialogue = (line) => `${line.type === '旁白' ? '旁白' : line.speaker}｜${line.description || '描述未指定'}｜${line.text}`
 export function clipVoices(clip, data) {
   const characterIds = new Set([

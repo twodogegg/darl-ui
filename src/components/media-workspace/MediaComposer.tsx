@@ -107,7 +107,7 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
       {inputMode === 'references' && !!accept.length && <Button variant="secondary" size="sm" onClick={chooseFiles} aria-label="添加参考素材">＋ 素材</Button>}
       <Popover label="选择模型" trigger={model ? `${model.type === 'image' ? '▧' : '▷'} ${model.name}` : '无可用模型'}>{(close) => <div className="darl-mw-models">{models.filter((item) => item.type === mediaType).map((item) => <Button key={item.id} variant={item.id === model?.id ? 'secondary' : 'ghost'} size="sm" onClick={() => { onModelChange(item.id); close(); }} aria-pressed={item.id === model?.id}>{item.name}</Button>)}</div>}</Popover>
       {(!!styles.length || !!onCreateStyle) && <>
-        <Button variant="secondary" size="sm" onClick={() => setStyleOpen(true)} aria-label="选择风格">风格 <b>{styleId ? styles.find((style) => style.id === styleId)?.name || '已选择' : '默认'}</b></Button>
+        <Button variant="secondary" size="sm" onClick={() => setStyleOpen(true)} aria-label="选择风格">风格 <b>{styleId ? styles.find((style) => style.id === styleId)?.name || '已选择' : '未附加风格'}</b></Button>
         <StyleSelector styles={styles} open={styleOpen} onOpenChange={setStyleOpen} value={styleId || null} onChange={(style) => onStyleChange(style?.id || '')} onCreate={onCreateStyle} onUpdate={onUpdateStyle} />
       </>}
       {hasPanel && model && <OptionPanel

@@ -1,0 +1,4 @@
+interface:
+  display_name: "本入剧出网站操作"
+  short_description: "按功能分类调用本入剧出网站 Tools，操作创作数据、媒体任务、文件和技能"
+  default_prompt: "使用 $darl-studio，调用对应类别的网站 Tools 完成操作。"

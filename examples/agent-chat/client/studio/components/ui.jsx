@@ -231,12 +231,12 @@ export function Models({ image = false, video = false }) {
   return <div className="model-fields"><DirectorSelect /><TextModelSelect type={video ? 'video' : image ? 'image' : 'text'} label={video ? '视频模型' : image ? '图片模型' : '文本模型'} /></div>
 }
 export function DirectorSelect({ label = '创作导演', disabled }) {
-  const { agents, agentSelection, setAgentSelection } = useStore()
-  return <label className="creative-director-select"><span>{label}</span><select aria-label={label} disabled={disabled} value={agentSelection} onChange={event => setAgentSelection(event.target.value)}><option value="">使用当前 Agent</option>{agents.filter(agent => agent.type !== 'sub_agent' && agent.enabled !== false).map(agent => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
+  const { agents, agentSelection, setAgentSelection, currentAgentId } = useStore()
+  return <label className="creative-director-select"><span>{label}</span><select aria-label={label} disabled={disabled} value={agentSelection || currentAgentId || ''} onChange={event => setAgentSelection(event.target.value)}>{!agents.some(agent => agent.id === (agentSelection || currentAgentId)) && <option value="">请选择 Agent</option>}{agents.filter(agent => agent.type !== 'sub_agent' && agent.enabled !== false).map(agent => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
 }
 export function TextModelSelect({ label = '文本模型', type = 'text', disabled }) {
-  const { models, modelSelections, setModelSelections } = useStore()
-  return <label className="text-model-select"><span>{label}</span><select aria-label={label} disabled={disabled} value={modelSelections[type] || ''} onChange={event => setModelSelections(current => ({ ...current, [type]: event.target.value }))}><option value="">使用默认模型</option>{models.filter(model => model.type === type && model.enabled !== false).map(model => <option key={model.id} value={model.id}>{model.name || model.displayName}</option>)}</select></label>
+  const { models, getModel, setModelSelections } = useStore()
+  return <label className="text-model-select"><span>{label}</span><select aria-label={label} disabled={disabled} value={getModel(type)?.id || ''} onChange={event => setModelSelections(current => ({ ...current, [type]: event.target.value }))}>{!getModel(type) && <option value="">请选择模型</option>}{models.filter(model => model.type === type && model.enabled !== false).map(model => <option key={model.id} value={model.id}>{model.name || model.displayName}</option>)}</select></label>
 }
 export function Processing({ busy, cancel, text = '正在提交…' }) {
   return (

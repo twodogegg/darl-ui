@@ -23,6 +23,8 @@ export type MediaJob = {
   createdAt: string;
 };
 
+export const standaloneMediaJobs = (jobs: MediaJob[]) => jobs.filter(job => !job.options?.studioTarget);
+
 export function jobOptions(job: MediaJob): GenerateRequest['options'] {
   const options = job.options || {};
   return {

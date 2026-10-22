@@ -2,17 +2,18 @@ import { createContext, useContext, useState, useCallback, useRef, useEffect } f
 import actionPrompts from '../../prompts/studio-actions.json'
 import promptCatalog from '../../prompts/studio-prompt-catalog.json'
 import { emptyStudioData, studioFields, studioPositions } from '../../studio-schema'
+import { styleOptionsFromCatalog } from '../workspace-styles'
 
 const Store = import.meta.hot?.data.studioContext || createContext(null)
 if (import.meta.hot) import.meta.hot.data.studioContext = Store
-export async function studioApi(path, body) {
-  const response = await fetch(`/api/${path}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined)
+export async function studioApi(path, body, signal) {
+  const response = await fetch(`/api/${path}`, { signal, ...(body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) })
   const value = await response.json()
   if (!response.ok) throw new Error(value.error || `请求失败（${response.status}）`)
   return value
 }
 const fields = (resource, item) => Object.fromEntries(studioFields[resource].split(' ').filter(key => item[key] !== undefined).map(key => [key, item[key]]))
-export function StudioProvider({ children, onAgentRequest, agents, models, onNavigate, onAgentCancel }) {
+export function StudioProvider({ children, onAgentRequest, agents, models, onNavigate, onAgentCancel, currentTextModelId, currentAgentId }) {
   const [data, setData] = useState(emptyStudioData)
   const [mediaJobs, setMediaJobs] = useState([])
   const [mediaDefaults, setMediaDefaults] = useState({})
@@ -23,6 +24,7 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
   const [agentSelection, setAgentSelection] = useState('')
   const [modelSelections, setModelSelections] = useState({})
   const [lastBatch, setLastBatch] = useState('')
+  const getModel = (type, modelId) => models.find(model => model.type === type && model.id === (modelId || modelSelections[type] || (type === 'text' ? currentTextModelId : mediaDefaults[type]?.modelId)))
   const state = useRef(data), queue = useRef(Promise.resolve()), failed = useRef(false), count = useRef(0), timer = useRef(), mounted = useRef(true)
   const announce = useCallback(message => { if (!mounted.current) return; clearTimeout(timer.current); setToast(message); timer.current = setTimeout(() => setToast(''), 4000) }, [])
   const reload = useCallback(async () => {
@@ -96,7 +98,7 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
     const prompt = configured?.mode === 'replace' ? configured.text : configured?.defaultText || actionPrompts[task.action]
     await onAgentRequest({ ...task, prompt, agentId: agentSelection, modelSelections })
   }
-  const generateMedia = async ({ type = 'image', prompt, target, references = [], options = {}, modelId, applyStyle = true }) => {
+  const generateMedia = async ({ type = 'image', prompt, target, references = [], options = {}, modelId, applyStyle = true, styleId }) => {
     await queue.current
     if (failed.current) throw new Error('请先处理保存错误')
     options = Object.fromEntries(Object.entries(options).filter(([, value]) => value !== '' && value !== undefined))
@@ -110,20 +112,21 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
     const episode = item.episodeId && state.current.episodes.find(episode => episode.id === item.episodeId)
     const project = state.current.projects.find(project => project.id === (item.projectId || episode?.projectId))
     const catalog = applyStyle ? await studioApi('workspace/styles') : null
-    const style = catalog?.data.items.find(item => item.id === project?.style_catalog_id)
+    const style = catalog && styleOptionsFromCatalog(catalog.data).find(item => item.id === String(styleId ?? project?.style_catalog_id))
+    if (applyStyle && !style) throw new Error('请先选择项目视觉风格')
     const requestId = crypto.randomUUID()
     const resolution = options.resolution || (selectedId === defaults[type]?.modelId ? defaults[type]?.resolution : model.defaults?.resolution) || model.capabilities?.resolutions?.[0]
     const aspectRatio = options.aspectRatio || project?.ratio || defaults[type]?.aspectRatio || model.defaults?.aspectRatio
     if (references.length > (model.capabilities?.images || 0)) throw new Error(`当前模型最多支持 ${model.capabilities?.images || 0} 张参考图片`)
     const job = await studioApi('media-generation/jobs', {
-      requestId, taskId: requestId, modelId: selectedId, prompt, ...(style ? { style: { id: String(style.id), name: style.name, description: style.prompt, category: style.category } } : {}),
+      requestId, taskId: requestId, modelId: selectedId, prompt, ...(style ? { style: { id: style.id, name: style.name, description: style.description, category: style.category } } : {}),
       options: { resolution, aspectRatio, ...options, ...(references.length ? { references } : {}), studioTarget: { ...target, version: item._version } },
     })
     if (mounted.current) setMediaJobs(current => [job, ...current.filter(item => item.id !== job.id)])
     announce('生成任务已入队，可在“生成任务”中查看真实进度')
     return job
   }
-  return <Store.Provider value={{ data, update, patch, notify, log, reload, requestAgent, agents, models, mediaJobs, mediaDefaults, onNavigate, cancelAgent: onAgentCancel, generateMedia, agentSelection, setAgentSelection, modelSelections, setModelSelections }}>
+  return <Store.Provider value={{ data, update, patch, notify, log, reload, requestAgent, agents, models, getModel, currentAgentId, mediaJobs, mediaDefaults, onNavigate, cancelAgent: onAgentCancel, generateMedia, agentSelection, setAgentSelection, modelSelections, setModelSelections }}>
     {error && <div className="studio-error" role="alert">{error}<button onClick={async () => { failed.current = false; setError(''); await reload() }}>重新加载</button></div>}
     <div className="studio-save-status" role="status">{loading ? '正在读取工作台…' : pending ? `正在保存 ${pending} 批修改…` : error ? '保存失败' : '已同步'}{lastBatch && !pending && <button onClick={async () => { try { await studioApi('studio/changes', { requestId: crypto.randomUUID(), undoBatchId: lastBatch }); setLastBatch(''); await reload(); announce('已撤销上次修改') } catch (reason) { setError(reason.message) } }}>撤销上次修改</button>}</div>
     {!loading && children}
