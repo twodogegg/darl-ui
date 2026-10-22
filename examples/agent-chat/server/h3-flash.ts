@@ -4,6 +4,7 @@ export type H3AspectRatio = '16:9' | '9:16';
 export type H3VideoStatus = 'queued' | 'processing' | 'succeeded' | 'failed';
 
 export interface H3FlashOptions {
+  model?: string;
   prompt: string;
   seconds?: number;
   resolution?: H3Resolution;
@@ -16,7 +17,7 @@ export interface H3FlashOptions {
 }
 
 export interface H3FlashRequest {
-  model: 'minimax-h3-flash';
+  model: string;
   prompt: string;
   seconds: number;
   resolution: H3Resolution;
@@ -28,7 +29,7 @@ export interface H3FlashRequest {
 }
 
 export interface H3FileDescriptor { id: string; url?: string; purpose?: string }
-export interface H3VideoTask { id: string; status: H3VideoStatus; videoUrl?: string; error?: string }
+export interface H3VideoTask { id: string; status: H3VideoStatus; progress?: number; videoUrl?: string; error?: string }
 
 const H3_STATUSES: H3VideoStatus[] = ['queued', 'processing', 'succeeded', 'failed'];
 
@@ -64,7 +65,7 @@ export function buildH3FlashRequest(options: H3FlashOptions): H3FlashRequest {
   assertUrlList('参考视频', options.referenceVideos, 3);
   assertUrlList('参考音频', options.referenceAudios, 3);
   if (options.referenceVideo && options.referenceVideos?.length) throw new Error('reference_video 不能与 reference_videos 同时提交');
-  const request: H3FlashRequest = { model: 'minimax-h3-flash', prompt, seconds, resolution, aspect_ratio: aspectRatio };
+  const request: H3FlashRequest = { model: options.model || 'minimax-h3-flash', prompt, seconds, resolution, aspect_ratio: aspectRatio };
   if (options.referenceImages?.length) request.reference_images = [...options.referenceImages];
   if (options.referenceVideos?.length) request.reference_videos = [...options.referenceVideos];
   if (options.referenceAudios?.length) request.reference_audios = [...options.referenceAudios];
@@ -109,13 +110,15 @@ export async function createH3Video(baseUrl: string, apiKey: string, options: H3
 
 export async function getH3Video(baseUrl: string, apiKey: string, taskId: string, signal?: AbortSignal): Promise<H3VideoTask> {
   const response = await fetch(apiUrl(baseUrl, `/v1/videos/${encodeURIComponent(taskId)}`), { headers: { Authorization: `Bearer ${apiKey}` }, signal });
-  const value = await h3Response(response, apiKey).then((item) => item.json()) as { id?: unknown; status?: unknown; video_url?: unknown; error?: unknown };
-  if (value.id !== taskId || !H3_STATUSES.includes(value.status as H3VideoStatus)) throw new Error('H3 Flash 任务状态响应无效');
+  const value = await h3Response(response, apiKey).then((item) => item.json()) as { id?: unknown; status?: unknown; progress?: unknown; video_url?: unknown; error?: string | { message?: string } };
+  const status = value.status === 'completed' ? 'succeeded' : value.status === 'in_progress' ? 'processing' : value.status;
+  if (value.id !== taskId || !H3_STATUSES.includes(status as H3VideoStatus)) throw new Error('H3 Flash 任务状态响应无效');
   return {
     id: taskId,
-    status: value.status as H3VideoStatus,
+    status: status as H3VideoStatus,
+    ...(typeof value.progress === 'number' && Number.isFinite(value.progress) && value.progress >= 0 && value.progress <= 100 ? { progress: value.progress } : {}),
     ...(typeof value.video_url === 'string' ? { videoUrl: absolute(baseUrl, value.video_url) } : {}),
-    ...(typeof value.error === 'string' ? { error: value.error } : {}),
+    ...(value.error ? { error: typeof value.error === 'string' ? value.error : value.error.message } : {}),
   };
 }
 

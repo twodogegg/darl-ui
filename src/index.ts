@@ -8,7 +8,7 @@ export type { FileUploaderProps, UploadFn, UploadContext, UploadItem, UploadStat
 export { VideoCompare } from './components/video-compare/VideoCompare';
 export type { CompareVideo, CompareMedia, VideoCompareLayout, VideoCompareProps } from './components/video-compare/VideoCompare';
 export { MediaWorkspace } from './components/media-workspace/MediaWorkspace';
-export type { BaseCapabilities, BaseDefaults, ImageModel, VideoModel, MediaModel, MediaInput, MediaStyleOption, MediaReferences, MediaGenerationMode, MediaRoute, MediaRouteStrategy, GenerateRequest, MediaResult, MediaBatch, MediaTask, MediaWorkspaceProps } from './components/media-workspace/types';
+export type { BaseCapabilities, BaseDefaults, ImageModel, VideoModel, MediaModel, MediaInput, MediaStyleOption, MediaReferences, MediaGenerationMode, MediaRoute, MediaRouteStrategy, GenerateRequest, PromptOptimizationMode, PromptOptimizationRequest, MediaResult, MediaBatch, MediaTask, MediaWorkspaceProps } from './components/media-workspace/types';
 export { ApprovalModeSelector } from './components/agent-sidebar/ApprovalModeSelector';
 export type { ApprovalModeSelectorProps } from './components/agent-sidebar/ApprovalModeSelector';
 export { AgentSidebar } from './components/agent-sidebar/AgentSidebar';

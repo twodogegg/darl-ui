@@ -9,6 +9,7 @@ export type MediaJob = {
   modelId: string;
   type: 'image' | 'video';
   status: JobStatus;
+  progress?: number;
   prompt: string;
   options: Record<string, unknown>;
   style?: MediaStyleOption;
@@ -63,7 +64,7 @@ export function jobResults(job: MediaJob): MediaResult[] {
     return [{ id: `${job.id}-error`, status: 'failed', error: job.error || '生成失败' }];
   }
   if (job.status === 'cancelled') return [{ id: `${job.id}-cancelled`, status: 'cancelled', error: job.error || '任务已取消' }];
-  return [{ id: `${job.id}-pending`, status: job.status }];
+  return [{ id: `${job.id}-pending`, status: job.status, ...(typeof job.progress === 'number' ? { progress: job.progress } : {}) }];
 }
 
 /** Rebuild reusable reference inputs from the persisted job options so historical batches keep their reference images after refresh. */

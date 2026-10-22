@@ -100,6 +100,8 @@ export class MediaJobRunner {
     try{
       const {apiKey}=this.resolve(job);
       const result=await checkVideo(job,apiKey);
+      job.progress=result.progress;
+      job.providerResponse=result.provider;
       if(result.state==='failed'){job.status='failed';job.error=result.error;this.onFailure(job,result.error||'远端任务失败',apiKey);}
       if(result.state==='completed'){
         if(!result.media)throw new Error('缺少视频内容');

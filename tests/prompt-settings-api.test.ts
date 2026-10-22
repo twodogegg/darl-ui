@@ -35,12 +35,18 @@ describe('Prompt settings API', () => {
       await writeFile(join(directory, 'voice.md'), '语音默认');
       await withApi(directory, system, async (request) => {
         const initial = await (await request()).json();
-        expect(initial).toEqual({ system: '系统默认', voice: '语音默认', defaults: { system: '系统默认', voice: '语音默认' } });
+        expect(initial).toMatchObject({ system: '系统默认', voice: '语音默认', defaults: { system: '系统默认', voice: '语音默认' } });
 
         const saved = await request({ system: '新系统', voice: '新语音' });
         expect(saved.ok).toBe(true);
         expect(await saved.json()).toMatchObject({ system: '新系统', voice: '新语音', defaults: { system: '系统默认', voice: '语音默认' } });
 
+        expect(initial.optimization).toContain('当前生成');
+        expect(initial.h3Optimization).toContain('MiniMax H3');
+        await request({ optimization: '普通优化配置', h3Optimization: 'H3 优化配置' });
+        expect(await (await request()).json()).toMatchObject({ optimization: '普通优化配置', h3Optimization: 'H3 优化配置' });
+        expect((await request({ optimization: '' })).status).toBe(400);
+        expect((await request({ h3Optimization: '   ' })).status).toBe(400);
         // 只更新一项不影响另一项
         await request({ voice: '再改语音' });
         expect(await (await request()).json()).toMatchObject({ system: '新系统', voice: '再改语音' });

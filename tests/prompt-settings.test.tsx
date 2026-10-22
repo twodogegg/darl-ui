@@ -9,6 +9,16 @@ const prompts = {
 };
 
 describe('PromptSettingsCard', () => {
+  it('可独立编辑普通和 H3 优化模板', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<PromptSettingsCard prompts={{ ...prompts, optimization: '普通规则', h3Optimization: 'H3 规则' }} onSave={onSave} />);
+    fireEvent.click(screen.getByRole('button', { name: /普通提示词优化/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: '普通提示词优化' }), { target: { value: '按当前生成模型优化' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith({ optimization: '按当前生成模型优化' }));
+    fireEvent.click(screen.getByRole('button', { name: /H3 提示词优化/ }));
+    expect(screen.getByRole('textbox', { name: 'H3 提示词优化' })).toHaveValue('H3 规则');
+  });
   it('编辑并保存当前提示词，切换项不串内容', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<PromptSettingsCard prompts={prompts} onSave={onSave} />);

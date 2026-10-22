@@ -57,6 +57,7 @@ export function useReferences(onError: (message: string) => void, upload?: (file
     if (input instanceof File) files.addFiles([input]);
     else setRemote((prev) => ({ ...prev, [kind]: [...(prev[kind] ?? []).filter((item) => item instanceof File || item.id !== input.id), input] }));
   };
-  return { references, previews, frame, setFrame, restore, addRemote, addFiles: files.addFiles };
+  const ready = !upload || [...files.items, ...first.items, ...last.items].every(item => item.status === 'success');
+  return { references, previews, frame, setFrame, restore, addRemote, ready, addFiles: files.addFiles };
 }
 export type ReferenceDraft = ReturnType<typeof useReferences>;

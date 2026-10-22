@@ -1,11 +1,12 @@
 import { useFishVoice, VoiceSettings } from './VoiceSettings';
 import { useEffect, useRef, useState } from 'react';
-import { AgentPlaza, AgentSidebar, ApprovalModeSelector, type AgentApprovalMode, AgentsSettingsCard, DefaultModelSelector, DarlUIProvider, ModelManagementCard, PromptSettingsCard, SettingsPage, SkillManager, defaultModelConfiguration, defaultReasoningEffort, toAgentModels, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentErrorInfo, type AgentExecutionEvent, type AgentToolCall, type AgentSendRequest, type AgentSession, type AgentSkill, type DefaultModelDraft, type DefaultModelOption, type DefaultModelSelection, type ModelConfiguration, type ModelProvider, type PromptSettingsPrompts } from '@darl/ui';
+import { AgentPlaza, AgentSidebar, ApprovalModeSelector, type AgentApprovalMode, AgentsSettingsCard, DefaultModelSelector, DarlUIProvider, ModelManagementCard, PromptSettingsCard, SettingsPage, SkillManager, defaultModelConfiguration, defaultReasoningEffort, toAgentModels, type AgentModelConfig, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentErrorInfo, type AgentExecutionEvent, type AgentToolCall, type AgentSendRequest, type AgentSession, type AgentSkill, type DefaultModelDraft, type DefaultModelOption, type DefaultModelSelection, type ModelConfiguration, type ModelProvider, type PromptSettingsPrompts } from '@darl/ui';
 import { ArrowLeft, Blocks, BookOpen, Bot, Database, FileText, History, MessageSquare, Settings2, Sparkles, Wrench } from 'lucide-react';
 import createSkillPrompt from '../prompts/create-skill.md?raw';
 import { lines } from '../stream';
 import { Guide } from './Guide';
 import { ProjectsPage } from './ProjectsPage';
+import { PromptOptimizationSettings } from './PromptOptimizationSettings';
 import { MediaConcurrencySettings } from './MediaConcurrencySettings';
 import { MediaGenerationPage } from './MediaGenerationPage';
 import { McpSettings } from './McpSettings';
@@ -17,21 +18,22 @@ import { finishToolCalls, messageTextForModel } from './message-history';
 const persistedSessions = (sessions: AgentSession[]) => sessions.map((session) => ({ ...session, messages: session.messages.map((message) => ({ ...message, attachments: message.attachments?.map((attachment) => typeof attachment === 'string' ? attachment : { ...attachment, url: attachment.url?.startsWith('data:') ? undefined : attachment.url }), toolCalls: message.toolCalls?.map(({ output: _output, ...call }) => call) })) }));
 const interruptedExecutionStatuses = new Set<AgentExecutionEvent['status']>(['pending', 'started', 'running', 'retrying', 'confirmation']);
 const terminalExecutionStatuses = new Set<AgentExecutionEvent['status']>(['success', 'error', 'cancelled', 'timeout']);
+const timelineKey = (event: AgentExecutionEvent) => event.source === 'commentary' ? `commentary:${event.id}` : event.toolCallId || event.runId || event.id;
 function recoverTimeline(timeline: AgentExecutionEvent[] | undefined) {
   if (!timeline?.length) return timeline;
   const recoveredAt = new Date().toISOString();
   const cleaned = timeline.filter((event, index) => {
     if (event.status !== 'cancelled') return true;
-    const key = event.toolCallId || event.runId || event.id;
-    return !timeline.slice(index + 1).some((candidate) => (candidate.toolCallId || candidate.runId || candidate.id) === key && candidate.status === 'success');
+    const key = timelineKey(event);
+    return !timeline.slice(index + 1).some((candidate) => timelineKey(candidate) === key && candidate.status === 'success');
   });
   return cleaned.map((event, index) => {
     if (!interruptedExecutionStatuses.has(event.status)) return event;
-    const key = event.toolCallId || event.runId || event.id;
+    const key = timelineKey(event);
     let latestIndex = -1;
     for (let candidateIndex = timeline.length - 1; candidateIndex >= 0; candidateIndex -= 1) {
       const candidate = timeline[candidateIndex];
-      if ((candidate.toolCallId || candidate.runId || candidate.id) === key) { latestIndex = candidateIndex; break; }
+      if (timelineKey(candidate) === key) { latestIndex = candidateIndex; break; }
     }
     if (latestIndex !== index || terminalExecutionStatuses.has(timeline[latestIndex]?.status)) return event;
     return { ...event, status: 'cancelled' as const, endedAt: recoveredAt, error: { code: 'REQUEST_CANCELLED', stage: 'cancellation', message: '运行已中断，请重新发起请求。', retryable: true, suggestion: '可以点击“重新生成”继续请求。', runId: event.runId, parentRunId: event.parentRunId } };
@@ -60,6 +62,7 @@ async function api<T>(path: string, body?: unknown, method = body ? 'POST' : 'GE
 export function App() {
   const fishVoice = useFishVoice();
   const [sessions, setSessions] = useState<AgentSession[]>(() => [newSession()]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [activeId, setActiveId] = useState(() => sessions[0].id);
   const [skills, setSkills] = useState<AgentSkill[]>([]);
   const [providers, setProviders] = useState<ModelProvider[]>([]);
@@ -165,7 +168,7 @@ export function App() {
     setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, updatedAt: new Date().toLocaleString(), messages: session.messages.map((message) => message.id === messageId ? { ...message, content: content(message.content), streaming, ...(error ? { error } : {}) } : message) } : session));
   };
   const appendTimeline = (sessionId: string, messageId: string, event: AgentExecutionEvent) => {
-    setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, messages: session.messages.map((message) => message.id === messageId ? { ...message, timeline: [...(message.timeline || []), event] } : message) } : session));
+    setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, messages: session.messages.map((message) => message.id === messageId ? { ...message, ...(event.source === 'commentary' ? { content: '' } : {}), timeline: [...(message.timeline || []), event] } : message) } : session));
   };
   const finishTimeline = (sessionId: string, messageId: string, status: AgentExecutionEvent['status'], runId: string, requestId: string, error?: AgentErrorInfo, completed = false) => {
     setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, messages: session.messages.map((message) => {
@@ -173,8 +176,8 @@ export function App() {
       const now = new Date().toISOString();
       const active = message.timeline.filter((event) => {
         if (!interruptedExecutionStatuses.has(event.status)) return false;
-        const key = event.toolCallId || event.runId || event.id;
-        const latest = [...message.timeline!].reverse().find((candidate) => (candidate.toolCallId || candidate.runId || candidate.id) === key);
+        const key = timelineKey(event);
+        const latest = [...message.timeline!].reverse().find((candidate) => timelineKey(candidate) === key);
         return latest?.id === event.id;
       });
       const next = [...message.timeline];
@@ -326,7 +329,7 @@ export function App() {
     setSessions(current => [session, ...current]);
     setActiveId(session.id);
     setSkillManagerOpen(false); setSettings(false); setGuide(false); setPlazaVisible(false); setProjectsVisible(false); setMediaJobsVisible(false); setOpen(true);
-    await run({ sessionId: session.id, agentId: session.agentId, content: createSkillPrompt.trim(), skillIds: ['builtin:skill-creator'], applicationIds: [], modelId: availableModelId, reasoningEffort: activeEffort }, undefined, session);
+    setDrafts(current => ({ ...current, [session.id]: createSkillPrompt.trim() }));
   };
   const saveSkill = async (skill: AgentSkill) => {
     setSkills(await api<AgentSkill[]>('skills', { skill }));
@@ -368,10 +371,11 @@ export function App() {
   const approvalSettings = <section className="example-default-models" aria-label="审批模式设置"><header><div><span className="example-eyebrow">TOOL APPROVAL</span><h2>审批模式</h2><p>与聊天输入框共用同一设置，保存在本机，主 Agent 与子 Agent 一起生效。</p></div></header><ApprovalModeSelector value={approvalMode} onChange={updateApprovalMode} disabled={approvalSaving || generating} /><p>帮我批准：自动执行工作区文件操作、新增 Skill、简单只读命令及明确标记为非破坏且封闭的 MCP 写操作；付费生成、复杂命令和未知操作仍询问。完全访问：不再逐次确认，包括媒体生成费用与危险操作；命令拥有后端系统用户的权限。</p></section>;
   const agentsSettings = <AgentsSettingsCard agents={agents} onSave={async (agent) => setAgents(await api<AgentConfig[]>('agents', { agent }))} onDelete={async (id) => setAgents(await api<AgentConfig[]>(`agents/${id}`, undefined, 'DELETE'))} />;
   const promptsSettings = <PromptSettingsCard prompts={prompts} onSave={async (patch) => setPrompts(await api<PromptSettingsPrompts>('prompts', patch))} />;
-  const modelSettings = <div className="example-model-settings">{defaultModelSettings}<DefaultModelSelector models={defaultMediaModels} kinds={['image', 'video']} value={defaultMediaSelection} onChange={setDefaultMediaSelection} open={defaultMediaModelsOpen} onOpenChange={setDefaultMediaModelsOpen} onComplete={saveDefaultMediaModels} /><MediaConcurrencySettings /><ModelManagementCard configuration={modelConfiguration} providers={providers}
+  const modelSettings = <div className="example-model-settings">{defaultModelSettings}<DefaultModelSelector models={defaultMediaModels} kinds={['image', 'video']} value={defaultMediaSelection} onChange={setDefaultMediaSelection} open={defaultMediaModelsOpen} onOpenChange={setDefaultMediaModelsOpen} onComplete={saveDefaultMediaModels} /><PromptOptimizationSettings models={models} /><MediaConcurrencySettings /><ModelManagementCard configuration={modelConfiguration} providers={providers}
     onSave={async (configuration) => setModelConfiguration(await api<ModelConfiguration>('model-config', { configuration }))}
     onProviderSave={async (provider, apiKey) => setProviders(await api<ModelProvider[]>('providers', { provider, apiKey }))}
     onProviderDelete={async (id) => setProviders(await api<ModelProvider[]>(`providers/${id}`, undefined, 'DELETE'))}
+    onFetchModels={(provider, apiKey) => api<AgentModelConfig[]>('providers/models', { provider, ...(apiKey ? { apiKey } : {}) })}
     onTestConnection={async (provider) => setProviders(await api<ModelProvider[]>(`providers/${provider.id}/test`, {}))}
   /></div>;
 
@@ -383,7 +387,8 @@ export function App() {
     </div>
     <AgentSidebar voice={fishVoice.voice} approvalMode={approvalMode} onApprovalModeChange={updateApprovalMode} approvalModePending={!approvalReady || approvalSaving} open={open} onOpenChange={setOpen} sessions={sessions} activeSessionId={activeId} onSessionChange={setActiveId} onSessionRename={renameSession} onSessionDelete={deleteSession}
       onNewSession={showPlaza}
-      onSend={run} onStop={() => running.current?.abort()} isGenerating={generating} onRegenerate={regenerate}
+      draft={drafts[activeId] ?? ''} onDraftChange={(value) => setDrafts(current => ({ ...current, [activeId]: value }))}
+      onSend={async (request) => { await run(request); setDrafts(current => current[request.sessionId]?.trim() === request.content ? { ...current, [request.sessionId]: '' } : current); }} onStop={() => running.current?.abort()} isGenerating={generating} onRegenerate={regenerate}
       applications={applications} onToolConfirm={async (id, approved) => { await api(`tool-confirmations/${id}`, { approved }); }}
       agents={agents} selectedAgentId={agentId} models={models} selectedModelId={availableModelId} onSelectedModelIdChange={setModelId} selectedReasoningEffort={activeEffort} onSelectedReasoningEffortChange={setEffort}
       uploadAttachment={async (file) => {

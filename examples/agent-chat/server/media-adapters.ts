@@ -405,6 +405,7 @@ export async function submitVideo(job:MediaJob,key:string,localMedia?:LocalMedia
     referenceImages.push(resolved.url);
   }
   const result=await createH3Video(job.baseUrl,key,{
+    model:job.upstreamModelId,
     prompt:promptFor(job), seconds:Number(job.options.duration??10),
     resolution:(job.options.resolution ?? '768') as '480'|'768',
     aspectRatio:(job.options.aspectRatio ?? '9:16') as '16:9'|'9:16',
@@ -412,11 +413,12 @@ export async function submitVideo(job:MediaJob,key:string,localMedia?:LocalMedia
   },AbortSignal.timeout(30000));
   return result.id;
 }
-export async function checkVideo(job:MediaJob,key:string):Promise<{state:'running'|'failed'|'completed';error?:string;media?:Buffer}>{
+export async function checkVideo(job:MediaJob,key:string):Promise<{state:'running'|'failed'|'completed';progress?:number;provider?:Record<string,unknown>;error?:string;media?:Buffer}>{
   if(!job.remoteTaskId)throw new Error('视频远端编号未保存');
   ensureHttp(job.baseUrl);
   const remote=await getH3Video(job.baseUrl,key,job.remoteTaskId,AbortSignal.timeout(30000));
-  if(remote.status==='failed')return {state:'failed',error:remote.error||'视频生成失败'};
-  if(remote.status==='succeeded')return {state:'completed',media:Buffer.from(await downloadH3Video(job.baseUrl,key,remote,AbortSignal.timeout(120000)))};
-  return {state:'running'};
+  const metadata={...(remote.progress!==undefined?{progress:remote.progress}:{}),provider:{...remote}};
+  if(remote.status==='failed')return {...metadata,state:'failed',error:remote.error||'视频生成失败'};
+  if(remote.status==='succeeded')return {...metadata,state:'completed',media:Buffer.from(await downloadH3Video(job.baseUrl,key,remote,AbortSignal.timeout(120000)))};
+  return {...metadata,state:'running'};
 }

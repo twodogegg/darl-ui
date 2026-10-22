@@ -1,14 +1,14 @@
-import { useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { Button } from '../ui/Button';
 import { StyleSelector, type StyleCreateRequest } from '../style-selector/StyleSelector';
-import { Alert, Choice, OptionPanel, Popover } from './WorkspaceUI';
-import { durations, filterReferences, GENERATION_COUNTS, generationModeLabels, generationModes, outputLimit, referenceLimit, selectedGenerationMode, supportsFrames, type MediaInputMode } from './model';
-import type { GenerateRequest, MediaGenerationMode, MediaModel, MediaStyleOption } from './types';
+import { Alert, Choice, Modal, OptionPanel, Popover } from './WorkspaceUI';
+import { durations, filterReferences, GENERATION_COUNTS, generationModeLabels, generationModes, isH3Model, outputLimit, referenceLimit, selectedGenerationMode, supportsFrames, type MediaInputMode } from './model';
+import type { GenerateRequest, MediaGenerationMode, MediaModel, MediaStyleOption, MediaWorkspaceProps, PromptOptimizationMode } from './types';
 import type { ReferenceDraft } from './useReferences';
 
 const labels = { images: '参考图片', videos: '参考视频', audios: '参考音频' };
 const typeLabels = { image: '图片', video: '视频' };
-export function MediaComposer({ models, model, mediaType, onMediaTypeChange, options, generationCount, onGenerationCountChange, onModelChange, onOptionsChange, prompt, onPromptChange, draft, inputMode, onInputModeChange, generationMode, onGenerationModeChange, styles, styleId, onStyleChange, onCreateStyle, error, onError, pending, canGenerate, onGenerate }: {
+export function MediaComposer({ models, model, mediaType, onMediaTypeChange, options, generationCount, onGenerationCountChange, onModelChange, onOptionsChange, prompt, onPromptChange, draft, inputMode, onInputModeChange, generationMode, onGenerationModeChange, styles, styleId, onStyleChange, onCreateStyle, onUpdateStyle, onOptimizePrompt, optimizing, onCancelOptimization, optimizationResult, onRestoreOptimization, error, onError, pending, canGenerate, onGenerate }: {
   models: MediaModel[]; model?: MediaModel; mediaType: MediaModel['type']; onMediaTypeChange: (type: MediaModel['type']) => void;
   options: GenerateRequest['options'];
   generationCount: number; onGenerationCountChange: (count: number) => void;
@@ -18,6 +18,11 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
   generationMode?: MediaGenerationMode; onGenerationModeChange: (mode: MediaGenerationMode) => void;
   styles: MediaStyleOption[]; styleId?: string; onStyleChange: (styleId: string) => void;
   onCreateStyle?: (request: StyleCreateRequest) => void | Promise<void>;
+  onUpdateStyle?: MediaWorkspaceProps['onUpdateStyle'];
+  onOptimizePrompt?: (mode: PromptOptimizationMode) => void;
+  optimizing: boolean; onCancelOptimization: () => void;
+  optimizationResult: { before: string; after: string } | null;
+  onRestoreOptimization: () => void;
   error: string; onError: (message: string) => void; pending: boolean; canGenerate: boolean; onGenerate: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
@@ -25,6 +30,8 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
   const inputId = useId();
   const frameRole = useRef<'firstFrame' | 'lastFrame'>('firstFrame');
   const [styleOpen, setStyleOpen] = useState(false);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
+  useEffect(() => { if (!optimizationResult) setComparisonOpen(false); }, [optimizationResult]);
   const modelTypes = (['image', 'video'] as const).filter((type) => models.some((item) => item.type === type));
   const accept = model ? (['images', 'videos', 'audios'] as const).filter((kind) => referenceLimit(model, kind)).map((kind) => kind === 'images' ? 'image/*' : kind === 'videos' ? 'video/*' : 'audio/*') : [];
   const availableModes = generationModes(model);
@@ -90,6 +97,7 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
     </div>
     <label htmlFor={inputId} className="darl-visually-hidden">生成提示词</label><textarea id={inputId} className="darl-mw-prompt" rows={2} value={prompt} onChange={(event) => onPromptChange(event.target.value)} onKeyDown={keyDown} aria-invalid={Boolean(error)} placeholder="描述想生成的画面，或添加参考素材后说明修改要求…"/>
     {error && <Alert>{error}</Alert>}
+    {optimizing && <span role="status">正在优化提示词…</span>}
     <div className="darl-mw-controls">
       {model?.type === 'video' && availableModes.length > 1 && <Choice label="生成方式" ariaLabel={selectedMode ? `生成方式：${generationModeLabels[selectedMode]}` : '生成方式'} choices={availableModes} value={selectedMode} format={(value) => generationModeLabels[value as MediaGenerationMode]} onChange={(value) => onGenerationModeChange(value as MediaGenerationMode)}/>} 
       {supportsFrames(model) && !!accept.length && <Choice label="素材方式" value={inputMode === 'frames' ? '首尾帧' : '参考素材'} choices={['首尾帧', '参考素材']} onChange={(value) => onInputModeChange(value === '首尾帧' ? 'frames' : 'references')}/>} 
@@ -97,7 +105,7 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
       <Popover label="选择模型" trigger={model ? `${model.type === 'image' ? '▧' : '▷'} ${model.name}` : '无可用模型'}>{(close) => <div className="darl-mw-models">{models.filter((item) => item.type === mediaType).map((item) => <Button key={item.id} variant={item.id === model?.id ? 'secondary' : 'ghost'} size="sm" onClick={() => { onModelChange(item.id); close(); }} aria-pressed={item.id === model?.id}>{item.name}</Button>)}</div>}</Popover>
       {(!!styles.length || !!onCreateStyle) && <>
         <Button variant="secondary" size="sm" onClick={() => setStyleOpen(true)} aria-label="选择风格">风格 <b>{styleId ? styles.find((style) => style.id === styleId)?.name || '已选择' : '默认'}</b></Button>
-        <StyleSelector styles={styles} open={styleOpen} onOpenChange={setStyleOpen} value={styleId || null} onChange={(style) => onStyleChange(style?.id || '')} onCreate={onCreateStyle} />
+        <StyleSelector styles={styles} open={styleOpen} onOpenChange={setStyleOpen} value={styleId || null} onChange={(style) => onStyleChange(style?.id || '')} onCreate={onCreateStyle} onUpdate={onUpdateStyle} />
       </>}
       {hasPanel && model && <OptionPanel
         label="生成参数"
@@ -109,7 +117,23 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
         generation={{ values: [...GENERATION_COUNTS], value: generationCount, onChange: (count) => onGenerationCountChange(count) }}
       />}
       {model?.type === 'video' && model.capabilities.generateAudio === true && <Button variant="secondary" size="sm" role="switch" aria-label="生成声音" aria-checked={options.generateAudio ?? false} onClick={() => onOptionsChange({ ...options, generateAudio: !options.generateAudio })}>生成声音 {options.generateAudio ? '开' : '关'}</Button>}
+      {onOptimizePrompt && (optimizing ? <Button variant="secondary" size="sm" onClick={onCancelOptimization}>取消优化</Button>
+        : model && isH3Model(model) && prompt.trim() && !pending ? <Popover label="提示词优化" trigger="✧ 提示词优化">{(close) => <div className="darl-mw-models">
+          <Button variant="ghost" size="sm" onClick={() => { close(); onOptimizePrompt('general'); }}>普通优化</Button>
+          <Button variant="ghost" size="sm" onClick={() => { close(); onOptimizePrompt('h3'); }}>H3 提示优化</Button>
+        </div>}</Popover> : <Button variant="secondary" size="sm" disabled={!model || !prompt.trim() || pending} onClick={() => onOptimizePrompt('general')}>✧ 提示词优化</Button>)}
+      {optimizationResult && <>
+        <Button variant="secondary" size="sm" disabled={optimizing || pending} onClick={() => setComparisonOpen(true)}>优化对比</Button>
+        <Button variant="ghost" size="sm" disabled={optimizing || pending} onClick={onRestoreOptimization}>还原优化</Button>
+      </>}
       <Button className="darl-mw-generate" size="sm" disabled={!canGenerate} onClick={onGenerate}>{pending ? '提交中…' : '✧ 生成'}</Button>
     </div>
+    <Modal title="提示词优化对比" open={comparisonOpen && !!optimizationResult} onOpenChange={setComparisonOpen}>
+      <div className="darl-mw-prompt-comparison">
+        <label>优化前<textarea readOnly value={optimizationResult?.before ?? ''} /></label>
+        <label>优化后<textarea readOnly value={optimizationResult?.after ?? ''} /></label>
+      </div>
+      <div className="darl-mw-prompt-comparison-actions"><Button variant="outline" onClick={() => setComparisonOpen(false)}>关闭对比</Button><Button disabled={optimizing || pending} onClick={() => { onRestoreOptimization(); setComparisonOpen(false); }}>还原优化</Button></div>
+    </Modal>
   </div><div className="darl-mw-composer-hint">Enter 生成 · Shift + Enter 换行 · 支持粘贴和拖入参考素材</div></footer>;
 }

@@ -45,11 +45,12 @@ describe('AgentSidebar', () => {
       { id: 'failed', appId: 'runtime', appName: '执行环境', toolName: 'run', status: 'error', errorInfo: failed },
     ] }] }]} activeSessionId="one" />);
     expect(screen.getByText('已停止')).toBeInTheDocument();
-    expect(screen.getByText('已拒绝')).toBeInTheDocument();
     expect(screen.getByText('生成已停止')).toHaveAttribute('role', 'status');
     expect(screen.getAllByRole('alert')).toHaveLength(1);
     expect(screen.getByRole('alert')).toHaveTextContent('命令退出码为 7');
-    expect(container.querySelectorAll('.darl-agent-tool-call--cancelled')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: /执行过程/ }));
+    expect(screen.getByText('已拒绝')).toBeInTheDocument();
+    expect(container.querySelectorAll('.darl-agent-execution-item--cancelled')).toHaveLength(2);
     expect(screen.queryByText('已取消失败')).not.toBeInTheDocument();
   });
 
@@ -94,9 +95,11 @@ describe('AgentSidebar', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('检查应用地址后重试。');
   });
 
-  it('普通工具记录只显示名称和状态，不提供参数或结果展开入口', () => {
+  it('普通工具记录默认折叠，展开操作后仍不展示原始参数和结果', () => {
     const history: AgentSession[] = [{ id: 'one', title: '查询', messages: [{ id: 'assistant', role: 'assistant', content: '已完成查询。', toolCalls: [{ id: 'read-call', appId: 'catalog', appName: '素材库', toolName: 'search', toolTitle: '搜索素材', status: 'success', input: { query: '不显示的参数' }, output: { text: '不显示的详细结果' } }] }] }];
     const { container } = render(<AgentSidebar open onOpenChange={vi.fn()} sessions={history} activeSessionId="one" />);
+    expect(screen.queryByText('搜索素材')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /执行过程/ }));
     expect(screen.getByText('素材库')).toBeInTheDocument();
     expect(screen.getByText('搜索素材')).toBeInTheDocument();
     expect(screen.getByText('已完成')).toBeInTheDocument();
@@ -110,6 +113,8 @@ describe('AgentSidebar', () => {
   it('显示主 Agent 委派给子 Agent 的任务内容', () => {
     const history: AgentSession[] = [{ id: 'one', title: '委派', messages: [{ id: 'assistant', role: 'assistant', content: '', toolCalls: [{ id: 'delegation', appId: 'agent:writer', appName: '文案 Agent', toolName: 'ask_writer', toolTitle: '文案 Agent 子任务', status: 'success', agentId: 'writer', input: { task: '请根据素材中心的结果写一段产品介绍。' } }] }] }];
     render(<AgentSidebar open onOpenChange={vi.fn()} sessions={history} activeSessionId="one" />);
+    fireEvent.click(screen.getByRole('button', { name: /执行过程/ }));
+    fireEvent.click(screen.getByText('文案 Agent 子任务').closest('summary')!);
     expect(screen.getByText('委派任务')).toBeInTheDocument();
     expect(screen.getByText('请根据素材中心的结果写一段产品介绍。')).toBeInTheDocument();
   });

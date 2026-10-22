@@ -70,14 +70,15 @@ Agent Chat 的素材上传、命名字体、项目封面和媒体结果统一通
 - 对话、Skills、提供方、模型配置和 Agent 配置保存在 Git 忽略的 `.local/agent-chat/data.sqlite`；浏览器只负责调用本机 API，不保存聊天历史。
 - 本机执行环境提供技能目录/按需加载、文件列举/分页读取/写入、附件导入、Shell 命令、进程查询/停止和文件交付。技能正文及二进制资源由服务端读取已保存版本，浏览器只传 Skill ID。允许自动调用的技能仅发送目录；关闭自动调用的技能需用户显式引用。
 - 网站默认提供 Anthropic 的 `skill-creator`，所有主 / 子 Agent 都能按需加载。上游完整技能包（含许可）位于 `examples/agent-chat/skills/skill-creator/`，来自 [claude-plugins-official](https://github.com/anthropics/claude-plugins-official/tree/d1adba47161a271799de7b548225d929310046bd/plugins/skill-creator/skills/skill-creator)，固定版本 `d1adba47161a271799de7b548225d929310046bd`，原文件未修改。Claude CLI 专属评测仍依赖对应软件与账号，不属于网站自带能力。
-- 在聊天的「选择 Skill」弹层或「管理 Skill」窗口点击「通过对话创建」，会新开一条对话并自动引用 skill-creator，原聊天及草稿保持不变。也可以直接对话「创建一个整理会议行动项的 Skill」或发送技能链接要求安装。Agent 用现有文件 / 命令工具生成或下载完整包，再调用 `builtin_create_skill` 安装进网站 Skills 库；安装复用手动导入校验，不执行包内脚本，不写电脑全局技能目录。默认模式自动批准新增技能，覆盖已有技能需明确 ID、当前版本并确认；内置技能内容只读。同包重复安装复用已有 ID。
+- 在聊天的「选择 Skill」弹层或「管理 Skill」窗口点击「通过对话创建」，会新开一条对话并将自动引用 skill-creator 的创建请求填入输入框，用户确认发送后才执行，原聊天及草稿保持不变。也可以直接对话「创建一个整理会议行动项的 Skill」或发送技能链接要求安装。Agent 用现有文件 / 命令工具生成或下载完整包，再调用 `builtin_create_skill` 安装进网站 Skills 库；安装复用手动导入校验，不执行包内脚本，不写电脑全局技能目录。默认模式自动批准新增技能，覆盖已有技能需明确 ID、当前版本并确认；内置技能内容只读。同包重复安装复用已有 ID。
 - Skills 由 `/api/skills` 单独保存到 SQLite，`/api/state` 只写会话，读状态时合并技能目录；旧版会话中的 Skills 首次自动迁移。手动导入与 Agent 创建共用保存逻辑，创建后发送 `skills-changed` 事件刷新界面，当轮即可加载，新对话及刷新后仍可用。
 - 工作区保存在 `.local/agent-chat/workspaces/`，按聊天及 Agent 分目录，文件跨请求和服务重启保留；导入的技能按内容版本落盘，带 shebang 的脚本及 Shell 脚本可直接执行。命令默认超时 120 秒、最大 10 分钟；调用最多等待 10 秒后返回进程 ID，继续用查询工具获取输出与真实退出码。成功回复后后台命令可继续运行至超时；停止、断连或请求失败会终止本轮启动的命令。重启服务后进程不恢复。
 - 命令运行在后端操作系统用户下，**不是沙箱**；文件工具校验工作区路径和符号链接，Shell 本身仍具有系统用户权限。子进程只继承 PATH、HOME、语言、临时目录等基础环境，不转发后端提供方密钥；需要特定凭证、CLI、系统软件或 MCP 的技能仍需配置真实依赖。执行工具仅向本机/局域网同源请求提供，不适合直接暴露到公网。
 - 「设置 → Tools」可查看实际工具目录；输入框或「设置 → 审批模式」统一控制工具执行。默认“帮我批准”，工作区文件操作自动执行；导入 Skill 不会自动执行。用户拒绝或主动停止使用 `cancelled` 状态，页面显示普通状态提示；命令失败、网络错误和超时仍保留错误提示。通过 `publish_file` 保存产物后取得 `/api/files/:id?download=1` 下载链接，HTML 等主动内容作为附件交付。
 - 宿主提供 `uploadAttachment` 后，聊天文件选择器支持任意文件；未提供时仍只接受图片。示例将附件保存为 fileId 并告知模型，模型可导入工作区处理；仅图片发送给视觉模型，其他文件不冒充图片预览。
+- 媒体生成输入区支持提示词优化；H3 视频可选择普通优化或 H3 专用优化。请求附带当前生成模型、模式、参数、风格和参考素材元数据。「设置 → 模型 → 提示词优化模型」分别选择执行模型，「设置 → 提示词」编辑普通 / H3 优化规则，保存后下次请求生效。失败或取消保留原文，修改输入或参数会取消旧优化。成功后可查看最近一次优化前后的对比，并一键还原优化。
 - MediaWorkspace 宿主可通过 `/api/media-tasks` 保存单用户任务、批次和结果；协议凭据与生成结果仍由宿主 API 管理。
-- 获取模型目录后需确认模型类型、启用状态并保存；新发现的模型默认禁用，接口返回的 ID 无法证明其媒体或推理能力。
+- 供应商编辑器通过真实 `/v1/models` 临时预览可用模型；查询、测试连接和保存供应商均不保存查询目录。用户逐个点击「添加」后，在供应商编辑器内确认名称、模型类型、参数模板和调用协议，再保存所选模型；已知模型匹配现有配置，未知模型须明确选择类型和模板。「模型 ID 映射」可设置网站使用的 ID，实际请求仍发送所选供应商模型 ID。高级能力覆盖默认折叠。同一供应商的不同文本模型可分别使用 Chat Completions 或 Responses；实际请求遵循模型绑定协议。接口返回的 ID 无法证明其媒体或推理能力。
 - 支持通过 Streamable HTTP 接入 MCP 应用和真实多步工具调用；AgentSidebar 支持图片附件预览、发送到支持视觉输入的文本模型，以及 MCP 图片结果回传；模型目录仍可设置图片 / 视频 / 音频类型，聊天仅列出启用的文本模型。
 - 聊天请求不设置固定的 100000 字符文本上限；上下文预算按模型 `contextWindow` 能力计算，未声明时按 1M token 的默认预算处理。累计上下文超过预算 50% 后主动压缩较早历史，当前消息和最近上下文优先保留；工具结果仍按 Agent 上下文策略控制。
 
@@ -273,6 +274,8 @@ import '@darl/ui/styles.css';
   onCreateTask={handleCreateTask}
   onRenameTask={handleRenameTask}
   onGenerate={handleGenerate}
+  onOptimizePrompt={handleOptimizePrompt}
+  onUpdateStyle={handleUpdateStyle}
   onRetry={handleRetry}
   onCancel={handleCancel}
   onRegenerate={handleRegenerate}
@@ -280,7 +283,11 @@ import '@darl/ui/styles.css';
 />
 ```
 
-模型、任务、批次和异步状态由宿主传入；组件不调用真实生成 API，不上传文件，不自行保存任务。切换模型保留素材，超限阻止生成；不支持的参数与素材不进入请求。
+模型、任务、批次和异步状态由宿主传入；组件不调用真实生成 API，不上传文件，不自行保存任务。切换模型保留素材，超限阻止生成；不支持的参数与素材不进入请求。可选 `onOptimizePrompt(request, { signal })` 返回优化文本；请求包含当前 `model`、`options`、`mode`、风格、参考素材、生成次数及 `optimization: 'general' | 'h3'`，真实模型调用与配置由宿主负责。
+
+批次长提示词支持展开 / 收起，视频参考图随生成参数保存；生成卡片显示上游真实进度，未提供进度时保持等待状态。
+
+真实提示词优化、优化对比 / 还原及风格编辑演示位于 `http://localhost:5197` 的「媒体生成」，同样直接调用组件库源码。
 
 演示入口：`http://localhost:5188/#media-workspace`。包含「创作工作室」与「品牌宣传」两种宿主配置、深浅主题及本地异步模拟。示例媒体为本地示意素材。完整模型类型、API、接入示例和边界见 [MediaWorkspace 文档](docs/media-workspace.md)。
 
@@ -331,7 +338,7 @@ import '@darl/ui/styles.css';
 
 接口依据：[Fish TTS](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech)、[Fish ASR](https://docs.fish.audio/features/speech-to-text)。本地并行开发可在 `.env.local` 设置 `AGENT_CHAT_PORT`、`PLAYGROUND_PORT`，保持固定端口和 `npm run dev` 同时启动。
 
-`AgentMessage.timeline` 可接收按流式顺序排列的 `AgentExecutionEvent`。事件只包含通用的 `source`、`status`、`name`、`runId`、`parentRunId`、`agentId`、时间戳、耗时和安全错误摘要；`source: 'agent'` 会区分主 Agent 与子 Agent，`source: 'tool'` 显示 MCP 工具。侧栏默认折叠时间线，展开后按父子运行关系缩进，并显示真实耗时、重试、确认、失败、取消和超时；原始参数和结果仍只在确认卡片中按既有规则展示，不进入时间线事件。
+`AgentMessage.timeline` 可接收按流式顺序排列的 `AgentExecutionEvent`。事件只包含通用的 `source`、`status`、`name`、`runId`、`parentRunId`、`agentId`、时间戳、耗时和安全错误摘要；`source: 'agent'` 区分主 Agent 与子 Agent，`source: 'tool'` 表示工具调用，`source: 'commentary'` 的 `summary` 保存模型执行时输出的普通过程说明（不接收内部推理）。每条回复的执行过程统一放在回答上方，默认折叠为当前状态、调用次数和可用的真实总耗时；仅有 `toolCalls` 的历史记录也适用，无工具的普通回复不增加入口。展开摘要后直接按时间顺序列出每次调用和过程说明，不再增加同类调用的分组层；点击单项查看说明、来源、状态变化、耗时或委派任务。宿主示例将工具调用前后的中间文字移入过程说明，正文只保留最后的回复，刷新后两者仍分别恢复。用户手动展开的记录在运行结束后保持展开，失败提示和确认弹窗始终可见。原始参数和结果仍按既有确认规则展示，不进入执行过程详情。Playground 的「演示执行过程」提供明确标注的本地交互预览。
 
 服务端示例为每次聊天返回 `requestId` 和顶层 `runId`，工具及子 Agent 事件携带 `runId` / `parentRunId` 以便关联。失败事件使用 `AgentErrorInfo`，区分模型、MCP 连接、MCP 工具、工具参数、子 Agent 委派、校验、取消和超时；错误卡片显示错误码、requestId、阶段、是否可重试及下一步建议，不展示完整上游响应或敏感工具参数。
 
@@ -376,7 +383,7 @@ Agent 的 `@` 只对当前用户消息生效，历史提及不会每轮重复触
 
 ## StyleSelector｜风格选择弹窗
 
-`StyleSelector` 提供风格广场弹窗，支持集合切换、分类筛选、搜索、选择、收藏和两步创建风格向导。宿主通过 `styles` 提供风格数据，通过 `onChange`、`onFavoriteChange` 和 `onCreate` 接收结果；`onCreate` 可以返回 Promise，失败时会保留表单并显示错误。
+`StyleSelector` 提供风格广场弹窗，支持集合切换、分类筛选、搜索、选择、收藏和两步创建风格向导。宿主通过 `styles` 提供风格数据，通过 `onChange`、`onFavoriteChange` 和 `onCreate` 接收结果；`onCreate` 可以返回 Promise，失败时会保留表单并显示错误。创建入口位于「我的风格」卡片；传入 `onUpdate(style, request)` 后自有风格显示编辑按钮，保存后由宿主刷新列表。
 
 ```tsx
 <StyleSelector

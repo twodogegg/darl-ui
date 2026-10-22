@@ -5,7 +5,7 @@ export type AgentMessageRole = 'user' | 'assistant';
 export type AgentToolStatus = 'pending' | 'running' | 'retrying' | 'success' | 'error' | 'confirmation' | 'cancelled';
 
 /** Fixed streaming protocol values used to render generic Agent activity. */
-export type AgentExecutionSource = 'agent' | 'tool';
+export type AgentExecutionSource = 'agent' | 'tool' | 'commentary';
 export type AgentExecutionStatus = 'pending' | 'started' | 'running' | 'retrying' | 'confirmation' | 'success' | 'error' | 'cancelled' | 'timeout';
 
 export interface AgentExecutionEvent {

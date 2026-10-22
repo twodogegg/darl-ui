@@ -6,9 +6,11 @@ import './settings.css';
 const meta: { key: PromptKey; label: string; eyebrow: string; description: string; empty: string }[] = [
   { key: 'system', label: '系统提示词', eyebrow: 'SYSTEM PROMPT', description: '定义助手整体角色、边界与输出方式，全局生效（system.md）。', empty: '系统提示词不能为空' },
   { key: 'voice', label: '语音提示词', eyebrow: 'VOICE PROMPT', description: '语音输出模式下追加给模型的提示，控制语音与文字的表达（voice.md）。', empty: '语音提示词不能为空' },
+  { key: 'optimization', label: '普通提示词优化', eyebrow: 'PROMPT OPTIMIZATION', description: '根据当前生成模型、参数、风格和参考素材优化提示词（optimize-prompt.md）。', empty: '优化提示词不能为空' },
+  { key: 'h3Optimization', label: 'H3 提示词优化', eyebrow: 'H3 PROMPT OPTIMIZATION', description: 'H3 视频专用优化规则，按当前时长和生成方式组织镜头（optimize-h3-prompt.md）。', empty: 'H3 优化提示词不能为空' },
 ];
 
-/** 提示词设置：查看/编辑全局系统提示词与语音提示词，支持恢复默认。 */
+/** 提示词设置：查看/编辑宿主提供的提示词，支持恢复默认。 */
 export function PromptSettingsCard({ prompts, onSave, onReset }: PromptSettingsCardProps) {
   const [active, setActive] = useState<PromptKey>('system');
   const [draft, setDraft] = useState(prompts.system);
@@ -19,14 +21,14 @@ export function PromptSettingsCard({ prompts, onSave, onReset }: PromptSettingsC
   const current = meta.find((item) => item.key === active)!;
   const dirty = draft !== prompts[active];
 
-  useEffect(() => { setDraft(prompts[active]); setNotice(''); setError(''); }, [active, prompts]);
+  useEffect(() => { setDraft(prompts[active] ?? ''); setNotice(''); setError(''); }, [active, prompts]);
 
   const save = async () => {
     if (saving) return;
     setNotice(''); setError('');
     if (!draft.trim()) { setError(current.empty); return; }
     setSaving(true);
-    try { await onSave({ [active]: draft }); setNotice('已保存，下次对话生效。'); }
+    try { await onSave({ [active]: draft }); setNotice('已保存，下次请求生效。'); }
     catch (reason) { setError(reason instanceof Error ? reason.message : '保存失败，请重试'); }
     finally { setSaving(false); }
   };
@@ -40,15 +42,15 @@ export function PromptSettingsCard({ prompts, onSave, onReset }: PromptSettingsC
     setNotice('已载入默认内容，点击保存后生效。');
   };
 
-  const rows = useMemo(() => meta.map((item) => {
+  const rows = useMemo(() => meta.filter((item) => prompts[item.key] !== undefined).map((item) => {
     const fallback = prompts.defaults?.[item.key];
     // 与默认内容比较时忽略首尾空白，避免换行差异误判为“已修改”。
-    const changed = typeof fallback === 'string' ? prompts[item.key].trim() !== fallback.trim() : false;
+    const changed = typeof fallback === 'string' ? prompts[item.key]?.trim() !== fallback.trim() : false;
     return { ...item, changed };
   }), [prompts]);
 
   return <section className="darl-prompt-settings-card" aria-label="提示词设置">
-    <header className="darl-settings-card-header"><div><span className="darl-settings-eyebrow">PROMPTS</span><h2>提示词设置</h2><p>管理当前网站使用的系统提示词与语音提示词。</p></div></header>
+    <header className="darl-settings-card-header"><div><span className="darl-settings-eyebrow">PROMPTS</span><h2>提示词设置</h2><p>管理当前网站使用的提示词，保存后下次请求生效。</p></div></header>
     <div className="darl-prompt-settings-layout">
       <nav className="darl-prompt-tabs" aria-label="提示词项">
         {rows.map((row) => <button type="button" key={row.key} className="darl-prompt-tab" data-active={row.key === active ? '' : undefined} aria-current={row.key === active ? 'page' : undefined} onClick={() => setActive(row.key)}><span><strong>{row.label}</strong><small>{row.eyebrow}</small></span><em>{row.changed ? '已修改' : '默认'}</em></button>)}

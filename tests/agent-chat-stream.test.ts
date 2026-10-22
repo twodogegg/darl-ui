@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { lines } from '../examples/agent-chat/stream';
-import { checkedText, publicProvider, safeError, validateProvider } from '../examples/agent-chat/server/models';
+import { agentStepText, checkedText, publicProvider, safeError, validateProvider } from '../examples/agent-chat/server/models';
 import { createAgentError, failure } from '../examples/agent-chat/server/errors';
 
 function stream(text: string, size: number) {
@@ -68,6 +68,39 @@ describe('structured Agent errors', () => {
 });
 
 describe('model answer protocol boundary', () => {
+  it('moves only public intermediate text into process notes and leaves the last response as the answer', async () => {
+    async function* parts() {
+      yield { type: 'start-step' };
+      yield { type: 'reasoning-delta', text: 'private-reasoning' };
+      yield { type: 'text-delta', text: '我先查询' };
+      yield { type: 'text-delta', text: '素材。' };
+      yield { type: 'tool-call' };
+      yield { type: 'tool-call' };
+      yield { type: 'finish-step', finishReason: 'tool-calls' };
+      yield { type: 'start-step' };
+      yield { type: 'text-delta', text: '已完成查询。' };
+      yield { type: 'finish-step', finishReason: 'stop' };
+      yield { type: 'finish', finishReason: 'stop' };
+    }
+    const notes: string[] = [];
+    let answer = '';
+    for await (const text of agentStepText(parts(), (note, startedAt) => { notes.push(note); expect(Number.isFinite(Date.parse(startedAt))).toBe(true); answer = ''; })) answer += text;
+    expect(notes).toEqual(['我先查询素材。']);
+    expect(answer).toBe('已完成查询。');
+    expect(answer).not.toContain('private-reasoning');
+  });
+
+  it('preserves plain replies and propagates real stream errors', async () => {
+    async function* plain() { yield { type: 'text-delta', text: '你好。' }; yield { type: 'finish', finishReason: 'stop' }; }
+    expect(await collect(agentStepText(plain(), () => { throw new Error('不应创建过程说明'); }))).toEqual(['你好。']);
+    async function* broken() { yield { type: 'error', error: new Error('连接已中断') }; }
+    await expect(collect(agentStepText(broken(), () => {}))).rejects.toThrow('连接已中断');
+    async function* empty() { yield { type: 'finish', finishReason: 'stop' }; }
+    await expect(collect(agentStepText(empty(), () => {}))).rejects.toThrow('模型没有返回文本内容');
+    async function* limited() { yield { type: 'tool-call' }; yield { type: 'finish', finishReason: 'tool-calls' }; }
+    expect(await collect(agentStepText(limited(), () => {}))).toEqual([]);
+  });
+
   async function* chunks(value: string, size = 1) {
     for (let offset = 0; offset < value.length; offset += size) yield value.slice(offset, offset + size);
   }

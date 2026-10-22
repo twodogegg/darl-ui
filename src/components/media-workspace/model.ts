@@ -2,6 +2,11 @@ import type { GenerateRequest, MediaGenerationMode, MediaModel, MediaReferences 
 
 export const GENERATION_COUNTS = [1, 2, 3, 4] as const;
 
+export function isH3Model(model: MediaModel): boolean {
+  return model.type === 'video' && [model.id, model.logicalModelId, model.upstreamModelId, model.name, model.protocolKey]
+    .some((value) => value && /(?:^|[^a-z0-9])h3(?:$|[^a-z0-9])/i.test(value));
+}
+
 export function outputLimit(model: MediaModel): number {
   const value = model.capabilities.maxOutputs;
   return value && Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 1;

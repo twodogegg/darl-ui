@@ -69,6 +69,8 @@ export function Studio({ startGeneration }: {
 | `tasks` | `MediaTask[]`，必填；组件只展示数据 |
 | `styles` | `MediaStyleOption[]`，可选；提供后输入区出现「风格」选择器，选择结果通过 `GenerateRequest.style` 交给宿主 |
 | `onCreateStyle` | `(request: StyleCreateRequest) => void \| Promise<void>`；提供后可在风格弹窗内创建风格，失败保留表单 |
+| `onUpdateStyle` | `(style, request: StyleCreateRequest) => void \| Promise<void>`；编辑自己的风格，保存成功后宿主刷新 `styles` |
+| `onOptimizePrompt` | `(request: PromptOptimizationRequest, { signal }) => Promise<string>`；按当前模型及参数优化并回填文本，失败保留原文 |
 | `routingStrategy` | `'selected-binding' | 'auto'`；默认选择当前模型绑定，`auto` 交给宿主按逻辑模型路由 |
 | `activeTaskId` | 可选受控任务 ID；不传时组件内部维护选择，默认第一项 |
 | `onTaskChange` | `(taskId) => void`，切换任务通知 |
@@ -139,9 +141,15 @@ type GenerateRequest = {
 
 `mode` 由当前模型能力、输入方式和素材角色自动规范化：无参考图时使用文生图 / 文生视频，有图片编辑素材时使用 `reference-edit` / `reference`，选择首尾帧时使用 `first-last-frame`。有绑定元数据时，默认 `route.strategy` 为 `selected-binding`；传入 `routingStrategy="auto"` 后交给宿主按逻辑模型选择渠道。宿主仍负责凭据、上传、协议适配、轮询和错误映射，组件不会拼接供应商原生请求体。
 
-宿主通过 `styles` 提供风格时，输入区出现「风格」按钮；确认选择后 `GenerateRequest.style` 携带 `{ id, name, description?, category? }`，宿主自行决定如何把风格注入提示词或模型参数。风格列表必须带 `isOwned`，否则自己创建的风格既进不了「我的风格」，还会漏进「风格广场」。传入 `onCreateStyle` 后可直接在弹窗内创建风格，保存成功后由宿主更新 `styles`。
+宿主通过 `styles` 提供风格时，输入区出现「风格」按钮；确认选择后 `GenerateRequest.style` 携带 `{ id, name, description?, category? }`，宿主自行决定如何把风格注入提示词或模型参数。风格列表必须带 `isOwned`，否则自己创建的风格既进不了「我的风格」，还会漏进「风格广场」。传入 `onCreateStyle` 后可直接在弹窗内创建风格，保存成功后由宿主更新 `styles`。创建入口在「我的风格」卡片；`onUpdateStyle` 提供自有风格的编辑与异步保存。
 
 `onGenerate` 只在提示词非空、任务与模型存在且参考数量合法时触发。等待提交 Promise 期间禁止重复提交；抛错显示在输入区，保留草稿方便重试。长期运行状态由宿主更新，不用提交 Promise 模拟轮询。
+
+传入 `onOptimizePrompt` 后显示「提示词优化」。`PromptOptimizationRequest` 包含生成请求（不含 `taskId`）、完整当前 `model` 和 `optimization: 'general' | 'h3'`。H3 视频通过模型 ID、上游 ID、协议键或名称中的 H3 标识提供普通 / H3 优化选择，其余模型直接普通优化。回调返回的文本填回输入框，成功后可通过「优化对比」查看最近一次优化前后文本，「还原优化」恢复本次优化前的完整原文（含空白）。连续优化仅保留最近一次对比，切换任务或模型后清除对比；失败、取消或上下文变化不覆盖原文；宿主需将 `signal` 传给真实请求。组件不自带模型凭据或优化模板。
+
+Agent Chat 的媒体请求将参考图片统一写入 `options.references`，生成、重试和历史复用共享同一提交入口；H3 适配器使用渠道绑定中的真实上游模型 ID。H3 接口约定见[创建任务](https://fwr0187eq6.apifox.cn/523019890e0)和[查询任务](https://fwr0187eq6.apifox.cn/523019892e0)。
+
+Agent Chat 的真实演示位于 `http://localhost:5197` 的「媒体生成」。宿主通过 `/api/prompt-optimization` 调用设置中选择的文本模型，将当前生成模型、模式、参数、风格和参考素材元数据作为 JSON 传给模型，不把元数据当作已识别的画面内容。普通与 H3 模板位于 `examples/agent-chat/prompts/optimize-prompt.md` 和 `optimize-h3-prompt.md`，可在「设置 → 提示词」覆盖并存入 SQLite；执行模型在「设置 → 模型」中分别配置。
 
 ## 批次和结果
 
@@ -153,7 +161,7 @@ type GenerateRequest = {
 - `style?: MediaStyleOption`：建议保存，复用时恢复当时的风格选择。
 - `references?: MediaReferences`：历史复用时恢复素材；结果区会展示参考图片、视频、音频及首尾帧缩略图。缺省恢复为空。跨会话保存前应由宿主将本地文件转成远程素材对象。
 
-结果含 `id`、`status`、可选 `url`、`error` 和 `favorited?: boolean`。状态为 `queued | running | completed | failed | cancelled`。每次生成由宿主追加批次；结果较多、记录区产生滚动时，显示粘附的顶部 / 底部跳转按钮。结果失败互不影响。
+批次长提示词可展开查看完整内容（含换行），并可收起。结果含 `id`、`status`、可选 `url`、`error`、`progress?: number` 和 `favorited?: boolean`。`progress` 为宿主提供的真实百分比（0–100），省略时不展示推算的百分比。Agent Chat 将 H3 查询接口的进度保存并传到生成卡片，兼容 `completed` / `succeeded` 和 `in_progress` / `processing` 状态。状态为 `queued | running | completed | failed | cancelled`。每次生成由宿主追加批次；结果较多、记录区产生滚动时，显示粘附的顶部 / 底部跳转按钮。结果失败互不影响。
 
 成功结果支持图片 / 视频预览、下载，图片和视频结果都可用作参考，并支持重新生成及收藏 / 取消收藏。点击「用作参考」只加入当前输入区的参考素材，不带回结果批次的提示词或其他生成参数；如果当前模型不支持该素材类型，组件会切换到第一个支持该类型的模型，但保留当前提示词和参数草稿。重新生成、收藏按钮仅在配置相应回调时出现。重新生成按参考 HTML 重跑当前结果，不把当前输入区的模型、提示词或数量作为该结果的原始参数；宿主负责更新该结果的等待、运行、完成、失败状态。收藏不发起生成请求，状态由宿主传入 `result.favorited` 控制，不在组件内持久化。浏览器原生视频控件不会自动有声播放；媒体加载失败、完成但无地址均给出提示。
 
@@ -173,7 +181,7 @@ type GenerateRequest = {
 
 ## 实现边界与归属
 
-无真实模型 API、持久化、上传服务、蒙版编辑、优化提示词、节点画布或视频剪辑。工作台结果支持通过公共 `VideoCompare` 选择最多 3 个图片 / 视频进行对比；全部为视频时使用同步播放能力。
+组件自身不提供真实模型 API、持久化、上传服务、蒙版编辑、节点画布或视频剪辑；提示词优化通过宿主回调执行。工作台结果支持通过公共 `VideoCompare` 选择最多 3 个图片 / 视频进行对比；全部为视频时使用同步播放能力。
 
 基础 Button 沿用仓库的 shadcn/ui 本地适配；弹出面板、对话框采用 shadcn/ui 的 Radix 组合模式，通过 Radix 处理 Escape、焦点和键盘交互，样式适配独立 CSS 分发。相关实现是本地适配，不是官方 CLI 原样安装的组件。
 

@@ -85,11 +85,18 @@ export interface GenerateRequest {
   references?: MediaReferences;
   options: { aspectRatio?: string; resolution?: string; duration?: number; count: number; generateAudio?: boolean };
 }
+export type PromptOptimizationMode = 'general' | 'h3';
+export interface PromptOptimizationRequest extends Omit<GenerateRequest, 'taskId'> {
+  model: MediaModel;
+  optimization: PromptOptimizationMode;
+}
 export interface MediaResult {
   id: string;
   /** Stable file identity when the host stores this result in the unified file store. */
   fileId?: string;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  /** Actual provider progress, 0–100; omit when unavailable. */
+  progress?: number;
   url?: string;
   /** 320px card thumbnail (WebP when the host transforms images). */
   thumbnailUrl?: string;
@@ -127,6 +134,9 @@ export interface MediaWorkspaceProps {
   styles?: MediaStyleOption[];
   /** Save a style created from the composer; reject to keep the draft. */
   onCreateStyle?: (request: StyleCreateRequest) => void | Promise<void>;
+  onUpdateStyle?: (style: MediaStyleOption, request: StyleCreateRequest) => void | Promise<void>;
+  /** Return optimized text; abort when the user cancels or changes the draft. */
+  onOptimizePrompt?: (request: PromptOptimizationRequest, context: { signal: AbortSignal }) => Promise<string>;
   /** How the host should select a channel when a model has binding metadata. */
   routingStrategy?: MediaRouteStrategy;
   activeTaskId?: string;

@@ -6,7 +6,7 @@ import { FileStore, type StoredFile } from './file-storage';
 export type MediaJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'uncertain';
 export type MediaJob = { id: string; taskId?: string; batchId?: string; modelId: string; type: 'image' | 'video'; status: MediaJobStatus;
   prompt: string; options: Record<string, unknown>; style?: MediaStyleOption; providerId: string; upstreamModelId: string; baseUrl: string; protocolKey?: string;
-  remoteTaskId?: string; error?: string; phase?: string; attempts: number;
+  remoteTaskId?: string; progress?: number; error?: string; phase?: string; attempts: number;
   /** IDs in the unified file store for generated outputs. */
   resultFileIds?: string[];
   /** Which payload shape the provider used for the finished image. */
@@ -29,6 +29,7 @@ export function mediaTaskResult(job: MediaJob) {
     id: job.id,
     status: job.status,
     modelId: job.modelId,
+    ...(job.progress !== undefined ? { progress: job.progress } : {}),
     ...(results ? { resultUrls: Array.from({ length: results }, (_, index) => `/api/media-generation/jobs/${job.id}/file${index ? `?index=${index}` : ''}`) } : {}),
     ...(job.resultForm ? { resultForm: job.resultForm } : {}),
     ...(job.providerResponse ? { providerResponse: job.providerResponse } : {}),
