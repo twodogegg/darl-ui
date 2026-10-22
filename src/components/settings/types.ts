@@ -31,6 +31,7 @@ export interface ModelProvider {
   id: string;
   name: string;
   baseUrl: string;
+  /** Legacy provider adapter default; ModelManagementCard hosts resolve protocol from each model binding. */
   protocol: ModelProviderProtocol;
   hasApiKey?: boolean;
   status?: ModelProviderStatus;
@@ -126,6 +127,7 @@ export interface ModelManagementCardProps {
   onProviderSave?: (provider: ModelProvider, apiKey?: string) => void | Promise<void>;
   onProviderDelete?: (providerId: string) => void | Promise<void>;
   onTestConnection?: (provider: ModelProvider) => void | Promise<void>;
+  onFetchModels?: (provider: ModelProvider, apiKey?: string) => Promise<AgentModelConfig[]>;
 }
 
 export type {
@@ -149,4 +151,18 @@ export type {
 export interface AgentSettingsCardProps {
   systemPrompt: string;
   onSave: (systemPrompt: string) => void | Promise<void>;
+}
+
+export type PromptKey = 'system' | 'voice' | 'optimization' | 'h3Optimization';
+export interface PromptSettingsPrompts {
+  system: string;
+  voice: string;
+  optimization?: string;
+  h3Optimization?: string;
+  defaults?: Partial<Record<PromptKey, string>>;
+}
+export interface PromptSettingsCardProps {
+  prompts: PromptSettingsPrompts;
+  onSave: (patch: Partial<Record<PromptKey, string>>) => void | Promise<void>;
+  onReset?: (prompts: PromptSettingsPrompts) => void | Promise<void>;
 }

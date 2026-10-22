@@ -8,7 +8,7 @@ export type { FileUploaderProps, UploadFn, UploadContext, UploadItem, UploadStat
 export { VideoCompare } from './components/video-compare/VideoCompare';
 export type { CompareVideo, CompareMedia, VideoCompareLayout, VideoCompareProps } from './components/video-compare/VideoCompare';
 export { MediaWorkspace } from './components/media-workspace/MediaWorkspace';
-export type { BaseCapabilities, BaseDefaults, ImageModel, VideoModel, MediaModel, MediaInput, MediaStyleOption, MediaReferences, MediaReferencePickerProps, MediaGenerationMode, MediaRoute, MediaRouteStrategy, GenerateRequest, MediaResult, MediaBatch, MediaTask, MediaWorkspaceProps } from './components/media-workspace/types';
+export type { BaseCapabilities, BaseDefaults, ImageModel, VideoModel, MediaModel, MediaInput, MediaStyleOption, MediaReferences, MediaReferencePickerProps, MediaGenerationMode, MediaRoute, MediaRouteStrategy, GenerateRequest, PromptOptimizationMode, PromptOptimizationRequest, MediaResult, MediaBatch, MediaTask, MediaWorkspaceProps } from './components/media-workspace/types';
 export { ApprovalModeSelector } from './components/agent-sidebar/ApprovalModeSelector';
 export type { ApprovalModeSelectorProps } from './components/agent-sidebar/ApprovalModeSelector';
 export { AgentSidebar } from './components/agent-sidebar/AgentSidebar';
@@ -22,7 +22,8 @@ export { AgentsSettingsCard } from './components/settings/AgentsSettingsCard';
 export { ModelSettingsCard } from './components/settings/ModelSettingsCard';
 export { ModelManagementCard } from './components/settings/ModelManagementCard';
 export { AgentSettingsCard } from './components/settings/AgentSettingsCard';
-export type { AgentSettingsCardProps } from './components/settings/types';
+export { PromptSettingsCard } from './components/settings/PromptSettingsCard';
+export type { AgentSettingsCardProps, PromptSettingsCardProps, PromptSettingsPrompts, PromptKey } from './components/settings/types';
 export type { AgentChildContextMode, AgentConfig, AgentContextPolicy, AgentHistoryMode, AgentSource, AgentType, AgentContextStrategy, AgentsSettingsCardProps, AgentModelCapabilities, AgentModelConfig, AgentModelType, AgentToolResultMode, ModelProvider, ModelProviderProtocol, ModelProviderStatus, ModelSettingsCardProps, ModelManagementCardProps, SettingsPageProps, SettingsSection } from './components/settings/types';
 export { BUILTIN_MODELS, BUILTIN_PROTOCOLS, BUILTIN_TEMPLATES, defaultModelConfiguration, defaultReasoningEffort, effectiveCapabilities, enabledBindings, mediaCapabilities, resolveCapabilities, toAgentModels, toMediaModels, validateModelConfiguration } from './components/settings/model-config';
 export type { AudioCapabilities, CapabilityOverride, CapabilityTemplate, CapabilityTemplateType, CapabilityValues, FirstLastFrameSupport, ImageCapabilities, LogicalModel, ModelBinding, ModelConfiguration, ModelConfigurationError, ProtocolAdapterDefinition, TextCapabilities, VideoCapabilities, VideoGenerationMode } from './components/settings/model-config';

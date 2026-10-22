@@ -7,6 +7,11 @@ const job = (id: string, taskId: string | undefined, prompt: string): MediaJob =
 });
 
 describe('media jobs to workspace tasks', () => {
+  it('passes through provider progress and leaves missing progress unknown', () => {
+    const pending = { ...job('job-v', 't', '视频'), type: 'video' as const, status: 'running' as const };
+    expect(jobResults({ ...pending, progress: 42 })[0].progress).toBe(42);
+    expect(jobResults(pending)[0].progress).toBeUndefined();
+  });
   it('groups repeatedly generated batches under the same task', () => {
     const tasks = jobsToTasks([job('job-2', 'task-1', '第二次调整'), job('job-1', 'task-1', '第一次生成')]);
     expect(tasks).toHaveLength(1);

@@ -6,9 +6,9 @@ import { MediaResults } from './MediaResults';
 import { ConfirmPopover } from './WorkspaceUI';
 import { filterReferences, generationModes, normalizeOptions, referenceLimit, selectedGenerationMode, supportsFrames, type MediaInputMode } from './model';
 import { useReferences } from './useReferences';
-import type { GenerateRequest, MediaBatch, MediaGenerationMode, MediaModel, MediaResult, MediaWorkspaceProps } from './types';
+import type { GenerateRequest, MediaBatch, MediaGenerationMode, MediaModel, MediaResult, MediaWorkspaceProps, PromptOptimizationMode } from './types';
 
-export function MediaWorkspace({ models, tasks, styles = [], onCreateStyle, routingStrategy = 'selected-binding', activeTaskId, onTaskChange, onCreateTask, onRenameTask, onDeleteTask, onDeleteBatch, onGenerate, onUploadReference, renderReferencePicker, onRetry, onCancel, onRegenerate, onFavoriteChange, accentColor, className = '' }: MediaWorkspaceProps) {
+export function MediaWorkspace({ models, tasks, styles = [], onCreateStyle, onUpdateStyle, onOptimizePrompt, routingStrategy = 'selected-binding', activeTaskId, onTaskChange, onCreateTask, onRenameTask, onDeleteTask, onDeleteBatch, onGenerate, onUploadReference, renderReferencePicker, onRetry, onCancel, onRegenerate, onFavoriteChange, accentColor, className = '' }: MediaWorkspaceProps) {
   const [localTaskId, setLocalTaskId] = useState(tasks[0]?.id);
   const activeId = activeTaskId ?? localTaskId;
   const task = tasks.find((item) => item.id === activeId) ?? (activeTaskId === undefined ? tasks[0] : undefined);
@@ -30,6 +30,9 @@ export function MediaWorkspace({ models, tasks, styles = [], onCreateStyle, rout
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const submitting = useRef(false);
+  const optimization = useRef<AbortController | null>(null);
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizationResult, setOptimizationResult] = useState<{ before: string; after: string } | null>(null);
   const mounted = useRef(true);
   const promptContainer = useRef<HTMLDivElement>(null);
   const scrollContainer = useRef<HTMLDivElement>(null);
@@ -40,6 +43,7 @@ export function MediaWorkspace({ models, tasks, styles = [], onCreateStyle, rout
   // Hosts can recreate model objects on every render without resetting user edits.
   const modelSignature = JSON.stringify(model);
   const previousModel = useRef(modelSignature);
+  useEffect(() => { setOptimizationResult(null); }, [task?.id, modelSignature]);
   useEffect(() => {
     if (previousModel.current !== modelSignature && model) {
       const nextInputMode = supportsFrames(model) ? 'frames' : 'references';
@@ -80,7 +84,42 @@ export function MediaWorkspace({ models, tasks, styles = [], onCreateStyle, rout
     setPreferredType(type); setModelId(next.id); setOptions(normalizeOptions(next)); setInputMode(nextInputMode); setGenerationMode(selectedGenerationMode(next, nextInputMode, {})); setError('');
   };
   const violations = model && inputMode === 'references' ? (['images', 'videos', 'audios'] as const).filter((kind) => referenceLimit(model, kind) > 0 && (draft.references[kind]?.length ?? 0) > referenceLimit(model, kind)).map((kind) => `${kind === 'images' ? '参考图片' : kind === 'videos' ? '参考视频' : '参考音频'}超过上限 ${referenceLimit(model, kind)}`) : [];
-  const canGenerate = Boolean(model && task && prompt.trim() && !pending && !violations.length);
+  const optimizationKey = JSON.stringify([task?.id, model, prompt, options, generationCount, selectedStyle, generationMode, inputMode, draft.references, draft.ready], (_key, value) =>
+    value instanceof File ? [value.name, value.type, value.size, value.lastModified] : value);
+  const latestOptimizationKey = useRef(optimizationKey);
+  latestOptimizationKey.current = optimizationKey;
+  useEffect(() => {
+    optimization.current?.abort(); optimization.current = null; setOptimizing(false);
+    return () => { optimization.current?.abort(); };
+  }, [optimizationKey]);
+  const optimize = async (mode: PromptOptimizationMode) => {
+    if (!onOptimizePrompt || !model || !prompt.trim() || pending || optimization.current) return;
+    if (!draft.ready) { setError('请先完成参考素材上传，失败的素材请移除或重试'); return; }
+    if (violations.length) { setError(violations.join('；')); return; }
+    const controller = new AbortController();
+    optimization.current = controller; setOptimizing(true); setError('');
+    const references = filterReferences(model, draft.references, inputMode);
+    try {
+      const result = await onOptimizePrompt({
+        optimization: mode, model, modelId: model.id, prompt: prompt.trim(), options: normalizeOptions(model, options), generationCount,
+        mode: generationMode || selectedGenerationMode(model, inputMode, references || {}),
+        ...(selectedStyle ? { style: selectedStyle } : {}), ...(references ? { references } : {}),
+        ...(model.logicalModelId ? { logicalModelId: model.logicalModelId } : {}), ...(model.bindingId ? { bindingId: model.bindingId } : {}),
+        ...(model.providerId ? { providerId: model.providerId } : {}), ...(model.upstreamModelId ? { upstreamModelId: model.upstreamModelId } : {}),
+        ...(model.protocolKey ? { protocolKey: model.protocolKey } : {}),
+      }, { signal: controller.signal });
+      if (!controller.signal.aborted && latestOptimizationKey.current === optimizationKey) {
+        if (!result.trim()) throw new Error('模型没有返回优化后的提示词');
+        setOptimizationResult({ before: prompt, after: result.trim() });
+        setPrompt(result.trim());
+      }
+    } catch (reason) {
+      if (!controller.signal.aborted && latestOptimizationKey.current === optimizationKey) setError(reason instanceof Error ? reason.message : '提示词优化失败，请重试');
+    } finally {
+      if (optimization.current === controller) { optimization.current = null; setOptimizing(false); }
+    }
+  };
+  const canGenerate = Boolean(model && task && prompt.trim() && !pending && !optimizing && draft.ready && !violations.length);
   const generate = async () => {
     if (!canGenerate || !model || !task || submitting.current) return;
     submitting.current = true; setPending(true); setError('');
@@ -95,7 +134,7 @@ export function MediaWorkspace({ models, tasks, styles = [], onCreateStyle, rout
         : undefined;
     try {
       await onGenerate({ taskId: task.id, modelId: model.id, ...(generationCount > 1 ? { generationCount } : {}), prompt: prompt.trim(), options: normalizeOptions(model, options), ...(selectedStyle ? { style: selectedStyle } : {}), ...(model.logicalModelId ? { logicalModelId: model.logicalModelId } : {}), ...(model.bindingId ? { bindingId: model.bindingId } : {}), ...(model.providerId ? { providerId: model.providerId } : {}), ...(model.upstreamModelId ? { upstreamModelId: model.upstreamModelId } : {}), ...(model.protocolKey ? { protocolKey: model.protocolKey } : {}), ...(route ? { route } : {}), ...(mode ? { mode } : {}), ...(references ? { references } : {}) });
-      if (mounted.current) setPrompt('');
+      if (mounted.current) { setPrompt(''); setOptimizationResult(null); }
     }
     catch (reason) { if (mounted.current) setError(reason instanceof Error ? reason.message : '提交失败，请重试'); }
     finally { submitting.current = false; if (mounted.current) setPending(false); }
@@ -104,6 +143,7 @@ export function MediaWorkspace({ models, tasks, styles = [], onCreateStyle, rout
   const reuse = (batch: MediaBatch) => {
     const next = models.find((item) => item.id === batch.modelId);
     if (!next) { setError('历史模型已不可用，请选择其他模型'); return; }
+    setOptimizationResult(null);
     previousModel.current = JSON.stringify(next);
     const nextInputMode = batch.references?.firstFrame || batch.references?.lastFrame ? 'frames' : 'references';
     setPreferredType(next.type); setModelId(next.id); setOptions(normalizeOptions(next, batch.options)); setPrompt(batch.prompt); draft.restore(batch.references); setInputMode(nextInputMode); setGenerationMode(batch.mode || selectedGenerationMode(next, nextInputMode, batch.references || {})); setStyleId(batch.style?.id); setError(''); focusPrompt();
@@ -125,7 +165,8 @@ export function MediaWorkspace({ models, tasks, styles = [], onCreateStyle, rout
       return <div key={item.id} className="darl-mw-task-row"><Button variant="ghost" className="darl-mw-task" aria-current={item.id === task?.id ? 'page' : undefined} onClick={() => { if (activeTaskId === undefined) setLocalTaskId(item.id); onTaskChange?.(item.id); }}>{thumbnail ? <img src={thumbnail.listThumbnailUrl || thumbnail.thumbnailUrl || thumbnail.url} alt="" loading="lazy"/> : <span className="darl-mw-task-symbol">▧</span>}<span><strong>{item.title}</strong><small>{item.batches.length} 个批次 · 图片与视频</small></span></Button>{onDeleteTask && <ConfirmPopover label={`删除任务 ${item.title}`} message={`确定删除「${item.title}」及其全部生成结果？`} onConfirm={() => onDeleteTask(item.id)} trigger={<Button variant="ghost" size="icon" className="darl-mw-task-delete" aria-label={`删除任务 ${item.title}`}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5"/></svg></Button>} />}</div>;
     })}{!tasks.length && <p className="darl-mw-muted">暂无任务</p>}</nav><div className="darl-mw-sidebar-footer">同一任务，连续创作<br/>生成服务由宿主网站提供</div></aside>
     <div className="darl-mw-main"><header className="darl-mw-topbar"><span>创作工作台 <span>›</span> <strong>{task?.title ?? '未选择任务'}</strong></span><span className="darl-mw-muted">图片 / 视频</span></header><div ref={scrollContainer} className="darl-mw-scroll">{scrollState.top && <div className="darl-mw-scroll-controls darl-mw-scroll-controls--top" aria-label="记录导航"><Button variant="ghost" size="icon" aria-label="滚动到顶部" title="滚动到顶部" onClick={() => scrollResults('top')}>↑</Button></div>}<div className="darl-mw-content"><div className="darl-mw-title">{renaming && task && onRenameTask ? <form className="darl-mw-inline-rename" onSubmit={(event) => { event.preventDefault(); if (title.trim()) { onRenameTask(task.id, title.trim()); setRenaming(false); } }} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setRenaming(false); setTitle(task.title); } }}><input aria-label="任务名称" autoFocus value={title} onChange={(event) => setTitle(event.target.value)} /><Button type="submit" size="sm" disabled={!title.trim()}>保存</Button><Button type="button" variant="ghost" size="sm" onClick={() => { setRenaming(false); setTitle(task.title); }}>取消</Button></form> : <><h2>{task?.title ?? '媒体创作'}</h2>{task && onRenameTask && <Button variant="outline" size="sm" onClick={() => { setTitle(task.title); setRenaming(true); }}>重命名</Button>}</>}</div><p className="darl-mw-subtitle">按生成时间从早到晚排列，可复用参数或收藏结果</p><MediaResults task={task} models={models} onReuse={reuse} onReference={reference} onRetry={onRetry} onCancel={onCancel} onRegenerate={onRegenerate} onDeleteBatch={onDeleteBatch} onFavoriteChange={onFavoriteChange}/></div>{scrollState.bottom && <div className="darl-mw-scroll-controls darl-mw-scroll-controls--bottom" aria-label="记录导航"><Button variant="ghost" size="icon" aria-label="滚动到底部" title="滚动到底部" onClick={() => scrollResults('bottom')}>↓</Button></div>}</div>
-      <div ref={promptContainer}><MediaComposer models={models} model={model} mediaType={mediaType} onMediaTypeChange={chooseType} options={options} generationCount={generationCount} onGenerationCountChange={setGenerationCount} onModelChange={chooseModel} onOptionsChange={setOptions} prompt={prompt} onPromptChange={setPrompt} draft={draft} inputMode={inputMode} onInputModeChange={(value) => { setInputMode(value); setGenerationMode(selectedGenerationMode(model, value, draft.references) || generationMode); setError(''); }} generationMode={generationMode} onGenerationModeChange={(value) => { setGenerationMode(value); setInputMode(value === 'first-last-frame' ? 'frames' : 'references'); setError(''); }} styles={styles} styleId={styleId} onStyleChange={setStyleId} onCreateStyle={onCreateStyle} renderReferencePicker={renderReferencePicker} error={violations.join('；') || error || (!models.length ? '暂无可用模型' : '')} onError={setError} pending={pending} canGenerate={canGenerate} onGenerate={() => { void generate(); }}/></div>
+      <div ref={promptContainer}><MediaComposer models={models} model={model} mediaType={mediaType} onMediaTypeChange={chooseType} options={options} generationCount={generationCount} onGenerationCountChange={setGenerationCount} onModelChange={chooseModel} onOptionsChange={setOptions} prompt={prompt} onPromptChange={setPrompt} draft={draft} inputMode={inputMode} onInputModeChange={(value) => { setInputMode(value); setGenerationMode(selectedGenerationMode(model, value, draft.references) || generationMode); setError(''); }} generationMode={generationMode} onGenerationModeChange={(value) => { setGenerationMode(value); setInputMode(value === 'first-last-frame' ? 'frames' : 'references'); setError(''); }} styles={styles} styleId={styleId} onStyleChange={setStyleId} onCreateStyle={onCreateStyle} renderReferencePicker={renderReferencePicker} onUpdateStyle={onUpdateStyle} onOptimizePrompt={onOptimizePrompt ? (mode) => { void optimize(mode); } : undefined} optimizing={optimizing} onCancelOptimization={() => { optimization.current?.abort(); optimization.current = null; setOptimizing(false); }} optimizationResult={optimizationResult} onRestoreOptimization={() => { if (optimizationResult) { setPrompt(optimizationResult.before); setOptimizationResult(null); setError(''); focusPrompt(); } }} error={violations.join('；') || error || (!models.length ? '暂无可用模型' : '')} onError={setError} pending={pending} canGenerate={canGenerate} onGenerate={() => { void generate(); }}/></div>
+
     </div>
   </section>;
 }

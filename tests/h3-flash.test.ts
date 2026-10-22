@@ -16,6 +16,17 @@ describe('unified H3 Flash contract', () => {
       model: 'minimax-h3-flash', prompt: '海边日落', seconds: 8, resolution: '480', aspect_ratio: '16:9', reference_images: ['https://cdn.example/image.png'],
     });
   });
+  it('uses the selected upstream model mapping', () => {
+    expect(buildH3FlashRequest({ model: 'minimax-h3-optimized', prompt: '画面' }).model).toBe('minimax-h3-optimized');
+  });
+  it('normalizes documented completion and progress without inventing a percentage', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respond({ id: 'task_1', status: 'completed', progress: 100, video_url: '/v1/videos/task_1/content' })));
+    expect(await getH3Video(BASE, 'key', 'task_1')).toMatchObject({ status: 'succeeded', progress: 100 });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respond({ id: 'task_1', status: 'in_progress', progress: 45 })));
+    expect(await getH3Video(BASE, 'key', 'task_1')).toMatchObject({ status: 'processing', progress: 45 });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respond({ id: 'task_1', status: 'processing' })));
+    expect((await getH3Video(BASE, 'key', 'task_1')).progress).toBeUndefined();
+  });
 
   it('rejects legacy values, local references and unsupported frame guesses', () => {
     expect(() => buildH3FlashRequest({ prompt: 'x', resolution: '720' as never })).toThrow('480 或 768');
@@ -55,7 +66,7 @@ describe('unified H3 Flash contract', () => {
   });
 
   it('rejects an unknown status instead of treating it as completion', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respond({ id: 'task_1', status: 'in_progress' })));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respond({ id: 'task_1', status: 'unknown-state' })));
     await expect(getH3Video(BASE, 'key', 'task_1')).rejects.toThrow('任务状态响应无效');
   });
 });

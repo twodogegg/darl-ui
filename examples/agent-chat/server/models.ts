@@ -70,6 +70,7 @@ export interface FunctionCall { id: string; name: string; arguments: string }
 export interface ToolExecution {
   tools: FunctionTool[];
   maxSteps?: number;
+  onIntermediateText?: (text: string, startedAt: string) => void;
   execute: (call: FunctionCall, signal?: AbortSignal) => Promise<string>;
 }
 
@@ -97,6 +98,29 @@ export async function* checkedText(chunks: AsyncIterable<string>) {
     prefix = '';
   }
   if (prefix) yield prefix;
+}
+
+/** Preserve public step narration separately from the final answer; ignore reasoning parts. */
+export async function* agentStepText(chunks: AsyncIterable<{ type: string; text?: string; finishReason?: string; error?: unknown }>, onIntermediateText: NonNullable<ToolExecution['onIntermediateText']>) {
+  let text = '';
+  let startedAt = '';
+  let finishReason = '';
+  const flush = () => { if (text.trim()) onIntermediateText(text, startedAt); text = ''; };
+  async function* read() {
+    for await (const part of chunks) {
+      if (part.type === 'error') throw part.error;
+      if (part.type === 'start-step') text = '';
+      if (part.type === 'finish') finishReason = part.finishReason || '';
+      if (part.type === 'text-delta' && part.text) {
+        if (!text) startedAt = new Date().toISOString();
+        text += part.text;
+        yield part.text;
+      }
+      if (part.type === 'tool-call' || (part.type === 'finish-step' && part.finishReason === 'tool-calls')) flush();
+    }
+  }
+  yield* checkedText(read());
+  if (!text && finishReason !== 'tool-calls') throw new Error('模型没有返回文本内容');
 }
 
 function reasoningValue(effort: string | undefined) {
@@ -160,7 +184,7 @@ export async function* generate(provider: StoredProvider, model: AgentModelConfi
     ...(reasoning ? { providerOptions: { [providerOptionsName]: { reasoningEffort: reasoning } } } : {}),
   });
   let hasText = false;
-  for await (const text of checkedText(result.textStream)) {
+  for await (const text of execution?.onIntermediateText ? agentStepText(result.fullStream, execution.onIntermediateText) : checkedText(result.textStream)) {
     hasText = true;
     yield text;
   }
@@ -216,7 +240,7 @@ export async function* generateWithToolLoop(provider: StoredProvider, model: Age
   const agent = createToolLoopAgent(provider, model, instructions, effort, signal, execution, delegations, output);
   const result = await agent.stream({ messages: modelMessages(messages.map(sourceBoundMessage)), abortSignal: signal });
   let hasText = false;
-  for await (const text of checkedText(result.textStream)) { hasText = true; yield text; }
+  for await (const text of execution?.onIntermediateText ? agentStepText(result.fullStream, execution.onIntermediateText) : checkedText(result.textStream)) { hasText = true; yield text; }
   signal.throwIfAborted();
   const finishReason = await result.finishReason;
   if (finishReason === 'length') throw new Error('已达到模型输出长度限制');

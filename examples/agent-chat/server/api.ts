@@ -26,9 +26,10 @@ import { StudioStore, STUDIO_TOOLS, handleStudioRequest } from './studio';
 import { RUNTIME_TOOLS, SkillRuntime } from './skill-runtime';
 import { SkillLibrary } from './skill-library';
 import { RequestRecordStore, requestRecordsApi, requestRecordScope } from './request-records';
+import { createPromptOptimization, type OptimizationPromptKey } from './prompt-optimization';
 
 /** Resolve the model selected in the current chat against an enabled text binding. */
-function resolveTextModel(providers: StoredProvider[], configuration: ModelConfiguration, providerId: string, modelId: string) {
+export function resolveTextModel(providers: StoredProvider[], configuration: ModelConfiguration, providerId: string, modelId: string) {
   const provider = providers.find((item) => item.id === providerId);
   if (!provider) return undefined;
   const configured = configuration.models.filter((item) => item.enabled !== false && item.type === 'text')
@@ -40,7 +41,7 @@ function resolveTextModel(providers: StoredProvider[], configuration: ModelConfi
   const text = effective && 'reasoningEfforts' in effective ? effective : undefined;
   const directory = provider.models.find((item) => item.id === modelId && item.type === 'text');
   return {
-    provider,
+    provider: { ...provider, protocol: configured.binding.protocolKey as StoredProvider['protocol'] },
     model: {
       ...directory,
       id: modelId, name: configured.item.displayName, type: 'text' as const, providerId, enabled: true,
@@ -235,6 +236,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const subAgentLocks = new SubAgentThreadLocks();
   const fileConfig = validateStorageConfig(storage.getConfig<unknown>('storageConfiguration') || storageConfigFromEnv(env, storage.path));
   const files = new FileStore(storage.path, fileOptions(fileConfig));
+  const optimization = createPromptOptimization(storage, files);
   const requestRecords = new RequestRecordStore(storage, files, () => [env.AGENT_CHAT_API_KEY || '', env.FISH_API_KEY || '', ...((storage.getConfig<StoredProvider[]>('providers') || []).map(provider => provider.apiKey)), storage.getConfig<{ apiKey?: string }>('voiceConfiguration')?.apiKey || '']);
   const voiceApi = createVoiceApi(storage, env, requestRecords);
   const skillLibrary = new SkillLibrary(storage);
@@ -268,10 +270,20 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     if (JSON.stringify(upgraded) !== JSON.stringify(storedConfiguration)) storage.setConfig('modelConfiguration', upgraded);
   }
   if (!storage.getConfig<DefaultMediaSelection>('defaultMediaModels')) storage.setConfig('defaultMediaModels', defaultMediaSelection);
+  const voicePromptFile = join(promptFile, '..', 'voice.md');
+  const readPromptFile = (file: string) => readFileSync(file, 'utf8').trim();
+  const readPromptFileIfExists = (file: string) => { try { return readPromptFile(file); } catch { return ''; } };
   if (!storage.getConfig<string>('systemPrompt')) {
     storage.setConfig('systemPrompt', validatePrompt(readFileSync(promptFile, 'utf8')));
   }
+  const initialVoicePrompt = readPromptFileIfExists(voicePromptFile);
+  if (!storage.getConfig<string>('voicePrompt') && initialVoicePrompt) {
+    storage.setConfig('voicePrompt', initialVoicePrompt);
+  }
   const loadPrompt = async () => validatePrompt(storage.getConfig<string>('systemPrompt'));
+  const loadVoicePrompt = () => (storage.getConfig<string>('voicePrompt') || readPromptFileIfExists(voicePromptFile)).trim();
+  const promptDefaults = () => ({ system: readPromptFile(promptFile), voice: readPromptFileIfExists(voicePromptFile), ...optimization.defaults() });
+  const publicPrompts = async () => ({ system: await loadPrompt(), voice: loadVoicePrompt(), ...optimization.prompts(), defaults: promptDefaults() });
   const load = async (): Promise<StoredProvider[]> => storage.getConfig<StoredProvider[]>('providers') || initial;
   const loadModelConfiguration = async (): Promise<ModelConfiguration> => {
     const value = storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration();
@@ -429,6 +441,47 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const systemPrompt = validatePrompt(value);
         storage.setConfig('systemPrompt', systemPrompt);
         return send(200, { systemPrompt });
+      }
+      // 提示词统一读写；普通与 H3 优化规则也保存在现有配置中。
+      if (path === '/api/prompts' && request.method === 'GET') return send(200, await publicPrompts());
+      if (path === '/api/prompts' && request.method === 'POST') {
+        const body = await readBody(request);
+        for (const key of ['system', 'voice', 'optimization', 'h3Optimization']) {
+          if (body[key] !== undefined && (typeof body[key] !== 'string' || !body[key].trim())) throw new Error('提示词不能为空');
+        }
+        if (body.system !== undefined) {
+          const system = typeof body.system === 'string' ? body.system.trim() : '';
+          if (!system) throw new Error('系统提示词不能为空');
+          storage.setConfig('systemPrompt', system);
+        }
+        if (body.voice !== undefined) {
+          const voice = typeof body.voice === 'string' ? body.voice.trim() : '';
+          if (!voice) throw new Error('语音提示词不能为空');
+          storage.setConfig('voicePrompt', voice);
+        }
+        for (const key of ['optimization', 'h3Optimization'] as OptimizationPromptKey[]) {
+          if (typeof body[key] === 'string') storage.setConfig(key, body[key].trim());
+        }
+        return send(200, await publicPrompts());
+      }
+      if (path === '/api/prompt-optimization/settings' && request.method === 'GET') return send(200, optimization.models(modelConfiguration));
+      if (path === '/api/prompt-optimization/settings' && request.method === 'POST') {
+        return send(200, optimization.saveModels(await readBody(request), modelConfiguration));
+      }
+      if (path === '/api/prompt-optimization' && request.method === 'POST') {
+        const body = await readBody(request);
+        const context = optimization.context(body, modelConfiguration);
+        const selectedId = optimization.models(modelConfiguration)[body.optimization === 'h3' ? 'h3' : 'general'];
+        const split = selectedId.indexOf('/');
+        const selected = split > 0 ? resolveTextModel(providers, modelConfiguration, selectedId.slice(0, split), decodeURIComponent(selectedId.slice(split + 1))) : undefined;
+        if (!selected) throw new Error('请在设置 → 模型中配置提示词优化模型');
+        secret = selected.provider.apiKey;
+        const instructions = optimization.prompts()[body.optimization === 'h3' ? 'h3Optimization' : 'optimization'];
+        if (!instructions.trim()) throw new Error('请先配置优化提示词');
+        let prompt = '';
+        for await (const delta of generate(selected.provider, selected.model, [{ role: 'user', content: JSON.stringify(context) }], instructions, undefined, signal)) prompt += delta;
+        if (!prompt.trim() || prompt.length > 16000) throw new Error('优化结果为空或超过 16000 字符，请调整优化提示词后重试');
+        return send(200, { prompt: prompt.trim() });
       }
       if (path === MCP_OAUTH_CALLBACK_PATH && request.method === 'GET') {
         const callback = new URL(request.url, 'http://localhost');
@@ -598,6 +651,14 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         });
         return send(200, (await load()).map(publicProvider));
       }
+      if (path === '/api/providers/models' && request.method === 'POST') {
+        const body = await readBody(request);
+        const provider = validateProvider(body.provider);
+        const stored = providers.find(item => item.id === provider.id);
+        const apiKey = typeof body.apiKey === 'string' && body.apiKey.trim() ? body.apiKey.trim() : stored?.apiKey || '';
+        secret = apiKey;
+        return send(200, await listModels({ ...provider, apiKey }, signal));
+      }
       const route = path.match(/^\/api\/providers\/([\w-]+)(?:\/(models|test))?$/);
       if (route) {
         const provider = providers.find((item) => item.id === route[1]);
@@ -609,10 +670,8 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         }
         if (route[2] === 'models' && request.method === 'POST') return send(200, await listModels(provider, signal));
         if (route[2] === 'test' && request.method === 'POST') {
-          const model = provider.models.find((item) => item.enabled !== false && item.type === 'text');
-          if (!model) throw new Error('请先保存至少一个已启用的文本模型');
           try {
-            for await (const _delta of generate(provider, model, [{ role: 'user', content: '请只回复 OK。' }], await loadPrompt(), undefined, signal)) { /* Validate the complete real stream. */ }
+            await listModels(provider, signal);
             await update((current) => current.map((item) => item.id === provider.id ? { ...item, status: 'connected' } : item));
           } catch (error) {
             await update((current) => current.map((item) => item.id === provider.id ? { ...item, status: 'error' } : item));
@@ -677,7 +736,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         if (body.voiceMode !== undefined && typeof body.voiceMode !== 'boolean') throw new Error('语音模式状态无效');
         const voiceMode = body.voiceMode === true;
         const voiceGuide = voiceMode ? voiceGuideForTurn(storage, `${sessionId}:${provider.id}:${model.id}`, loadVoiceGuide(promptFile)) : undefined;
-        const voiceInstructions = voiceMode ? [readFileSync(join(promptFile, '..', 'voice.md'), 'utf8'), voiceGuide?.instructions].join('\n\n') : '';
+        const voiceInstructions = voiceMode ? [loadVoicePrompt(), voiceGuide?.instructions].join('\n\n') : '';
         const skillsForAgent = (ownerAgentId?: string) => {
           const allowedIds = ownerAgentId ? agents.find(agent => agent.id === ownerAgentId)?.skillIds : undefined;
           return skillLibrary.list().filter(skill =>
@@ -1031,6 +1090,10 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         }
         const voiceParser = voiceMode ? new VoiceOutputParser() : undefined;
         const outputFormat = voiceMode ? voiceOutputFormat(provider.protocol) : undefined;
+        if (execution && !voiceMode) execution.onIntermediateText = (text, startedAt) => {
+          const endedAt = new Date().toISOString();
+          emitExecution?.({ id: crypto.randomUUID(), source: 'commentary', status: 'success', name: '过程说明', summary: text, timestamp: startedAt, startedAt, endedAt, runId, requestId });
+        };
         for await (const text of (delegations.length ? generateWithToolLoop(provider, model, contextMessages, instructions, effort, signal, execution, delegations, outputFormat) : generate(provider, model, contextMessages, instructions, effort, signal, execution, outputFormat))) {
           const events = voiceParser ? voiceParser.push(text).map((output) => ({ type: 'output', output })) : [{ type: 'text', text }];
           for (const event of events) {

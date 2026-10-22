@@ -2,12 +2,20 @@
 import { describe, expect, it } from 'vitest';
 import { aiTools, generate, languageModel, modelMessages, type StoredProvider } from '../examples/agent-chat/server/models';
 import { ToolConfirmations } from '../examples/agent-chat/server/mcp';
+import { resolveTextModel } from '../examples/agent-chat/server/api';
+import { defaultModelConfiguration } from '../src/components/settings/model-config';
 
 const model = { id: 'custom-model', name: '自定义模型', type: 'text' as const, providerId: 'custom', reasoningEfforts: ['low'] };
 const provider: StoredProvider = { id: 'custom', name: '自定义中转', baseUrl: 'https://example.test/v1', apiKey: 'server-only', protocol: 'openai-completions', models: [model] };
 type TestTool = { type: string; inputSchema: { jsonSchema?: unknown; validate?: (value: unknown) => { success: boolean; error?: Error } }; execute: (input: unknown, options: { toolCallId: string; messages: []; context: Record<string, never>; abortSignal?: AbortSignal }) => Promise<unknown> };
 
 describe('AI SDK runtime integration boundary', () => {
+  it('resolves text protocol per model binding on the same supplier', () => {
+    const configuration = defaultModelConfiguration();
+    const configuredProvider = { ...provider, id: 'darl', protocol: 'openai-completions' as const };
+    expect(resolveTextModel([configuredProvider], configuration, 'darl', 'gpt-6.1-sol')?.provider.protocol).toBe('openai-responses');
+    expect(resolveTextModel([configuredProvider], configuration, 'darl', 'deepseek-v4.1-flash')?.provider.protocol).toBe('openai-completions');
+  });
   it.each(['openai-completions', 'openai-responses'] as const)('maps the saved provider without exposing credentials (%s)', (protocol) => {
     const mapped = languageModel({ ...provider, protocol }, model) as { provider: string; modelId: string };
     expect(mapped).toMatchObject({ modelId: model.id });

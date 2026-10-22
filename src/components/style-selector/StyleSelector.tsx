@@ -172,6 +172,13 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
     setPendingValue(item.id);
     setRecent((previous) => [item.id, ...previous.filter((key) => key !== item.id)]);
   };
+  const editStyle = (style: StyleOption) => {
+    if (onUpdate) {
+      setActiveEditStyle(style); setCreating(true); setStep(1); setName(style.name); setDescription(style.description || '');
+      setReferenceImage(undefined); setPreviewUrl(style.image); setError('');
+    }
+    onEdit?.(style);
+  };
   const confirmSelection = () => {
     const next = pendingValue ? styles.find((item) => item.id === pendingValue) ?? null : null;
     if (value === undefined) setInternalValue(next?.id ?? null);
@@ -251,16 +258,16 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
     </div> : <Tabs.Root className="darl-style-browser" value={collection} onValueChange={(next) => setCollection(next as StyleCollection)}>
       <header className="darl-style-header">
         <Tabs.List className="darl-style-collections" aria-label="风格集合">{collections.map((item) => <Tabs.Trigger key={item.id} value={item.id}>{item.label}</Tabs.Trigger>)}</Tabs.List>
-            <div className="darl-style-actions"><label className="darl-style-search"><Search aria-hidden="true" /><input aria-label="搜索风格名称" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索风格名称" />{query && <Button variant="ghost" size="icon" onClick={() => setQuery('')} aria-label="清除搜索"><X /></Button>}</label>{onCreate && <Button variant="outline" onClick={() => { setActiveEditStyle(null); setCreating(true); }}><Sparkles aria-hidden="true" />创建风格</Button>}{modal && <Button variant="ghost" size="icon" onClick={close} aria-label="关闭风格选择"><X /></Button>}</div>
+            <div className="darl-style-actions"><label className="darl-style-search"><Search aria-hidden="true" /><input aria-label="搜索风格名称" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索风格名称" />{query && <Button variant="ghost" size="icon" onClick={() => setQuery('')} aria-label="清除搜索"><X /></Button>}</label>{modal && <Button variant="ghost" size="icon" onClick={close} aria-label="关闭风格选择"><X /></Button>}</div>
       </header>
       {collection !== 'mine' && <div className="darl-style-filters"><ToggleGroup.Root className="darl-style-category" type="single" value={category || 'all'} onValueChange={(next) => { if (next) setCategory(next === 'all' ? '' : next); }} aria-label="风格分类"><ToggleGroup.Item value="all">全部</ToggleGroup.Item>{categories.map((item) => <ToggleGroup.Item key={item} value={item}>{item}</ToggleGroup.Item>)}</ToggleGroup.Root></div>}
       {collections.map((item) => <Tabs.Content key={item.id} value={item.id} className="darl-style-panel" ref={collection === item.id ? panelRef : undefined}>
-          <div className="darl-style-grid">{collection === 'mine' && onCreate && !query && <article className="darl-style-card darl-style-create-card"><button type="button" className="darl-style-card-select" onClick={() => setCreating(true)}><span className="darl-style-create-card-icon"><Sparkles /></span><strong>创建风格</strong><small>上传参考图或输入描述</small></button></article>}{filtered.slice(0, visibleCount).map((option) => <article key={option.id} className={`darl-style-card ${selectedId === option.id ? 'is-selected' : ''} ${pendingValue === option.id && pendingValue !== selectedId ? 'is-pending' : ''}`}>
+          <div className="darl-style-grid">{collection === 'mine' && onCreate && !query && <article className="darl-style-card darl-style-create-card"><button type="button" className="darl-style-card-select" aria-label="创建风格" onClick={() => setCreating(true)}><span className="darl-style-create-card-icon"><Sparkles /></span><strong>创建风格</strong><small>上传参考图或输入描述</small></button></article>}{filtered.slice(0, visibleCount).map((option) => <article key={option.id} className={`darl-style-card ${selectedId === option.id ? 'is-selected' : ''} ${pendingValue === option.id && pendingValue !== selectedId ? 'is-pending' : ''}`}>
           <button type="button" className="darl-style-card-select" onClick={() => selectStyle(option)} aria-pressed={pendingValue === option.id} aria-label={`预览${option.name}`}>
             <span className="darl-style-card-image"><Thumbnail src={option.image} /><span className="darl-style-card-overlay"><strong>{option.name}</strong></span><span className="darl-style-card-check"><Check /></span></span>
             <span className="darl-style-card-meta">{!option.isOwned && option.category && <span>{option.category}</span>}<span>{option.description}</span></span>
           </button>
-          {option.isOwned && onEdit && <Button variant="ghost" size="icon" className="darl-style-edit" onClick={(event) => { event.stopPropagation(); onEdit(option); }} aria-label={`编辑${option.name}`}><Pencil aria-hidden="true" /></Button>}
+          {option.isOwned && (onEdit || onUpdate) && <Button variant="ghost" size="icon" className="darl-style-edit" onClick={(event) => { event.stopPropagation(); editStyle(option); }} aria-label={`编辑${option.name}`}><Pencil aria-hidden="true" /></Button>}
           {onFavoriteChange && <Button variant="ghost" size="icon" className="darl-style-favorite" aria-pressed={!!option.favorite} onClick={() => onFavoriteChange(option, !option.favorite)} aria-label={`${option.favorite ? '取消收藏' : '收藏'}${option.name}`}><Star aria-hidden="true" /></Button>}
         </article>)}</div>
         {!filtered.length && !moreRemote && !loadingMore && <div className="darl-style-empty"><Search aria-hidden="true" /><strong>{query ? '没有找到匹配的风格' : collection === 'mine' ? '还没有自己的风格' : collection === 'favorites' ? '还没有收藏的风格' : collection === 'recent' ? '还没有使用过的风格' : '暂无风格'}</strong><span>试试其他关键词或切换分类</span><Button variant="outline" onClick={() => { setQuery(''); setCategory(''); setCollection('market'); }}>浏览全部风格</Button></div>}

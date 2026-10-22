@@ -67,7 +67,9 @@ describe('StyleSelector', () => {
   it('validates creation and sends the confirmed request', async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);
     render(<StyleSelector open styles={styles} onCreate={onCreate} />);
-    fireEvent.click(screen.getByRole('button', { name: '创建风格' }));
+    expect(document.querySelector('.darl-style-actions')).not.toHaveTextContent('创建风格');
+    fireEvent.mouseDown(screen.getByRole('tab', { name: '我的风格' }), { button: 0, ctrlKey: false });
+    fireEvent.click(screen.getByRole('button', { name: /创建风格/ }));
     fireEvent.change(screen.getByLabelText(/风格名称/), { target: { value: '新风格' } });
     fireEvent.change(screen.getByLabelText(/风格描述词/), { target: { value: '柔和电影光' } });
     fireEvent.click(screen.getByRole('button', { name: '下一步' }));

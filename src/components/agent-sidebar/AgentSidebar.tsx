@@ -5,7 +5,7 @@ import { Switch } from '../ui/FormControls';
 import { AgentComposerInput, ReferenceText, referenceIds } from './AgentComposerInput';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { AlertCircle, ArrowDown, ArrowLeft, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Clipboard, Clock3, Copy, History, LoaderCircle, Maximize2, Minimize2, Paperclip, Pencil, Plus, RefreshCw, Search, Send, Sparkles, Square, Trash2, Upload, Volume2, VolumeX, Wrench, X } from 'lucide-react';
+import { AlertCircle, ArrowDown, ArrowLeft, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Clipboard, Clock3, Copy, History, LoaderCircle, Maximize2, MessageSquareText, Minimize2, Paperclip, Pencil, Plus, RefreshCw, Search, Send, Sparkles, Square, Trash2, Upload, Volume2, VolumeX, Wrench, X } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
@@ -187,11 +187,15 @@ function Markdown({ content, onCopyCode, depth = 0 }: { content: string; onCopyC
   return <div className="darl-agent-markdown"><ReactMarkdown remarkPlugins={[remarkGfm, markCodeBlocks]} rehypePlugins={[rehypeSanitize]} components={components}>{content}</ReactMarkdown></div>;
 }
 
+function toolDelegationTask(call?: AgentToolCall) {
+  return call?.appId.startsWith('agent:') && call.input && typeof call.input === 'object' && 'task' in call.input && typeof call.input.task === 'string' ? call.input.task : '';
+}
+
 function ToolCallCard({ call }: { call: AgentToolCall }) {
   const state = call.errorInfo?.stage === 'cancellation' ? 'cancelled' : call.status;
   const status = { pending: '等待调用', running: '执行中', retrying: '重试中', success: '已完成', error: '调用失败', confirmation: '等待确认', cancelled: call.errorInfo?.code === 'TOOL_REJECTED' ? '已拒绝' : '已停止' }[state];
   const StatusIcon = state === 'running' || state === 'retrying' ? LoaderCircle : state === 'error' ? AlertCircle : state === 'success' ? Check : state === 'cancelled' ? Square : Wrench;
-  const delegationTask = call.appId.startsWith('agent:') && call.input && typeof call.input === 'object' && 'task' in call.input && typeof call.input.task === 'string' ? call.input.task : '';
+  const delegationTask = toolDelegationTask(call);
   return <article className={`darl-agent-tool-call darl-agent-tool-call--${state}`}>
     <div className="darl-agent-tool-summary">
       <span className="darl-agent-tool-icon"><StatusIcon size={14} className={call.status === 'running' || call.status === 'retrying' ? 'darl-agent-spin' : undefined} /></span>
@@ -219,72 +223,108 @@ function executionSourceText(event: AgentExecutionEvent) {
   return event.source === 'tool' ? '工具' : event.parentRunId ? '协作 Agent' : '主 Agent';
 }
 
+const liveExecutionStatuses = new Set<AgentExecutionEvent['status']>(['pending', 'started', 'running', 'retrying', 'confirmation']);
+
+function executionKey(event: AgentExecutionEvent) {
+  if (event.source === 'commentary') return `commentary:${event.id}`;
+  return event.toolCallId || event.source === 'tool' ? `tool:${event.toolCallId || event.id}` : `agent:${event.runId || event.id}`;
+}
+
 function executionDuration(event: AgentExecutionEvent, now: number, events: AgentExecutionEvent[] = []) {
-  if (typeof event.durationMs === 'number' && Number.isFinite(event.durationMs)) return event.durationMs;
-  const key = event.toolCallId || event.runId || event.id;
-  const terminal = [...events].reverse().find((candidate) => (candidate.toolCallId || candidate.runId || candidate.id) === key && ['success', 'error', 'cancelled', 'timeout'].includes(candidate.status) && typeof candidate.durationMs === 'number');
-  if (terminal?.durationMs !== undefined) return terminal.durationMs;
-  const start = Date.parse(event.startedAt || event.timestamp);
-  if (!Number.isFinite(start)) return 0;
-  return Math.max(0, now - start);
+  if (typeof event.durationMs === 'number' && Number.isFinite(event.durationMs)) return Math.max(0, event.durationMs);
+  const first = events.find((candidate) => executionKey(candidate) === executionKey(event));
+  const start = Date.parse(event.startedAt || first?.startedAt || (first && liveExecutionStatuses.has(first.status) ? first.timestamp : ''));
+  const end = liveExecutionStatuses.has(event.status) ? now : Date.parse(event.endedAt || event.timestamp);
+  return Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : undefined;
 }
 
 function formatDuration(milliseconds: number) {
+  if (milliseconds < 1000) return '<1s';
   const seconds = Math.floor(milliseconds / 1000);
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`;
 }
 
-function hasSubAgentActivity(events: AgentExecutionEvent[] | undefined) {
-  return Boolean(events?.some((event) => event.source === 'agent' && Boolean(event.parentRunId)));
+function hasExecutionActivity(events: AgentExecutionEvent[] | undefined, calls: AgentToolCall[] = []) {
+  return calls.length > 0 || Boolean(events?.some((event) => event.source !== 'agent' || event.parentRunId));
 }
 
-function ExecutionTimeline({ events, calls = [] }: { events: AgentExecutionEvent[]; calls?: AgentToolCall[] }) {
+function ExecutionTimeline({ events = [], calls = [], streaming = false, error, onCopyCode }: { events?: AgentExecutionEvent[]; calls?: AgentToolCall[]; streaming?: boolean; error?: AgentErrorInfo; onCopyCode: (code: string) => void }) {
   const [expanded, setExpanded] = useState(false);
-  const hasLiveEvents = events.some((event) => ['pending', 'started', 'running', 'retrying', 'confirmation'].includes(event.status));
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!hasLiveEvents) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [hasLiveEvents]);
-  if (!events.length) return null;
   const activityMap = new Map<string, AgentExecutionEvent[]>();
   events.forEach((event) => {
-    const key = event.toolCallId || event.runId || event.id;
+    const key = executionKey(event);
     activityMap.set(key, [...(activityMap.get(key) || []), event]);
   });
-  const activities = [...activityMap.entries()].map(([key, activityEvents]) => ({ key, events: activityEvents, first: activityEvents[0], latest: activityEvents.at(-1)! }));
+  calls.forEach((call) => {
+    const key = `tool:${call.id}`;
+    const history = activityMap.get(key) || [];
+    const previous = history.at(-1);
+    const snapshot: AgentExecutionEvent = {
+      ...previous, id: call.id, source: 'tool', name: call.toolTitle || call.toolName,
+      status: call.errorInfo?.stage === 'cancellation' ? 'cancelled' : call.errorInfo?.stage === 'timeout' && call.status === 'error' ? 'timeout' : call.status,
+      timestamp: call.endedAt || previous?.timestamp || call.startedAt || '',
+      startedAt: call.startedAt || previous?.startedAt, endedAt: call.endedAt || previous?.endedAt,
+      durationMs: call.durationMs ?? previous?.durationMs, runId: call.runId || previous?.runId,
+      parentRunId: call.parentRunId || previous?.parentRunId, toolCallId: call.id,
+      attempt: call.attempt ?? previous?.attempt,
+      error: call.status === 'success' ? undefined : call.errorInfo || previous?.error,
+    };
+    activityMap.set(key, [...history, snapshot]);
+  });
+  const activities = [...activityMap.entries()].map(([key, history]) => ({ key, events: history, first: history[0], latest: history.at(-1)!, call: calls.find((call) => key === `tool:${call.id}`) })).sort((a, b) => {
+    const difference = Date.parse(a.first.startedAt || a.first.timestamp) - Date.parse(b.first.startedAt || b.first.timestamp);
+    return Number.isFinite(difference) ? difference : 0;
+  });
+  const root = activities.find(({ latest }) => latest.source === 'agent' && !latest.parentRunId);
+  const tools = activities.filter(({ latest }) => latest.source === 'tool');
+  const live = activities.filter(({ latest }) => liveExecutionStatuses.has(latest.status));
+  const failures = activities.filter((activity) => activity !== root && (activity.latest.status === 'error' || activity.latest.status === 'timeout'));
+  const rootFinished = root && !liveExecutionStatuses.has(root.latest.status);
+  const running = !error && !rootFinished && (streaming || live.length > 0);
+  const current = live.find(({ latest }) => latest.status === 'confirmation') || live.filter(({ latest }) => latest.source === 'tool').at(-1);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [running]);
+  if (!hasExecutionActivity(events, calls)) return null;
   const runDepth = new Map<string, number>();
   events.filter((event) => event.source === 'agent').forEach((event) => {
     if (!event.runId || runDepth.has(event.runId)) return;
     const parentDepth = event.parentRunId ? runDepth.get(event.parentRunId) : undefined;
     runDepth.set(event.runId, Math.min(3, (parentDepth ?? -1) + 1));
   });
-  const current = events.at(-1)!;
-  return <section className={`darl-agent-execution${expanded ? ' is-expanded' : ''}`} aria-label="Agent 执行时间线">
-    <button type="button" className="darl-agent-execution-summary" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
-      <span className="darl-agent-execution-icon"><Clock3 size={14} /></span>
-      <span className="darl-agent-execution-heading"><strong>执行时间线</strong><small>{activities.length} 个活动 · {executionStatusText[current.status]}</small></span>
-      <span className="darl-agent-execution-duration">{formatDuration(executionDuration(current, now, events))}</span><ChevronDown size={14} className={expanded ? 'is-open' : undefined} />
+  const stopped = error?.stage === 'cancellation' || (rootFinished ? root.latest.status === 'cancelled' : !running && tools.some(({ latest }) => latest.status === 'cancelled'));
+  const failed = Boolean(error && error.stage !== 'cancellation') || root?.latest.status === 'error' || root?.latest.status === 'timeout';
+  const heading = running ? current ? `${executionStatusText[current.latest.status]} · ${current.latest.name}` : '处理中' : failed ? '处理失败' : stopped ? '已停止' : failures.length && !rootFinished ? '处理结束' : '处理完成';
+  const SummaryIcon = running ? current?.latest.status === 'confirmation' ? Wrench : LoaderCircle : failed || failures.length ? AlertCircle : stopped ? Square : Clock3;
+  const starts = activities.map(({ first, latest }) => Date.parse(latest.startedAt || first.startedAt || (liveExecutionStatuses.has(first.status) ? first.timestamp : ''))).filter(Number.isFinite);
+  const ends = activities.filter(({ latest }) => !liveExecutionStatuses.has(latest.status)).map(({ latest }) => Date.parse(latest.endedAt || latest.timestamp)).filter(Number.isFinite);
+  const duration = root ? executionDuration(root.latest, now, root.events) : starts.length && (running || ends.length) ? Math.max(0, (running ? now : Math.max(...ends)) - Math.min(...starts)) : undefined;
+  const renderActivity = ({ key, first, latest, events: history, call }: typeof activities[number]) => {
+    if (latest.source === 'commentary') return <li key={key} className="darl-agent-execution-item darl-agent-execution-commentary"><details className="darl-agent-execution-step"><summary className="darl-agent-execution-row"><span className="darl-agent-execution-dot"><MessageSquareText size={13} /></span><span className="darl-agent-execution-copy"><strong>过程说明</strong></span><ChevronRight size={12} /></summary><div className="darl-agent-execution-details"><Markdown content={latest.summary || ''} onCopyCode={onCopyCode} /></div></details></li>;
+    const transitions = history.map((event) => executionStatusText[event.status]).filter((label, index, values) => index === 0 || label !== values[index - 1]);
+    const retryCount = Math.max((latest.attempt || 1) - 1, transitions.filter((label) => label === executionStatusText.retrying).length);
+    const stepDuration = executionDuration(latest, now, history);
+    const depth = Math.max(0, Math.min(2, (runDepth.get(latest.runId || '') || 0) - (latest.source === 'agent' ? 1 : 0)));
+    return <li key={key} className={`darl-agent-execution-item darl-agent-execution-item--${latest.status}`} style={{ '--darl-agent-depth': depth } as CSSProperties}>
+      <details className="darl-agent-execution-step">
+        <summary className="darl-agent-execution-row"><span className="darl-agent-execution-dot">{running && ['running', 'retrying'].includes(latest.status) ? <LoaderCircle size={13} className="darl-agent-spin" /> : latest.status === 'success' ? <Check size={13} /> : latest.status === 'error' || latest.status === 'timeout' ? <AlertCircle size={13} /> : latest.status === 'cancelled' ? <Square size={12} /> : <Wrench size={13} />}</span><span className="darl-agent-execution-copy"><strong>{latest.name}</strong><span>{call?.appName || executionSourceText(latest)}</span></span>{retryCount > 0 && <span className="darl-agent-execution-retry">重试 {retryCount}</span>}<span className="darl-agent-execution-state">{call?.errorInfo?.code === 'TOOL_REJECTED' ? '已拒绝' : executionStatusText[latest.status]}</span><ChevronRight size={12} /></summary>
+        <div className="darl-agent-execution-details"><span>来源：{call?.appName || executionSourceText(latest)}{call && ` · ${call.toolName}`}</span>{first.summary && <p>{first.summary}</p>}{stepDuration !== undefined && <span>耗时 {formatDuration(stepDuration)}</span>}{transitions.length > 1 && <small className="darl-agent-execution-transitions">{transitions.join(' → ')}</small>}{latest.error && <p className={latest.error.stage === 'cancellation' ? 'darl-agent-status-note' : 'darl-agent-tool-error'}>{latest.error.message}</p>}{toolDelegationTask(call) && <div><span>委派任务</span><p>{toolDelegationTask(call)}</p></div>}</div>
+      </details>
+    </li>;
+  };
+  return <section className={`darl-agent-execution${expanded ? ' is-expanded' : ''}`} aria-label="执行过程">
+    <button type="button" className="darl-agent-execution-summary" aria-label={`执行过程：${heading}`} aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
+      <SummaryIcon size={14} className={running && current?.latest.status !== 'confirmation' ? 'darl-agent-spin' : undefined} />
+      <span className="darl-agent-execution-heading"><strong>{heading}</strong><small>{tools.length ? `${tools.length} 次调用` : `${activities.length - (root ? 1 : 0)} 项活动`}{running && live.filter(({ latest }) => latest.source === 'tool').length > 1 && ` · ${live.filter(({ latest }) => latest.source === 'tool').length} 项进行中`}{failures.length > 0 && ` · ${failures.length} 项失败`}</small></span>
+      {duration !== undefined && <span className="darl-agent-execution-duration">{formatDuration(duration)}</span>}<ChevronRight size={13} className={expanded ? 'is-open' : undefined} />
     </button>
-    {expanded && <ol className="darl-agent-execution-list">
-      {activities.map((activity) => {
-        const { first, latest, events: activityEvents } = activity;
-        const call = latest.toolCallId ? calls.find((item) => item.id === latest.toolCallId) : undefined;
-        const confirmation = latest.status === 'confirmation' && call ? { ...call, status: 'confirmation' as const } : undefined;
-        const isLive = ['pending', 'started', 'running', 'retrying', 'confirmation'].includes(latest.status);
-        const transitions = activityEvents.map((event) => executionStatusText[event.status]).filter((label, index, values) => index === 0 || label !== values[index - 1]);
-        const retryCount = activityEvents.filter((event) => event.status === 'retrying').length;
-        const hasDetails = Boolean(first.summary || latest.error || confirmation || transitions.length > 1);
-        const depth = Math.min(3, (runDepth.get(latest.runId || '') || 0) + (latest.source === 'tool' ? 1 : 0));
-        return <li key={activity.key} className={`darl-agent-execution-item darl-agent-execution-item--${latest.status}${isLive ? '' : ' is-history'}`} style={{ '--darl-agent-depth': depth } as CSSProperties}>
-          <div className="darl-agent-execution-row"><span className="darl-agent-execution-dot">{isLive && (latest.status === 'running' || latest.status === 'retrying') ? <LoaderCircle size={12} className="darl-agent-spin" /> : latest.status === 'success' ? <Check size={12} /> : latest.status === 'error' || latest.status === 'cancelled' || latest.status === 'timeout' ? <AlertCircle size={12} /> : <ChevronRight size={12} />}</span><span className="darl-agent-execution-copy"><strong>{executionSourceText(latest)}</strong><span>{latest.name}</span></span>{retryCount > 0 && <span className="darl-agent-execution-retry">重试 {retryCount}</span>}<span className="darl-agent-execution-state">{executionStatusText[latest.status]}</span><time>{formatDuration(executionDuration(latest, now, events))}</time></div>
-          {hasDetails && <details className="darl-agent-execution-details"><summary>查看详情</summary>{first.summary && <p>{first.summary}</p>}{transitions.length > 1 && <small className="darl-agent-execution-transitions">{transitions.join(' → ')}</small>}{latest.error && (latest.error.stage === 'cancellation' ? <p className="darl-agent-status-note">{latest.error.message}</p> : <div className="darl-agent-execution-error"><strong>{latest.error.message}</strong><small>{latest.error.code} · {latest.error.suggestion}</small></div>)}{confirmation && <ToolCallCard call={confirmation} />}</details>}
-        </li>;
-      })}
-    </ol>}
+    {expanded && <ol className="darl-agent-execution-list">{activities.filter((activity) => activity !== root).map(renderActivity)}</ol>}
+    {failures.map(({ key, latest, call }) => call ? <ToolCallCard key={key} call={call} /> : latest.error && <AgentErrorCard key={key} error={latest.error} />)}
   </section>;
 }
 
@@ -362,6 +402,8 @@ export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraft
   const effort = supportedEfforts.includes(preferredEffort ?? '') ? preferredEffort : defaultReasoningEffort(selectedModel);
   const draftKey = activeSession?.id ?? '';
   const draft = controlledDraft ?? drafts[draftKey] ?? '';
+  const latestDraft = useRef(draft);
+  latestDraft.current = draft;
   const applicationIds = selectedApplicationIds ?? referenceIds(draft, 'app');
   const skillIds = selectedSkillIds ?? referenceIds(draft, 'skill');
   const files = attachments[draftKey] || emptyFiles;
@@ -534,7 +576,7 @@ export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraft
         {!activeMessages.length && <div className="darl-agent-empty-state"><span className="darl-agent-empty-icon"><Sparkles size={22} /></span><h2>需要我帮你做什么？</h2><p>输入 @ 联系其他 Agent，或引用应用和 Skill。</p></div>}
         {activeMessages.map((message) => <article key={message.id} className={`darl-agent-message darl-agent-message--${message.role}`}>
           <div className="darl-agent-message-label">{message.role === 'user' ? '你' : 'Agent'}</div>
-          <div className="darl-agent-message-body">{message.streaming && !message.content && !message.outputs?.length && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content || speechTranscript(message.outputs)} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{hasSubAgentActivity(message.timeline) ? <ExecutionTimeline events={message.timeline!} calls={message.toolCalls} /> : message.toolCalls?.map((call) => <ToolCallCard key={call.id} call={call} />)}{message.error && <AgentErrorCard error={message.error} />}{message.attachments?.map((attachment, index) => { const name = attachmentName(attachment); const fileId = typeof attachment === 'string' ? undefined : attachment.fileId; const url = typeof attachment !== 'string' && attachment.url ? attachment.url : fileId ? `/api/files/${fileId}` : undefined; const isImage = typeof attachment !== 'string' && (!attachment.type || attachment.type.startsWith('image/')); return isImage && url && /^(?:data:image\/|https?:\/\/|\/api\/files\/)/.test(url) ? <figure className="darl-agent-image-attachment" key={`${name}-${index}`}><button type="button" className="darl-agent-image-trigger" onClick={() => openImagePreview({ src: url, alt: name })} title="点击放大预览"><img src={url} alt={name} loading="lazy" /></button></figure> : <span className="darl-agent-chip" key={`${name}-${index}`}><Paperclip size={12} />{fileId ? <a href={attachmentDownloadUrl(attachment, fileId)}>{name}</a> : name}</span>; })}</div>
+          <div className="darl-agent-message-body">{message.role === 'assistant' && <ExecutionTimeline events={message.timeline} calls={message.toolCalls} streaming={message.streaming} error={message.error} onCopyCode={(code) => void copy(code, `${message.id}-code`)} />}{message.streaming && !message.content && !message.outputs?.length && !hasExecutionActivity(message.timeline, message.toolCalls) && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content || speechTranscript(message.outputs)} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{message.error && <AgentErrorCard error={message.error} />}{message.attachments?.map((attachment, index) => { const name = attachmentName(attachment); const fileId = typeof attachment === 'string' ? undefined : attachment.fileId; const url = typeof attachment !== 'string' && attachment.url ? attachment.url : fileId ? `/api/files/${fileId}` : undefined; const isImage = typeof attachment !== 'string' && (!attachment.type || attachment.type.startsWith('image/')); return isImage && url && /^(?:data:image\/|https?:\/\/|\/api\/files\/)/.test(url) ? <figure className="darl-agent-image-attachment" key={`${name}-${index}`}><button type="button" className="darl-agent-image-trigger" onClick={() => openImagePreview({ src: url, alt: name })} title="点击放大预览"><img src={url} alt={name} loading="lazy" /></button></figure> : <span className="darl-agent-chip" key={`${name}-${index}`}><Paperclip size={12} />{fileId ? <a href={attachmentDownloadUrl(attachment, fileId)}>{name}</a> : name}</span>; })}</div>
           {message.role === 'assistant' && message.content && message.outputs?.some((output) => output.output_type === 'speech') && <details className="darl-agent-speech-transcript"><summary>语音内容</summary><p>{speechTranscript(message.outputs)}</p></details>}
           {message.role === 'assistant' && voice && message.outputs?.some((output) => output.output_type === 'speech') && <div className="darl-agent-message-actions"><Button variant="ghost" size="sm" aria-label={speechState.id === message.id && ['buffering', 'playing'].includes(speechState.state) ? '停止语音' : '播放语音'} onClick={() => speechState.id === message.id && ['buffering', 'playing'].includes(speechState.state) ? stopSpeech() : (() => { player.stop(); void player.prepare().catch(() => {}); for (const output of message.outputs || []) if (output.output_type === 'speech') player.enqueue(output.content, voice.voiceId, message.id); })()}><Volume2 size={14} />{speechState.id === message.id && speechState.state === 'buffering' ? '缓冲中 · 停止' : speechState.id === message.id && speechState.state === 'playing' ? '播放中 · 停止' : '播放语音'}</Button></div>}
           {renderMessageActions?.(message)}{message.role === 'assistant' && !message.streaming && <div className="darl-agent-message-actions"><Button variant="ghost" size="sm" onClick={() => void copy(message.content || speechTranscript(message.outputs), message.id)}><Clipboard size={13} />{copyState === message.id ? '已复制' : '复制'}</Button>{onRegenerate && <Button variant="ghost" size="sm" disabled={isGenerating} onClick={() => onRegenerate(message.id)}><RefreshCw size={13} />重新生成</Button>}</div>}
@@ -546,7 +588,7 @@ export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraft
           <Switch aria-label="语音回复" checked={voice.enabled} onChange={(event) => { player.stop(); if (event.target.checked) void player.prepare().catch(() => {}); voice.onEnabledChange(event.target.checked); if (event.target.checked && !voice.voiceId) openVoicePicker(); }}>语音回复</Switch>
           <Button variant="ghost" size="sm" ref={voiceButtonRef} onClick={openVoicePicker} title="选择音色" aria-haspopup="dialog" aria-expanded={picker === 'voices'}><Volume2 size={14} /><span>{voice.voiceName || '选择音色'}</span></Button>
           {['playing', 'buffering'].includes(speechState.state) && <Button variant="ghost" size="icon" aria-label="停止语音播放" onClick={stopSpeech}><VolumeX size={15} /></Button>}
-          {voice.transcribe && <AgentVoiceInput key={draftKey} transcribe={voice.transcribe} onBegin={() => player.stop()} onBusyChange={setVoiceInputBusy} disabled={isGenerating || pending} onText={(text) => setDrafts((current) => ({ ...current, [draftKey]: [current[draftKey], text].filter(Boolean).join('\n') }))} />}
+          {voice.transcribe && <AgentVoiceInput key={draftKey} transcribe={voice.transcribe} onBegin={() => player.stop()} onBusyChange={setVoiceInputBusy} disabled={isGenerating || pending} onText={(text) => setDraft([latestDraft.current, text].filter(Boolean).join('\n'))} />}
         </div>}
         {speechState.state === 'error' && <p role="alert">{speechState.error}</p>}
 

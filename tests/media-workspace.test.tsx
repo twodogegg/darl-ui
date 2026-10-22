@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MediaWorkspace, type MediaModel, type MediaTask } from '../src';
 import { durations, filterReferences, normalizeOptions, selectedGenerationMode } from '../src/components/media-workspace/model';
@@ -67,6 +67,108 @@ describe('MediaWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消资产选择' }));
     switchModel('图片 B'); prompt();
     expect(screen.getByRole('button', { name: '✧ 生成' })).toBeDisabled();
+  });
+  it('展开完整批次提示词，并显示宿主的真实生成进度', () => {
+    const longPrompt = '完整的长提示词和换行。\n'.repeat(12);
+    render(<MediaWorkspace models={models} tasks={[{ id: 't', title: '生成', batches: [{ id: 'b', modelId: 'video', type: 'video', prompt: longPrompt, options: { count: 1 }, results: [{ id: 'r', status: 'running', progress: 35 }] }] }]} onGenerate={vi.fn()} />);
+    const toggle = screen.getByRole('button', { name: '展开提示词' });
+    fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: '收起提示词' })).toHaveAttribute('aria-expanded', 'true');
+    expect(document.querySelector('.darl-mw-batch-header h3')).toHaveClass('is-expanded');
+    expect(document.querySelector('.darl-mw-batch-header h3')?.textContent).toBe(longPrompt);
+    expect(screen.getByRole('progressbar', { name: '生成进度' })).toHaveAttribute('value', '35');
+    expect(screen.getByText('生成中 · 35%')).toBeInTheDocument();
+  });
+  it('优化发送当前模型和参数，失败保持原文，成功回填', async () => {
+    const onOptimizePrompt = vi.fn().mockRejectedValueOnce(new Error('优化服务失败')).mockResolvedValueOnce('优化后的画面');
+    const image: MediaModel = { ...models[0], capabilities: { ...models[0].capabilities, generationModes: ['text-to-image', 'reference-edit'] } };
+    render(<MediaWorkspace models={[image]} tasks={tasks} onGenerate={vi.fn()} onOptimizePrompt={onOptimizePrompt} />);
+    expect(screen.getByRole('button', { name: '✧ 提示词优化' })).toBeDisabled();
+    prompt();
+    fireEvent.click(screen.getByRole('button', { name: '✧ 提示词优化' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('优化服务失败'));
+    expect(screen.getByRole('textbox', { name: '生成提示词' })).toHaveValue('生成测试画面');
+    expect(onOptimizePrompt).toHaveBeenCalledWith(expect.objectContaining({ optimization: 'general', modelId: 'image', model: image, mode: 'text-to-image', generationCount: 1, options: { aspectRatio: '16:9', resolution: '2K', count: 2 } }), { signal: expect.any(AbortSignal) });
+    fireEvent.click(screen.getByRole('button', { name: '✧ 提示词优化' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '生成提示词' })).toHaveValue('优化后的画面'));
+  });
+  it('H3 优化需要选择方式，传递时长和声音参数', async () => {
+    const onOptimizePrompt = vi.fn().mockResolvedValue('H3 镜头描述');
+    render(<MediaWorkspace models={[{ ...models[2], id: 'minimax-h3-flash', upstreamModelId: 'minimax-h3-flash', capabilities: { ...models[2].capabilities, generationModes: ['first-last-frame', 'text-to-video'] } }]} tasks={tasks} onGenerate={vi.fn()} onOptimizePrompt={onOptimizePrompt} />);
+    prompt();
+    fireEvent.click(screen.getByRole('button', { name: '提示词优化' }));
+    expect(onOptimizePrompt).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '普通优化' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'H3 提示优化' }));
+    await waitFor(() => expect(onOptimizePrompt).toHaveBeenCalledWith(expect.objectContaining({ optimization: 'h3', mode: 'first-last-frame', options: { count: 1, duration: 8, generateAudio: true } }), expect.anything()));
+  });
+  it('参考素材上传未完成时不发送缺失素材的优化请求', async () => {
+    const onOptimizePrompt = vi.fn();
+    render(<MediaWorkspace models={models} tasks={tasks} onGenerate={vi.fn()} onOptimizePrompt={onOptimizePrompt} onUploadReference={() => new Promise(() => {})} />);
+    fireEvent.change(screen.getByLabelText('选择参考素材'), { target: { files: [file('reference.png')] } });
+    prompt();
+    fireEvent.click(screen.getByRole('button', { name: '✧ 提示词优化' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('请先完成参考素材上传');
+    expect(onOptimizePrompt).not.toHaveBeenCalled();
+  });
+  it('展示最近一次优化对比，关闭保持结果，还原保留原文空白', async () => {
+    const onOptimizePrompt = vi.fn().mockResolvedValueOnce('第一次优化').mockResolvedValueOnce('第二次优化').mockResolvedValueOnce('第三次优化');
+    render(<MediaWorkspace models={models} tasks={tasks} onGenerate={vi.fn()} onOptimizePrompt={onOptimizePrompt} />);
+    const editor = screen.getByRole('textbox', { name: '生成提示词' });
+    fireEvent.change(editor, { target: { value: '  原始提示词\n' } });
+    expect(screen.queryByRole('button', { name: '优化对比' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '✧ 提示词优化' }));
+    await waitFor(() => expect(editor).toHaveValue('第一次优化'));
+    fireEvent.click(screen.getByRole('button', { name: '优化对比' }));
+    const comparison = screen.getByRole('dialog', { name: '提示词优化对比' });
+    expect(within(comparison).getByRole('textbox', { name: '优化前' })).toHaveValue('  原始提示词\n');
+    expect(within(comparison).getByRole('textbox', { name: '优化后' })).toHaveValue('第一次优化');
+    fireEvent.click(within(comparison).getByRole('button', { name: '关闭对比' }));
+    expect(editor).toHaveValue('第一次优化');
+    fireEvent.click(screen.getByRole('button', { name: '还原优化' }));
+    expect(editor).toHaveValue('  原始提示词\n');
+    expect(screen.queryByRole('button', { name: '优化对比' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '✧ 提示词优化' }));
+    await waitFor(() => expect(editor).toHaveValue('第二次优化'));
+    fireEvent.click(screen.getByRole('button', { name: '✧ 提示词优化' }));
+    await waitFor(() => expect(editor).toHaveValue('第三次优化'));
+    fireEvent.click(screen.getByRole('button', { name: '优化对比' }));
+    expect(screen.getByRole('textbox', { name: '优化前' })).toHaveValue('第二次优化');
+    expect(screen.getByRole('textbox', { name: '优化后' })).toHaveValue('第三次优化');
+    fireEvent.click(within(screen.getByRole('dialog', { name: '提示词优化对比' })).getByRole('button', { name: '还原优化' }));
+    expect(editor).toHaveValue('第二次优化');
+    expect(screen.queryByRole('dialog', { name: '提示词优化对比' })).not.toBeInTheDocument();
+  });
+  it('取消或修改参数后，旧优化结果不会覆盖输入', async () => {
+    let finish!: (text: string) => void;
+    let signal!: AbortSignal;
+    const onOptimizePrompt = vi.fn((_request, context) => { signal = context.signal; return new Promise<string>(resolve => { finish = resolve; }); });
+    render(<MediaWorkspace models={models} tasks={tasks} onGenerate={vi.fn()} onOptimizePrompt={onOptimizePrompt} />);
+    prompt();
+    fireEvent.click(screen.getByRole('button', { name: '✧ 提示词优化' }));
+    expect(screen.getByRole('button', { name: '✧ 生成' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '取消优化' }));
+    expect(signal.aborted).toBe(true);
+    await act(async () => finish('已取消的结果'));
+    expect(screen.getByRole('textbox', { name: '生成提示词' })).toHaveValue('生成测试画面');
+    fireEvent.click(screen.getByRole('button', { name: '✧ 提示词优化' }));
+    switchModel('图片 B');
+    expect(signal.aborted).toBe(true);
+    fireEvent.change(screen.getByRole('textbox', { name: '生成提示词' }), { target: { value: '新输入' } });
+    await act(async () => finish('过期结果'));
+    expect(screen.getByRole('textbox', { name: '生成提示词' })).toHaveValue('新输入');
+  });
+  it('媒体页直接编辑我的风格并提交修改', async () => {
+    const onUpdateStyle = vi.fn().mockResolvedValue(undefined);
+    render(<MediaWorkspace models={models} tasks={tasks} styles={[{ id: 's', name: '短剧感', description: '原始描述', isOwned: true }]} onGenerate={vi.fn()} onUpdateStyle={onUpdateStyle} />);
+    fireEvent.click(screen.getByRole('button', { name: '选择风格' }));
+    fireEvent.mouseDown(screen.getByRole('tab', { name: '我的风格' }), { button: 0, ctrlKey: false });
+    fireEvent.click(screen.getByRole('button', { name: '编辑短剧感' }));
+    fireEvent.change(screen.getByLabelText(/风格描述词/), { target: { value: '修改后的短剧描述' } });
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(onUpdateStyle).toHaveBeenCalledWith(expect.objectContaining({ id: 's' }), { name: '短剧感', description: '修改后的短剧描述' }));
+
   });
   it('采用模型默认值，提交请求且拒绝空提示词', async () => {
     const onGenerate = vi.fn();

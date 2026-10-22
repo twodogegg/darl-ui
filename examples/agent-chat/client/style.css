@@ -225,3 +225,6 @@ body { margin: 0; background: #101113; }
 
 .example-voice-settings { display:grid; gap:16px; max-width:640px; }
 .example-voice-settings > p { color:var(--darl-muted); font-size:13px; line-height:1.6; }
+
+.example-default-model-grid > label { display: grid; gap: 8px; min-width: 0; margin-bottom: 16px; }
+.example-default-model-grid select { width: 100%; min-width: 0; padding: 9px; border: 1px solid var(--darl-border); border-radius: 8px; background: var(--darl-background); color: var(--darl-text); }
