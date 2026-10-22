@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { MediaWorkspace, toMediaModels, type GenerateRequest, type MediaInput, type MediaModel, type MediaStyleOption, type MediaTask, type ModelConfiguration, type StyleCreateRequest } from '@darl/ui';
+import { MediaWorkspace, toMediaModels, type GenerateRequest, type MediaInput, type MediaModel, type MediaStyleOption, type MediaTask, type MediaWorkspaceProps, type ModelConfiguration, type StyleCreateRequest } from '@darl/ui';
 import { Button } from '../../../src/components/ui/Button';
 import { jobGroups, jobToBatch, jobsToBatchId, jobsToTasks, type MediaJob } from './media-job-view';
-import { styleOptionsFromCatalog, type StyleCatalog } from './workspace-styles';
+import { createWorkspaceStyle, styleOptionsFromCatalog, type StyleCatalog } from './workspace-styles';
 import type { UploadContext } from '../../../src/components/file-uploader/types';
 
 async function request<T>(path: string, body?: unknown, method?: string): Promise<T> {
@@ -18,14 +18,6 @@ async function request<T>(path: string, body?: unknown, method?: string): Promis
   return data as T;
 }
 
-async function styleForm(input: StyleCreateRequest): Promise<FormData> {
-  const data = new FormData();
-  data.set('name', input.name);
-  data.set('prompt', input.description);
-  if (input.referenceImage) data.set('reference_image', input.referenceImage);
-  return data;
-}
-
 function newTask(): MediaTask {
   return { id: crypto.randomUUID(), title: '新任务', batches: [] };
 }
@@ -37,7 +29,7 @@ function supportedModels(configuration: ModelConfiguration): MediaModel[] {
     : model);
 }
 
-export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
+export function MediaGenerationPage({ onBack, renderReferencePicker }: { onBack: () => void; renderReferencePicker?: MediaWorkspaceProps['renderReferencePicker'] }) {
   const [models, setModels] = useState<MediaModel[]>([]);
   const [styles, setStyles] = useState<MediaStyleOption[]>([]);
   const [tasks, setTasks] = useState<MediaTask[]>([]);
@@ -53,7 +45,7 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
   }, []);
 
   const createStyle = async (input: StyleCreateRequest) => {
-    await request<{ data: { id: number } }>('workspace/styles', await styleForm(input));
+    await createWorkspaceStyle(input);
     await loadStyles();
   };
 
@@ -156,10 +148,11 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
     request.send(form);
   });
 
-  const submit = async (taskId: string, payload: { modelId: string; prompt: string; options: GenerateRequest['options']; references?: GenerateRequest['references']; style?: GenerateRequest['style'] }) => {
+  const submit = async (taskId: string, payload: { batchId?: string; modelId: string; prompt: string; options: GenerateRequest['options']; references?: GenerateRequest['references']; style?: GenerateRequest['style'] }) => {
     const job = await request<MediaJob>('media-generation/jobs', {
       modelId: payload.modelId,
       taskId,
+      ...(payload.batchId ? { batchId: payload.batchId } : {}),
       prompt: payload.prompt,
       options: { ...payload.options, ...(payload.references ? { references: payload.references.images?.map((input) => input instanceof File ? input : { ...(input.fileId ? { fileId: input.fileId } : {}), url: input.url }) } : {}) },
       ...(payload.style ? { style: payload.style } : {}),
@@ -173,7 +166,7 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
       const count = Math.max(1, Math.min(4, Math.floor(request_.generationCount ?? 1)));
       const batchId = crypto.randomUUID();
       const requests = Array.from({ length: count }, () => ({ batchId, modelId: request_.modelId, prompt: request_.prompt, options: request_.options, ...(request_.references ? { references: request_.references } : {}), ...(request_.style ? { style: request_.style } : {}) }));
-      const created = await Promise.all(requests.map((payload) => request<MediaJob>('media-generation/jobs', { ...payload, taskId: request_.taskId })));
+      const created = await Promise.all(requests.map((payload) => submit(request_.taskId, payload)));
       const batch = { ...jobToBatch(created[0], created), ...(request_.references ? { references: request_.references } : {}), ...(request_.style ? { style: request_.style } : {}) };
       setTasks((current) => {
         const exists = current.some((task) => task.id === request_.taskId);
@@ -207,7 +200,7 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
     })));
   };
 
-  return <main className="example-media-generation">
+  return <section className="example-media-generation">
     <header className="example-media-generation-head">
       <Button variant="outline" size="sm" onClick={onBack}><ArrowLeft size={15} />返回</Button>
       <div><span className="example-eyebrow">MEDIA WORKSPACE</span><h1>媒体生成</h1><p>选择已配置的图片或视频模型，提交真实生成任务并查看结果。</p></div>
@@ -225,10 +218,11 @@ export function MediaGenerationPage({ onBack }: { onBack: () => void }) {
       onDeleteBatch={deleteBatch}
       onGenerate={generate}
       onUploadReference={uploadReference}
+      renderReferencePicker={renderReferencePicker}
       onCreateStyle={createStyle}
       onRetry={(batchId) => { void retry(batchId); }}
       onRegenerate={(batchId) => { void retry(batchId); }}
       onFavoriteChange={favorite}
     />}
-  </main>;
+  </section>;
 }

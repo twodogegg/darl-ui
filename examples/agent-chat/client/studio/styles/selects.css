@@ -1,0 +1,16 @@
+@scope (.rn-studio) {
+/* Reused from the original page; only selector scope and removed features differ. */
+
+.creative-director-select{display:flex;align-items:center;gap:7px;color:var(--br-text-secondary);font-size:12px;white-space:nowrap}
+.creative-director-select select{width:210px;max-width:42vw;height:32px;padding:0 9px;border:1px solid var(--br-border);border-radius:4px;background:var(--br-input-bg);color:var(--br-text-primary);font:12px inherit}
+.creative-director-select select:focus{outline:none;border-color:var(--br-accent)}
+@media(max-width:680px){.creative-director-select{width:100%;justify-content:space-between}.creative-director-select select{max-width:72%;width:72%}}
+
+/* Reused from the original page; only selector scope and removed features differ. */
+
+.text-model-select{display:flex;align-items:center;gap:7px;color:var(--br-text-secondary);font-size:12px;white-space:nowrap}
+.text-model-select select{width:210px;max-width:42vw;height:32px;padding:0 9px;border:1px solid var(--br-border);border-radius:4px;background:var(--br-input-bg);color:var(--br-text-primary);font:12px inherit}
+.text-model-select select:focus{outline:none;border-color:var(--br-accent)}
+@media(max-width:680px){.text-model-select{width:100%;justify-content:space-between}.text-model-select select{max-width:72%;width:72%}}
+
+}

@@ -57,6 +57,23 @@ describe('image results', () => {
 });
 
 describe('reference storage', () => {
+  it('resolves studio file URLs to stored bytes before sending an image edit', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'darl-media-'));
+    const files = new FileStore(join(directory, 'data.sqlite'));
+    try {
+      const stored = await files.put(PNG, 'image/png', 'reference.png');
+      const options = await resolveMediaReferencesInStore({ references: [`/api/files/${stored.id}`, { url: `/api/files/${stored.id}` }] }, files);
+      const references = options.references as Array<{ fileId: string }>;
+      expect(references.map(item => item.fileId)).toEqual([stored.id, stored.id]);
+      const normalized = await normalizeImageReferences(references, 16, async url => {
+        const value = await files.getBytes(url.split('/').pop()!);
+        return value ? { bytes: value.bytes, mime: value.file.mimeType } : undefined;
+      });
+      expect(normalized?.every(item => 'data' in item && item.data.equals(PNG))).toBe(true);
+      await expect(resolveMediaReferencesInStore({ references: ['/api/files/missing'] }, files)).rejects.toThrow('参考素材文件不存在');
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
   it('stores data URLs in the unified file store and reads them back as bytes', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'darl-media-'));
     const files = new FileStore(join(directory, 'data.sqlite'));

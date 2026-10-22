@@ -43,6 +43,31 @@ describe('模型能力', () => {
   });
 });
 describe('MediaWorkspace', () => {
+  it('opens a host asset picker, preserves references on cancel, and enforces model limits on applied files', async () => {
+    const onGenerate = vi.fn();
+    const images = [1, 2].map(index => ({ id: `asset-${index}`, fileId: `file-${index}`, url: `/api/files/file-${index}` }));
+    render(<MediaWorkspace models={models} tasks={tasks} onGenerate={onGenerate} renderReferencePicker={({ kinds, references, onApply, onClose }) => <div role="dialog" aria-label="资产选择">
+      <span>支持 {kinds.join(',')}，已选 {references.images?.length || 0}</span>
+      <button onClick={() => onApply({ images })}>应用资产</button><button onClick={onClose}>取消资产选择</button>
+    </div>} />);
+    expect(screen.queryByRole('dialog', { name: '资产选择' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '添加参考素材' }));
+    expect(screen.getByText('支持 images，已选 0')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '取消资产选择' }));
+    prompt(); submit();
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(1));
+    expect(onGenerate.mock.calls[0][0].references).toBeUndefined();
+    fireEvent.click(screen.getByRole('button', { name: '添加参考素材' }));
+    fireEvent.click(screen.getByRole('button', { name: '应用资产' }));
+    prompt(); submit();
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(2));
+    expect(onGenerate.mock.calls[1][0].references.images).toEqual(images);
+    fireEvent.click(screen.getByRole('button', { name: '添加参考素材' }));
+    expect(screen.getByText('支持 images，已选 2')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '取消资产选择' }));
+    switchModel('图片 B'); prompt();
+    expect(screen.getByRole('button', { name: '✧ 生成' })).toBeDisabled();
+  });
   it('采用模型默认值，提交请求且拒绝空提示词', async () => {
     const onGenerate = vi.fn();
     render(<MediaWorkspace models={models} tasks={tasks} onGenerate={onGenerate}/>);

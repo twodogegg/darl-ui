@@ -79,6 +79,8 @@ export interface AgentConfig {
   avatar?: string;
   description?: string;
   instructions: string;
+  /** Host website rules, appended after this Agent's general instructions. */
+  websiteInstructions?: string;
   skillIds?: string[];
   contextPolicy?: AgentContextPolicy;
   enabled?: boolean;

@@ -1,0 +1,72 @@
+@scope (.rn-studio) {
+/* Structural adapters for the React versions of the original Vue page markup. */
+.page-art, .page-storyboard { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.page-art .art-page { display: flex; flex: 1; flex-direction: column; min-height: 0; height: auto; }
+.page-art .art-workspace { flex-direction: row; }
+.page-art .art-main { width: 100%; }
+.page-art .art-toolbar__right .tool-btn { display: block; flex-shrink: 0; }
+.page-art .asset-card__preview:focus-within .asset-card__actions { opacity: 1; transform: none; }
+.page-art .asset-card__name { flex-wrap: wrap; }
+.page-art .asset-card__name .role-tag { border: 0; }
+.page-art .modal-mask.asset-drawer { display: block; backdrop-filter: none; background: rgba(0,0,0,.12); }
+.page-art .dialog.drawer.asset-drawer__panel { width: 58.4vw; min-width: 760px; height: calc(100dvh - 8px); max-height: none; border-radius: 0; border: 0; overflow: hidden; }
+.page-art .asset-drawer__panel > .asset-drawer__header { padding: 0 22px 0 0; border: 0; flex-shrink: 0; height: auto; min-height: 64px; }
+.page-art .asset-drawer__header-actions { flex-wrap: wrap; justify-content: flex-end; }
+.page-art .asset-drawer__content { padding: 0; display: flex; flex-direction: column; gap: 0; flex: 1; min-height: 0; overflow: auto; }
+.page-art .asset-drawer__content > .asset-drawer__workspace { flex: 1 0 250px; }
+.page-art .asset-drawer__content > .asset-drawer__variants { flex-shrink: 0; overflow-x: auto; }
+.page-art .asset-drawer__variants .variant { flex: 0 0 112px; margin: 0; }
+.page-art .asset-drawer__generator { flex-shrink: 0; }
+.page-art .asset-drawer__parameters textarea { font-family: inherit; font-size: 12px; }
+.page-art .asset-drawer__image-actions .file-btn { min-height: 34px; padding: 6px 12px; }
+.new-asset-fields { padding: 0 22px 12px 0; }
+.image-edit-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.image-edit-layout > img { width: 100%; max-height: 50dvh; object-fit: contain; background: var(--br-canvas); }
+.page-storyboard .storyboard-page { height: auto; min-height: 0; flex: 1; }
+.page-storyboard .main { min-width: 0; }
+.page-storyboard .sb-topbar__right { flex-wrap: wrap; }
+.page-storyboard select.sb-select { padding: 0 8px; min-width: 72px; font-size: 12px; }
+.page-storyboard .sb-chip-open { display: inline-flex; min-width: 0; align-items: center; gap: 3px; color: inherit; font-size: inherit; }
+.page-storyboard .sb-image-preview-button { position: absolute; inset: 0; width: 100%; height: 100%; }
+.page-storyboard .sb-img-cell__overlay .file-btn { width: 34px; height: 34px; padding: 0; min-height: 0; display: grid; place-items: center; color: var(--br-text-primary); background: var(--br-surface-raised); border: 1px solid var(--br-border); border-radius: 50%; box-shadow: 0 3px 10px rgba(0,0,0,.42); font-size: 16px; }
+.page-storyboard .sb-desc-head.sb-prompt-head { display: flex; }
+.page-storyboard .sb-text-modal .dialog-body { padding: 0; display: flex; flex: 1; min-height: 0; }
+.page-storyboard .sb-text-editor { width: calc(100% - 28px); min-height: 40dvh; }
+.page-storyboard .sb-footer { min-width: 0; position: sticky; bottom: 0; flex-shrink: 0; }
+.br-content.br-content--flush { width: 100%; padding: 0; }
+.demo-toast { z-index: 1000; }
+.modal-portal { position: fixed; inset: 0; z-index: 300; display: block; }
+.projects-page .projects-grid { grid-template-columns: repeat(auto-fill,234px); gap: 24px; margin-top: 32px; }
+.projects-page .project-card { position: relative; width: 234px; overflow: visible; border-radius: var(--br-radius-card); }
+.projects-page .project-card-cover { aspect-ratio: 16/9; object-fit: contain; border-radius: var(--br-radius-card) var(--br-radius-card) 0 0; background: var(--br-canvas); }
+.projects-page .project-card-body { height: 70px; padding: 12px 16px; }
+.projects-page .project-card-body h2 { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 6px; font-weight: 600; }
+.projects-page .project-card-body small { font-size: 11px; }
+.projects-page .project-card-actions { position: absolute; right: 10px; bottom: 10px; padding: 0; }
+.project-card-more { display: grid; place-items: center; width: 32px; height: 32px; font-size: 22px; border-radius: 5px; background: var(--br-surface-raised); border: 1px solid var(--br-border); opacity: 0; }
+.project-card:hover .project-card-more, .project-card:focus-within .project-card-more { opacity: 1; }
+.project-card-menu { position: absolute; right: 0; top: 36px; z-index: 10; width: 130px; padding: 5px; border: 1px solid var(--br-border); border-radius: 8px; background: var(--br-surface-raised); box-shadow: 0 10px 26px rgba(0,0,0,.55); }
+.project-card-menu button { width: 100%; height: 34px; text-align: left; padding: 0 12px; font-size: 12px; }
+.project-card-menu button:hover { background: var(--br-theme-elevated-flat); }
+.project-card-menu .danger { color: var(--br-error); }
+.workflow-steps a[aria-disabled=true] { opacity: .45; }
+@media(max-width:1100px) {
+  .page-art .dialog.drawer.asset-drawer__panel { width: 72vw; min-width: 680px; }
+}
+@media(max-width:760px) {
+  .projects-page .projects-grid { grid-template-columns: minmax(0,1fr); gap: 14px; margin-top: 22px; }
+  .projects-page .project-card { width: 100%; }
+  .project-card-more { opacity: 1; }
+  .page-art .dialog.drawer.asset-drawer__panel { inset: 0; width: 100%; min-width: 0; max-width: 100%; height: 100dvh; padding: 14px 12px 12px; }
+  .page-art .asset-drawer__panel > .asset-drawer__header { padding-right: 0; gap: 10px; }
+  .page-art .asset-drawer__header-actions { justify-content: flex-start; padding-bottom: 10px; }
+  .page-art .asset-drawer__content > .asset-drawer__workspace { flex: 0 0 auto; }
+  .page-art .asset-drawer__content > .asset-drawer__variants { justify-content: flex-start; }
+  .page-art .asset-drawer__header h3 { margin-bottom: 6px; }
+  .page-art .asset-card__actions { opacity: 1; transform: none; }
+  .image-edit-layout { grid-template-columns: 1fr; }
+  .page-storyboard .sb-img-cell__overlay .file-btn { width: 25px; height: 25px; font-size: 13px; }
+  .page-storyboard .sb-text-modal { width: 100%; max-height: calc(100dvh - 24px); }
+}
+
+}

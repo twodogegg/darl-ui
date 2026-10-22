@@ -1,10 +1,11 @@
 import { useFishVoice, VoiceSettings } from './VoiceSettings';
-import { useEffect, useRef, useState } from 'react';
-import { AgentPlaza, AgentSidebar, ApprovalModeSelector, type AgentApprovalMode, AgentsSettingsCard, DefaultModelSelector, DarlUIProvider, ModelManagementCard, SettingsPage, SkillManager, defaultModelConfiguration, defaultReasoningEffort, toAgentModels, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentErrorInfo, type AgentExecutionEvent, type AgentToolCall, type AgentSendRequest, type AgentSession, type AgentSkill, type DefaultModelDraft, type DefaultModelOption, type DefaultModelSelection, type ModelConfiguration, type ModelProvider } from '@darl/ui';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AgentPlaza, AgentSidebar, ApprovalModeSelector, type AgentApprovalMode, AgentsSettingsCard, DefaultModelSelector, DarlUIProvider, ModelManagementCard, SettingsPage, SkillManager, defaultModelConfiguration, defaultReasoningEffort, toAgentModels, toMediaModels, type AgentApplication, type AgentAttachment, type AgentConfig, type AgentErrorInfo, type AgentExecutionEvent, type AgentToolCall, type AgentSendRequest, type AgentSession, type AgentSkill, type DefaultModelDraft, type DefaultModelOption, type DefaultModelSelection, type ModelConfiguration, type ModelProvider } from '@darl/ui';
 import { ArrowLeft, Blocks, BookOpen, Bot, Database, MessageSquare, Settings2, Sparkles, Wrench } from 'lucide-react';
 import createSkillPrompt from '../prompts/create-skill.md?raw';
 import { lines } from '../stream';
 import { Guide } from './Guide';
+import { StudioApp } from './studio/StudioApp';
 import { ProjectsPage } from './ProjectsPage';
 import { MediaConcurrencySettings } from './MediaConcurrencySettings';
 import { MediaGenerationPage } from './MediaGenerationPage';
@@ -78,9 +79,12 @@ export function App() {
   const [modelId, setModelId] = useState('');
   const agentId = sessions.find(session => session.id === activeId)?.agentId;
   const [effort, setEffort] = useState<string | undefined>();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [studioVisible, setStudioVisible] = useState(true);
+  const websiteContext = useRef<Record<string, string>>({});
+  const updateWebsiteContext = useCallback((value: Record<string, string>) => { websiteContext.current = value; }, []);
   const [settings, setSettings] = useState(false);
-  const [settingsReturn, setSettingsReturn] = useState<'chat' | 'media'>('chat');
+  const [settingsReturn, setSettingsReturn] = useState<'chat' | 'media' | 'studio'>('chat');
   const [guide, setGuide] = useState(false);
   const [projectsVisible, setProjectsVisible] = useState(false);
   const [mediaJobsVisible, setMediaJobsVisible] = useState(false);
@@ -227,7 +231,7 @@ export function App() {
       try {
         response = await fetch('/api/chat', {
           method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ voiceMode: request.voiceMode === true, approvalMode, sessionId: request.sessionId, agentId: conversationAgentId, skillIds: usedSkills.map((skill) => skill.id), applicationIds: request.applicationIds, providerId: selected?.providerId, modelId: selected ? decodeURIComponent(selected.id.slice(selected.id.indexOf('/') + 1)) : undefined, effort: request.reasoningEffort, messages: apiMessages }),
+          body: JSON.stringify({ websiteContext: websiteContext.current, voiceMode: request.voiceMode === true, approvalMode, sessionId: request.sessionId, agentId: conversationAgentId, skillIds: usedSkills.map((skill) => skill.id), applicationIds: request.applicationIds, providerId: selected?.providerId, modelId: selected ? decodeURIComponent(selected.id.slice(selected.id.indexOf('/') + 1)) : undefined, effort: request.reasoningEffort, messages: apiMessages }),
         });
       } catch (reason) {
         if (controller.signal.aborted) throw reason;
@@ -255,6 +259,7 @@ export function App() {
               setSessions((current) => current.map((session) => session.id === source.id ? { ...session, messages: session.messages.map((message) => message.id === answer.id ? { ...message, requestId: requestId || undefined, runId: runId || undefined } : message) } : session));
               continue;
             }
+            if (event.type === 'studio-changed') { window.dispatchEvent(new Event('studio-changed')); continue; }
             if (event.type === 'skills-changed') { setSkills(await api<AgentSkill[]>('skills')); continue; }
             if (event.type === 'error') { streamError = typeof event.error === 'object' ? event.error as AgentErrorInfo : { code: 'MODEL_REQUEST_FAILED', stage: 'model', message: String(event.error || '请求失败'), requestId: requestId || undefined, runId: runId || undefined, retryable: true, suggestion: '检查模型、提供方和网络设置后重试。' }; break; }
             if (event.type === 'execution') {
@@ -317,7 +322,7 @@ export function App() {
     const session = newSession(agentId || 'default');
     setSessions(current => [session, ...current]);
     setActiveId(session.id);
-    setSkillManagerOpen(false); setSettings(false); setGuide(false); setPlazaVisible(false); setProjectsVisible(false); setMediaJobsVisible(false); setOpen(true);
+    setStudioVisible(false); setSkillManagerOpen(false); setSettings(false); setGuide(false); setPlazaVisible(false); setProjectsVisible(false); setMediaJobsVisible(false); setOpen(true);
     await run({ sessionId: session.id, agentId: session.agentId, content: createSkillPrompt.trim(), skillIds: ['builtin:skill-creator'], applicationIds: [], modelId: availableModelId, reasoningEffort: activeEffort }, undefined, session);
   };
   const saveSkill = async (skill: AgentSkill) => {
@@ -325,14 +330,15 @@ export function App() {
   };
   const buttonClass = 'darl-button darl-button--outline darl-button-size--default';
   const skillsSettings = <section className="example-skills-settings" aria-labelledby="example-skills-settings-title"><header><div><span className="example-eyebrow">SKILL LIBRARY</span><h2 id="example-skills-settings-title">Skills</h2><p>模型先读取技能目录，按需加载指令和资源。也可以在聊天中 @ 引用指定技能。</p></div><button className={buttonClass} onClick={() => setSkillManagerOpen(true)}><Sparkles size={15} />管理 Skills</button></header><div className="example-skills-settings-summary"><strong>{skills.length} 个 Skill</strong><span>可以在聊天中描述需求创建 Skill，或发送链接让 Agent 下载并安装。</span></div>{skillManagerOpen && <SkillManager open skills={skills} onClose={() => setSkillManagerOpen(false)} onCreateViaChat={createSkillViaChat} createViaChatDisabled={generating || !approvalReady || approvalSaving} onImport={saveSkill} onSave={saveSkill} onDelete={async (id) => { setSkills(await api<AgentSkill[]>(`skills/${encodeURIComponent(id)}`, undefined, 'DELETE')); }} onFavoriteChange={async (id, favorite) => { const skill = skills.find((item) => item.id === id); if (skill) await saveSkill({ ...skill, favorite }); }} />}</section>;
-  const showSettings = () => { setSettingsReturn(mediaJobsVisible ? 'media' : 'chat'); setOpen(false); setGuide(false); setPlazaVisible(false); setProjectsVisible(false); setMediaJobsVisible(false); setSettings(true); };
+  const showSettings = () => { setStudioVisible(false); setSettingsReturn(studioVisible ? 'studio' : mediaJobsVisible ? 'media' : 'chat'); setOpen(false); setGuide(false); setPlazaVisible(false); setProjectsVisible(false); setMediaJobsVisible(false); setSettings(true); };
   const leaveSettings = () => {
     setSettings(false);
+    if (settingsReturn === 'studio') { setStudioVisible(true); setOpen(false); return; }
     if (settingsReturn === 'media') { setMediaJobsVisible(true); setOpen(false); return; }
     setOpen(true);
   };
-  const showGuide = () => { setOpen(false); setSettings(false); setGuide(true); };
-  const showPlaza = () => { setOpen(false); setGuide(false); setSettings(false); setProjectsVisible(false); setMediaJobsVisible(false); setPlazaVisible(true); };
+  const showGuide = () => { setStudioVisible(false); setOpen(false); setSettings(false); setGuide(true); };
+  const showPlaza = () => { setStudioVisible(false); setOpen(false); setGuide(false); setSettings(false); setProjectsVisible(false); setMediaJobsVisible(false); setPlazaVisible(true); };
   const renameSession = (sessionId: string, title: string) => {
     setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, title, updatedAt: new Date().toLocaleString() } : session));
   };
@@ -366,11 +372,35 @@ export function App() {
     onTestConnection={async (provider) => setProviders(await api<ModelProvider[]>(`providers/${provider.id}/test`, {}))}
   /></div>;
 
+  const showStudio = () => { setStudioVisible(true); setSettings(false); setGuide(false); setPlazaVisible(false); setProjectsVisible(false); setMediaJobsVisible(false); setOpen(false); };
+  const openStudioChat = () => {
+    if (!agentId) { const session = newSession('default'); setSessions(current => [session, ...current]); setActiveId(session.id); }
+    setOpen(true);
+  };
+  const studioTask = async (task: Record<string, unknown>) => {
+    if (running.current) throw new Error('请先停止当前 Agent 任务');
+    const selectedId = typeof task.agentId === 'string' && task.agentId ? task.agentId : agentId || 'default';
+    const session = newSession(selectedId);
+    const selections = task.modelSelections as Record<string, string> | undefined;
+    const selectedModel = selections?.text || availableModelId;
+    if (!selectedModel) throw new Error('请先配置并启用文本模型');
+    setSessions(current => [session, ...current]); setActiveId(session.id); setOpen(true);
+    const { prompt, agentId: _agent, modelSelections: _selection, ...context } = task;
+    await run({ sessionId: session.id, agentId: selectedId, content: [String(prompt || ''), JSON.stringify({ ...context, modelPreferences: { ...defaultMediaSelection, ...selections } }, null, 2)].join('\n\n'), skillIds: [], applicationIds: [], modelId: selectedModel, reasoningEffort: activeEffort }, undefined, session);
+  };
+  const studioNavigate = (page: string) => {
+    if (page === 'chat') { openStudioChat(); return; }
+    setStudioVisible(false);
+    if (page === 'agents') showPlaza();
+    else if (page === 'settings') showSettings();
+    else { setOpen(false); setSettings(false); setGuide(false); setPlazaVisible(false); setMediaJobsVisible(true); }
+  };
   return <DarlUIProvider theme={{ mode: 'dark', primaryColor: '#8ba4c5' }} className="chat-example">
     <div className={`example-page ${open ? 'with-agent' : ''}`}>
-      <header className="example-header"><a href="http://localhost:5188">Darl UI <span>/ Agent Chat</span></a><div><button className={buttonClass} onClick={showPlaza}><Bot size={16} />Agent 广场</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setPlazaVisible(false); setProjectsVisible(false); setMediaJobsVisible(true); setOpen(false); }}>媒体生成</button><button className={buttonClass} onClick={() => { setGuide(false); setSettings(false); setPlazaVisible(false); setMediaJobsVisible(false); setProjectsVisible(true); setOpen(false); }}><BookOpen size={16} />项目</button><button className={buttonClass} onClick={showGuide}><BookOpen size={16} />开发说明</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />设置</button><button className={buttonClass} onClick={() => setOpen((value) => !value)}><MessageSquare size={16} />聊天</button></div></header>
+      <header className="example-header" hidden={studioVisible}><a href="http://localhost:5188">Darl UI <span>/ Agent Chat</span></a><div><button className={buttonClass} onClick={showStudio}>短剧工作台</button><button className={buttonClass} onClick={showPlaza}><Bot size={16} />Agent 广场</button><button className={buttonClass} onClick={() => { setStudioVisible(false); setGuide(false); setSettings(false); setPlazaVisible(false); setProjectsVisible(false); setMediaJobsVisible(true); setOpen(false); }}>媒体生成</button><button className={buttonClass} onClick={() => { setStudioVisible(false); setGuide(false); setSettings(false); setPlazaVisible(false); setMediaJobsVisible(false); setProjectsVisible(true); setOpen(false); }}><BookOpen size={16} />项目</button><button className={buttonClass} onClick={showGuide}><BookOpen size={16} />开发说明</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />设置</button><button className={buttonClass} onClick={() => setOpen((value) => !value)}><MessageSquare size={16} />聊天</button></div></header>
       {(error || fishVoice.error) && <p className="example-error" role="alert">{error || fishVoice.error}</p>}
-      {plazaVisible ? <main className="example-settings example-agent-plaza"><AgentPlaza agents={agents} selectedAgentId={agentId} onSelect={(agent) => { const session = newSession(agent.id); setSessions(current => [session, ...current.filter(item => item.agentId || item.messages.length)]); setActiveId(session.id); setPlazaVisible(false); setOpen(true); }} /></main> : mediaJobsVisible ? <MediaGenerationPage onBack={() => setMediaJobsVisible(false)} /> : projectsVisible ? <ProjectsPage onBack={() => setProjectsVisible(false)} /> : guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : settings ? <main className="example-settings"><button className={buttonClass} onClick={leaveSettings}><ArrowLeft size={15} />{settingsReturn === 'media' ? '返回媒体生成' : '返回聊天'}</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'voice', label: '语音', icon: <MessageSquare /> }, { id: 'storage', label: '存储', icon: <Database /> }, { id: 'tools', label: 'Tools', icon: <Wrench /> }, { id: 'skills', label: 'Skills', icon: <Sparkles /> }, { id: 'agents', label: 'Agents', icon: <Bot /> }, { id: 'applications', label: '应用 / MCP', icon: <Blocks /> }, { id: 'approvals', label: '审批模式', icon: <Settings2 /> }]}>{settingsSection === 'agents' ? agentsSettings : settingsSection === 'voice' ? <VoiceSettings settings={fishVoice.settings} onSave={fishVoice.save} /> : settingsSection === 'storage' ? <StorageSettings /> : settingsSection === 'skills' ? skillsSettings : settingsSection === 'tools' ? <ToolsSettings /> : settingsSection === 'applications' ? <McpSettings applications={applications} onChanged={() => setApplicationRevision((value) => value + 1)} /> : settingsSection === 'approvals' ? approvalSettings : modelSettings}</SettingsPage></main> : <main className="example-home"><span className="example-eyebrow">AGENT CHAT EXAMPLE</span><h1>让网站助手<br />真正开始工作。</h1><p>使用现有聊天 UI，连接真实模型。对话、历史和 Skills 保存在本机 SQLite。</p><div className="example-actions"><button className="darl-button darl-button--default darl-button-size--default" onClick={() => setOpen(true)}><MessageSquare size={16} />打开助手</button><button className={buttonClass} onClick={showPlaza}><Bot size={16} />Agent 广场</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />模型设置</button></div><div className="example-info"><div><span>模型</span><strong>{models.find((model) => model.id === availableModelId)?.name || '尚未配置'}</strong></div><div><span>会话</span><strong>{sessions.length}</strong></div><div><span>Skills</span><strong>{skills.length}</strong></div></div><small>支持文本和图片消息与 MCP 工具调用。用 @ 引用一次即可在本对话持续使用；通过输入框的审批模式控制执行前确认。Skills 按需加载；命令在本机后端执行，文件产物可下载。</small></main>}
+      <div hidden={!studioVisible}><StudioApp onAgentCancel={() => running.current?.abort()} onAgentRequest={studioTask} onNavigate={studioNavigate} onContextChange={updateWebsiteContext} agents={agents} models={[...models, ...toMediaModels(modelConfiguration)]} /></div>
+      {!studioVisible && (plazaVisible ? <main className="example-settings example-agent-plaza"><AgentPlaza agents={agents} selectedAgentId={agentId} onSelect={(agent) => { const session = newSession(agent.id); setSessions(current => [session, ...current.filter(item => item.agentId || item.messages.length)]); setActiveId(session.id); setPlazaVisible(false); setOpen(true); }} /></main> : mediaJobsVisible ? <MediaGenerationPage onBack={() => setMediaJobsVisible(false)} /> : projectsVisible ? <ProjectsPage onBack={() => setProjectsVisible(false)} /> : guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : settings ? <main className="example-settings"><button className={buttonClass} onClick={leaveSettings}><ArrowLeft size={15} />{settingsReturn === 'studio' ? '返回短剧工作台' : settingsReturn === 'media' ? '返回媒体生成' : '返回聊天'}</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'voice', label: '语音', icon: <MessageSquare /> }, { id: 'storage', label: '存储', icon: <Database /> }, { id: 'tools', label: 'Tools', icon: <Wrench /> }, { id: 'skills', label: 'Skills', icon: <Sparkles /> }, { id: 'agents', label: 'Agents', icon: <Bot /> }, { id: 'applications', label: '应用 / MCP', icon: <Blocks /> }, { id: 'approvals', label: '审批模式', icon: <Settings2 /> }]}>{settingsSection === 'agents' ? agentsSettings : settingsSection === 'voice' ? <VoiceSettings settings={fishVoice.settings} onSave={fishVoice.save} /> : settingsSection === 'storage' ? <StorageSettings /> : settingsSection === 'skills' ? skillsSettings : settingsSection === 'tools' ? <ToolsSettings /> : settingsSection === 'applications' ? <McpSettings applications={applications} onChanged={() => setApplicationRevision((value) => value + 1)} /> : settingsSection === 'approvals' ? approvalSettings : modelSettings}</SettingsPage></main> : <main className="example-home"><span className="example-eyebrow">AGENT CHAT EXAMPLE</span><h1>让网站助手<br />真正开始工作。</h1><p>使用现有聊天 UI，连接真实模型。对话、历史和 Skills 保存在本机 SQLite。</p><div className="example-actions"><button className="darl-button darl-button--default darl-button-size--default" onClick={() => setOpen(true)}><MessageSquare size={16} />打开助手</button><button className={buttonClass} onClick={showPlaza}><Bot size={16} />Agent 广场</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />模型设置</button></div><div className="example-info"><div><span>模型</span><strong>{models.find((model) => model.id === availableModelId)?.name || '尚未配置'}</strong></div><div><span>会话</span><strong>{sessions.length}</strong></div><div><span>Skills</span><strong>{skills.length}</strong></div></div><small>支持文本和图片消息与 MCP 工具调用。用 @ 引用一次即可在本对话持续使用；通过输入框的审批模式控制执行前确认。Skills 按需加载；命令在本机后端执行，文件产物可下载。</small></main>)}
     </div>
     <AgentSidebar voice={fishVoice.voice} approvalMode={approvalMode} onApprovalModeChange={updateApprovalMode} approvalModePending={!approvalReady || approvalSaving} open={open} onOpenChange={setOpen} sessions={sessions} activeSessionId={activeId} onSessionChange={setActiveId} onSessionRename={renameSession} onSessionDelete={deleteSession}
       onNewSession={showPlaza}

@@ -1,9 +1,20 @@
-import type { MediaStyleOption } from '@darl/ui';
+import type { MediaStyleOption, StyleCreateRequest } from '@darl/ui';
 
 export type StyleRecord = {
   id: number; name: string; image_url?: string; thumbnail_url?: string; category?: string; prompt?: string;
 };
 export type StyleCatalog = { items?: StyleRecord[]; official_items?: StyleRecord[] };
+
+export async function createWorkspaceStyle(input: StyleCreateRequest): Promise<number> {
+  const body = new FormData();
+  body.set('name', input.name);
+  body.set('prompt', input.description);
+  if (input.referenceImage) body.set('reference_image', input.referenceImage);
+  const response = await fetch('/api/workspace/styles', { method: 'POST', body });
+  const value = await response.json();
+  if (!response.ok) throw new Error(value.error || `创建风格失败（HTTP ${response.status}）`);
+  return value.data.id;
+}
 
 /** Accept only shipping presets and unified file URLs; legacy storage paths are intentionally unsupported. */
 export function storageImage(key?: string | null): string | undefined {

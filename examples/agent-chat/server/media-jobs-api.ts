@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { dirname, join } from 'node:path';
 import { MediaJobStore } from './media-job-store';
@@ -53,33 +54,15 @@ function presentJob(job: import('./media-job-store').MediaJob, files: FileStore)
   });
   return resultFiles.length ? { ...safe, resultFiles } : safe;
 }
-export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration, providers:()=>StoredProvider[], files:FileStore){
+export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration, providers:()=>StoredProvider[], files:FileStore, hooks: { target?: (value: unknown, type: string) => Record<string, unknown>; completed?: (job: import('./media-job-store').MediaJob) => void } = {}){
   const store=new MediaJobStore(dbPath, files);
   const logFailure = createFailureLog(join(dirname(dbPath), 'logs'));
   const runner=new MediaJobRunner(store,(job)=>{
     const provider=providers().find(p=>p.id===job.providerId);
     return provider&&provider.apiKey?{apiKey:provider.apiKey,baseUrl:provider.baseUrl}:undefined;
-  }, (job, message, secret) => logFailure({ appId: 'builtin:media', appName: '媒体生成', toolName: job.modelId, stage: 'mcp-tool', code: job.status === 'uncertain' ? 'MEDIA_TASK_UNCERTAIN' : 'MEDIA_TASK_FAILED', message, secret }));
+  }, (job, message, secret) => logFailure({ appId: 'builtin:media', appName: '媒体生成', toolName: job.modelId, stage: 'mcp-tool', code: job.status === 'uncertain' ? 'MEDIA_TASK_UNCERTAIN' : 'MEDIA_TASK_FAILED', message, secret }), hooks.completed);
   runner.start();
-  const handle=async(req:IncomingMessage,res:ServerResponse):Promise<boolean>=>{
-    const path=new URL(req.url||'/', 'http://localhost').pathname;
-    if(!path.startsWith('/api/media-generation/'))return false;
-    if(!isLocalOrLanAddress(req.socket.remoteAddress)){reply(res,403,{error:'生成任务 API 仅允许本机或同一局域网调用'});return true;}
-    const method=req.method||'GET';
-    try{
-      if(path==='/api/media-generation/jobs' && method==='GET'){
-        reply(res,200,store.list().map((job)=>presentJob(job,files)));return true;
-      }
-      if(path==='/api/media-generation/limits' && method==='GET'){reply(res,200,store.limits());return true;}
-      if(path==='/api/media-generation/limits' && method==='POST'){
-        const input=await body(req);
-        if(typeof input.modelId!=='string'||typeof input.concurrency!=='number')throw new Error('模型和并发必填');
-        store.setLimit(input.modelId,input.concurrency);
-        await runner.tick();
-        reply(res,200,store.limits());return true;
-      }
-      if(path==='/api/media-generation/jobs' && method==='POST'){
-        const input=await body(req, MAX_MEDIA_BODY);
+  const submit = async (input: Record<string, unknown>) => {
         if(typeof input.taskId!=='string'||!input.taskId.trim()||input.taskId.length>120)throw new Error('任务 ID 无效');
         if(input.batchId!==undefined&&(typeof input.batchId!=='string'||!input.batchId.trim()||input.batchId.length>120))throw new Error('批次 ID 无效');
         if(typeof input.modelId!=='string'||!input.modelId)throw new Error('模型必填');
@@ -100,9 +83,52 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         const maxReferences=effective&&'maxReferenceImages' in effective?effective.maxReferenceImages:0;
         if(referenceCount>maxReferences)throw new Error(`参考图片最多 ${maxReferences} 张`);
         // Large data URLs stay out of the job row; adapters read the saved files.
+        const capabilities = effective as { resolutions?: string[]; aspectRatios?: string[]; durations?: number[] | { min: number; max: number } } | undefined;
+        if (typeof rawOptions.resolution === 'string' && capabilities?.resolutions && !capabilities.resolutions.includes(rawOptions.resolution)) throw new Error('模型不支持所选分辨率');
+        if (typeof rawOptions.aspectRatio === 'string' && capabilities?.aspectRatios && !capabilities.aspectRatios.includes(rawOptions.aspectRatio)) throw new Error('模型不支持所选画幅');
+        if (rawOptions.duration !== undefined && capabilities?.durations) {
+          const duration = rawOptions.duration, allowed = capabilities.durations;
+          if (typeof duration !== 'number' || !Number.isFinite(duration) || (Array.isArray(allowed) ? !allowed.includes(duration) : duration < allowed.min || duration > allowed.max)) throw new Error('片段时长不在模型支持范围内，请调整分镜组合');
+        }
+        const requestId = input.requestId;
+        if (requestId !== undefined && (typeof requestId !== 'string' || !/^[\w:.-]{1,160}$/.test(requestId))) throw new Error('生成请求编号无效');
+        const fingerprint = createHash('sha256').update(JSON.stringify([input.modelId,input.prompt,rawOptions,input.style])).digest('hex');
+        const existing = () => typeof requestId === 'string' ? store.list().find(job => job.options.studioRequestId === requestId) : undefined;
+        const previous = existing();
+        if (previous) { if (previous.options.studioFingerprint !== fingerprint) throw new Error('生成请求编号已用于其他内容'); return previous; }
+        const target = rawOptions.studioTarget !== undefined ? hooks.target?.(rawOptions.studioTarget, type) : undefined;
+        if (rawOptions.studioTarget !== undefined && !target) throw new Error('生成目标不可用');
         const options=await resolveMediaReferencesInStore(rawOptions, files);
+        if (target) options.studioTarget = target;
+        if (requestId) { options.studioRequestId = requestId; options.studioFingerprint = fingerprint; }
+        const raced = existing();
+        if (raced) { if (raced.options.studioFingerprint !== fingerprint) throw new Error('生成请求编号已用于其他内容'); return raced; }
         const style = parseStyle(input.style);
         const job=store.create({taskId:input.taskId.trim(),...(typeof input.batchId==='string'?{batchId:input.batchId.trim()}:{}),modelId:model.id,type,prompt:input.prompt.trim(),...(style ? { style } : {}),providerId:provider.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey,baseUrl:provider.baseUrl,options});
+
+        void runner.tick();
+        return job;
+  };
+  const handle=async(req:IncomingMessage,res:ServerResponse):Promise<boolean>=>{
+    const path=new URL(req.url||'/', 'http://localhost').pathname;
+    if(!path.startsWith('/api/media-generation/'))return false;
+    if(!isLocalOrLanAddress(req.socket.remoteAddress)){reply(res,403,{error:'生成任务 API 仅允许本机或同一局域网调用'});return true;}
+    const method=req.method||'GET';
+    try{
+      if(path==='/api/media-generation/jobs' && method==='GET'){
+        reply(res,200,store.list().map((job)=>presentJob(job,files)));return true;
+      }
+      if(path==='/api/media-generation/limits' && method==='GET'){reply(res,200,store.limits());return true;}
+      if(path==='/api/media-generation/limits' && method==='POST'){
+        const input=await body(req);
+        if(typeof input.modelId!=='string'||typeof input.concurrency!=='number')throw new Error('模型和并发必填');
+        store.setLimit(input.modelId,input.concurrency);
+        await runner.tick();
+        reply(res,200,store.limits());return true;
+      }
+      if(path==='/api/media-generation/jobs' && method==='POST'){
+        const input=await body(req, MAX_MEDIA_BODY);
+        const job = await submit(input);
         void runner.tick();
         reply(res,201,job);return true;
       }
@@ -146,5 +172,5 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
     }catch(error){reply(res,400,{error:error instanceof Error?error.message:'请求错误'});}
     return true;
   };
-  return {handle,runner,store};
+  return {handle,runner,store,submit};
 }

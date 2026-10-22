@@ -1,0 +1,390 @@
+@scope (.rn-studio) {
+/* =============================================================================
+ * 品牌 Token 层 · DESIGN.md v2.1（曜石黑 × 赤铜橙）
+ *
+ * 文件结构：
+ *   Part 1 主题调色板（--br-theme-*）……「换主题」只改这一块
+ *   Part 2 语义 Token（--br-*）…………组件与页面只读这一层
+ *   Part 3 尺寸 / 间距 / 字体 / 断点
+ *
+ * 换主题怎么做（三种方式，任选）：
+ *   1) 直接替换 Part 1 里的值（最省事，改完立即生效）。
+ *   2) 复制 Part 1 整块，改成 :scope[data-theme="你的主题名"] { … }，
+ *      再给 <html> 加 data-theme 即可在运行时切换，见 Part 4 示例。
+ *   3) 新增主题包文件，import 在 main.js 里本文件之后。
+ *
+ * 规则：
+ *   - 颜色只允许出现在 Part 1。Part 2 / 组件 / 页面里不得再写颜色字面量。
+ *   - 组件与页面优先读 Part 2 的语义 Token；语义层没有对应角色的个别装饰色
+ *     （如首屏光效叠层），可直接读 Part 1 的调色板变量。
+ *   - 半透明叠层统一写 rgb(var(--br-accent-rgb) / .14) 这类形式，
+ *     这样换主题只改一个色相三元组，全站所有透明度一起跟随。
+ *   - 断点统一为 1440 / 1024 / 768 / 390 / 360；侧栏断点由本文件集中维护。
+ *
+ * 「换主题」要替换的 6 个族（都在 Part 1）：
+ *   ① 1.1 深色底面（canvas / surface / elevated…）——换成新主题的底色阶
+ *   ② 1.2 文字与中性阶（ink-01 → ink-54）——换成新主题的文字阶
+ *   ③ 1.3 品牌强调与 CTA（accent / copper / peach / cta-*）
+ *   ④ 1.6 色相基元（*-rgb 三元组）——必须与 ③⑤⑥ 的实色保持同色
+ *   ⑤ 1.7 叠层 · 描边 · 辉光（accent-wash-* / hairline-* / hero-tint-* / glow）
+ *   ⑥ 1.4 状态色、1.5 分类与轨道色——保留功能语义，通常只微调明度
+ *   Part 2 / Part 3 一律不需要改；组件代码零改动。
+ * ============================================================================ */
+
+/* =============================================================================
+ * Part 1 · 主题调色板
+ * 曜石黑 × 赤铜橙。1.2 中性阶（ink）与 1.7 叠层是当前页面在用值的原样登记
+ * （同值换名，零视觉变化），换主题时整族替换即可。
+ * ============================================================================ */
+:scope {
+  /* ---------- 1.1 深色底面 ---------- */
+  --br-theme-canvas: #0B0C0E;              /* 页面最深底色 */
+  --br-theme-canvas-deep: #141316;         /* 首屏最深处 */
+  --br-theme-surface: #171719;             /* 常规面板、项目卡 */
+  --br-theme-surface-plate: #191719;       /* 首屏左栏底板 */
+  --br-theme-surface-warm: #191311;        /* 首屏右栏底板（暖倾向） */
+  --br-theme-hero-edge: #181719;           /* 首屏主区渐变中段 */
+  --br-theme-surface-raised: #202024;      /* 高一层面板、控件底色 */
+  --br-theme-surface-raised-soft: #202023;
+  --br-theme-elevated: #1C1C1E;
+  --br-theme-elevated-warm: #211D1C;
+  --br-theme-elevated-plate: #1B1A1B;
+  --br-theme-elevated-2: #242021;
+  --br-theme-elevated-3: #292423;
+  --br-theme-elevated-copper: #2A2119;
+  --br-theme-elevated-flat: #2B2B2E;
+  --br-theme-elevated-strong: #252122;
+  --br-theme-sidebar-edge: #151414;        /* 侧栏渐变起点 */
+  --br-theme-input: #151516;
+  --br-theme-dialog: #1B1B1D;
+  --br-theme-media-placeholder: #222222;   /* 封面未加载时的占位底 */
+  --br-theme-divider: #393939;             /* 菜单里的实心分隔线 */
+  --br-theme-brand-dot: #1B1713;           /* 品牌字标方块内的深色描边 */
+  --br-theme-avatar-high: #8B674F;         /* 头像渐变亮端 */
+
+  /* ---------- 1.2 文字与中性阶（ink-01 最亮 → ink-52 最暗）---------- */
+  --br-theme-ink-01: #FFF7F0;
+  --br-theme-ink-02: #FFF4E9;
+  --br-theme-ink-03: #FFF4E8;
+  --br-theme-ink-04: #FFF3E6;
+  --br-theme-ink-05: #FFF0E5;
+  --br-theme-ink-06: #FFF0DE;
+  --br-theme-ink-07: #F8EEE5;
+  --br-theme-ink-08: #F5EEE6;              /* 正文主色 --br-text-primary */
+  --br-theme-ink-09: #F6EAE0;
+  --br-theme-ink-10: #F4EAE2;
+  --br-theme-ink-11: #F9E6D6;
+  --br-theme-ink-12: #E6DCD3;
+  --br-theme-ink-13: #DDDDDD;
+  --br-theme-ink-14: #DAD4D0;
+  --br-theme-ink-15: #FFE1C8;
+  --br-theme-ink-16: #FFE0C4;
+  --br-theme-ink-17: #FFD4AE;
+  --br-theme-ink-18: #FFD1B0;
+  --br-theme-ink-19: #FFC99B;
+  --br-theme-ink-20: #FFC796;
+  --br-theme-ink-21: #FFB77D;
+  --br-theme-ink-22: #FFAA6E;
+  --br-theme-ink-23: #FFA764;
+  --br-theme-ink-24: #FFA760;
+  --br-theme-ink-25: #F9AA71;
+  --br-theme-ink-26: #F4A96E;
+  --br-theme-ink-27: #CBBEB5;
+  --br-theme-ink-28: #C2B5AE;
+  --br-theme-ink-29: #BDB0A7;
+  --br-theme-ink-30: #BB9E88;
+  --br-theme-ink-31: #B9B6B7;
+  --br-theme-ink-32: #B8B0AD;
+  --br-theme-ink-33: #B7A99F;
+  --br-theme-ink-34: #B4ABA5;
+  --br-theme-ink-35: #B3ABAD;
+  --br-theme-ink-36: #AC8A73;
+  --br-theme-ink-37: #AAA5A1;
+  --br-theme-ink-38: #AAA29C;
+  --br-theme-ink-39: #A9A2A0;
+  --br-theme-ink-40: #A7A3A2;              /* 次级文字 --br-text-secondary */
+  --br-theme-ink-41: #A19D9C;
+  --br-theme-ink-42: #999397;
+  --br-theme-ink-43: #999394;
+  --br-theme-ink-44: #8B8886;
+  --br-theme-ink-45: #89868A;
+  --br-theme-ink-46: #898583;
+  --br-theme-ink-47: #817B78;
+  --br-theme-ink-48: #777777;
+  --br-theme-ink-49: #75767A;              /* 装饰文字 --br-text-decorative */
+  --br-theme-ink-50: #6F6967;
+  --br-theme-ink-51: #6E6D72;
+  --br-theme-ink-52: #656266;
+  --br-theme-ink-53: #FBE4D1;              /* 交互悬停亮字 */
+  --br-theme-ink-54: #EDE1D7;              /* 输入控件文字 */
+  --br-theme-copper-deep: #75503A;         /* 提示条描边 */
+  --br-theme-copper-deep-2: #715845;       /* 头像描边 */
+
+  /* ---------- 1.3 品牌强调与 CTA ---------- */
+  --br-theme-accent: #FF9B52;              /* 焦点、选中指示、橙色交互 */
+  --br-theme-accent-nav-text: #FFBB86;
+  --br-theme-copper: #E79D68;
+  --br-theme-peach: #FFD0A1;
+  --br-theme-cta-start: #FFB26E;
+  --br-theme-cta-end: #F38341;
+  --br-theme-cta-border: #FFC28D;
+  --br-theme-on-accent: #241309;
+
+  /* ---------- 1.4 语义状态 ---------- */
+  --br-theme-success: #7BC5A5;
+  --br-theme-warning: #E9B66B;
+  --br-theme-error: #EF8585;
+
+  /* ---------- 1.5 分类与轨道语义色 ---------- */
+  --br-theme-category-character: #A7C985;
+  --br-theme-category-scene: #80B9CD;
+  --br-theme-category-prop: #D3A078;
+  --br-theme-track-video: #D6A06D;
+  --br-theme-track-dialogue: #9BAFD4;
+  --br-theme-track-music: #B7A0CC;
+  --br-theme-track-effect: #7FBEAF;
+  --br-theme-track-text: #ABB2BB;
+
+  /* ---------- 1.6 色相基元（RGB 三元组）----------
+   * 供半透明叠层使用：rgb(var(--br-theme-X-rgb) / .14)。
+   * 换主题时只改这里的三个数字，全站该色相的所有透明度叠层一起跟随。
+   * 与 1.3 / 1.4 / 1.5 的实色一一对应，值必须保持一致。 */
+  --br-theme-accent-rgb: 255 155 82;
+  --br-theme-success-rgb: 123 197 165;
+  --br-theme-warning-rgb: 233 182 107;
+  --br-theme-error-rgb: 239 133 133;
+  --br-theme-category-character-rgb: 167 201 133;
+  --br-theme-category-scene-rgb: 128 185 205;
+  --br-theme-category-prop-rgb: 211 160 120;
+  --br-theme-track-video-rgb: 214 160 109;
+  --br-theme-track-dialogue-rgb: 155 175 212;
+  --br-theme-track-music-rgb: 183 160 204;
+  --br-theme-track-effect-rgb: 127 190 175;
+  --br-theme-track-text-rgb: 171 178 187;
+
+  /* ---------- 1.7 叠层 · 描边 · 辉光 ---------- */
+  --br-theme-border: rgba(255, 255, 255, 0.105);
+  --br-theme-hairline-07: rgba(255, 255, 255, 0.07);
+  --br-theme-hairline-09: rgba(255, 255, 255, 0.09);
+  --br-theme-hairline-10: rgba(255, 255, 255, 0.1);
+  --br-theme-hairline-11: rgba(255, 255, 255, 0.11);
+  --br-theme-hairline-12: rgba(255, 255, 255, 0.12);
+  --br-theme-hairline-13: rgba(255, 255, 255, 0.13);
+  --br-theme-hairline-14: rgba(255, 255, 255, 0.14);
+  --br-theme-hairline-24: rgba(255, 255, 255, 0.24);
+  --br-theme-wash-hover: rgba(255, 255, 255, 0.045);
+  --br-theme-overlay-topbar: rgba(19, 19, 20, 0.76);
+  --br-theme-overlay-composer: rgba(10, 11, 13, 0.46);
+  /* 说明：投影（box-shadow）一律使用纯黑 rgba(0,0,0,α)，与主题无关，保持字面量不登记。 */
+  --br-theme-scrim-warm: rgba(7, 8, 10, 0.88);
+  --br-theme-sidebar-scrim: rgba(3, 3, 5, 0.3);
+  --br-theme-menu-scrim: rgba(16, 16, 18, 0.96);
+  --br-theme-hero-tint-30: rgba(12, 9, 8, 0.3);
+  --br-theme-hero-tint-36: rgba(20, 16, 16, 0.36);
+  --br-theme-hero-tint-38: rgba(75, 49, 36, 0.38);
+  --br-theme-hero-tint-70: rgba(42, 29, 27, 0.7);
+  --br-theme-glow: rgba(244, 139, 62, 0.22);   /* 仅表现层光效，不得作按钮底色或语义色 */
+  --br-theme-accent-wash-02: rgba(255, 164, 97, 0.02);
+  --br-theme-accent-wash-09: rgba(193, 93, 39, 0.09);
+  --br-theme-accent-wash-11: rgba(238, 129, 67, 0.11);
+  --br-theme-accent-wash-12: rgba(178, 109, 66, 0.12);
+  --br-theme-accent-wash-12b: rgba(137, 68, 25, 0.12);
+  --br-theme-accent-wash-15: rgba(239, 169, 114, 0.15);
+  --br-theme-accent-wash-18: rgba(246, 124, 49, 0.18);
+  --br-theme-accent-wash-24: rgba(232, 165, 117, 0.24);
+  --br-theme-accent-wash-28: rgba(205, 115, 55, 0.28);
+  --br-theme-accent-wash-28b: rgba(176, 96, 42, 0.28);
+  --br-theme-accent-wash-33: rgba(252, 155, 76, 0.33);
+  --br-theme-accent-wash-33b: rgba(244, 157, 98, 0.33);
+  --br-theme-accent-wash-35: rgba(239, 169, 114, 0.35);
+  --br-theme-accent-wash-45: rgba(249, 177, 113, 0.45);
+  --br-theme-accent-wash-47: rgba(226, 143, 83, 0.47);
+  --br-theme-accent-wash-55: rgba(255, 159, 98, 0.55);
+  --br-theme-accent-wash-56: rgba(236, 147, 80, 0.56);
+  --br-theme-accent-wash-60: rgba(249, 177, 113, 0.6);
+  --br-theme-accent-wash-65: rgba(242, 154, 87, 0.65);
+}
+
+/* =============================================================================
+ * Part 2 · 语义 Token（组件与页面只读这一层）
+ * 全部指向 Part 1，本身不写颜色。换主题不需要改这里。
+ * ============================================================================ */
+:scope {
+  /* ---------- 基底与面板 ---------- */
+  --br-canvas: var(--br-theme-canvas);
+  --br-surface: var(--br-theme-surface);
+  --br-surface-raised: var(--br-theme-surface-raised);
+  --br-input-bg: var(--br-theme-input);
+  --br-dialog-bg: var(--br-theme-dialog);
+
+  /* ---------- 边框与叠层 ---------- */
+  --br-border: var(--br-theme-border);
+  --br-topbar-overlay: var(--br-theme-overlay-topbar);
+  --br-composer-overlay: var(--br-theme-overlay-composer);
+  --br-sidebar-gradient: linear-gradient(110deg, var(--br-theme-sidebar-edge), var(--br-theme-canvas) 65%);
+  --br-glow: var(--br-theme-glow);
+
+  /* ---------- 文字 ---------- */
+  --br-text-primary: var(--br-theme-ink-08);
+  --br-text-secondary: var(--br-theme-ink-40);
+  --br-text-decorative: var(--br-theme-ink-49);   /* 3.95:1，禁止用于 12–14px 正文/提示/错误解释 */
+
+  /* ---------- 品牌橙与 CTA ---------- */
+  --br-accent: var(--br-theme-accent);
+  --br-accent-nav-text: var(--br-theme-accent-nav-text);
+  --br-copper: var(--br-theme-copper);
+  --br-peach: var(--br-theme-peach);
+  --br-cta-start: var(--br-theme-cta-start);
+  --br-cta-end: var(--br-theme-cta-end);
+  --br-cta-border: var(--br-theme-cta-border);
+  --br-on-accent: var(--br-theme-on-accent);
+  --br-focus: var(--br-theme-accent);
+  /* CTA 是渐变，不是单一橙色；仅一级 CTA 使用，危险操作禁用 */
+  --br-cta-gradient: linear-gradient(180deg, var(--br-cta-start) 0%, var(--br-cta-end) 100%);
+
+  /* ---------- 语义状态 ---------- */
+  --br-success: var(--br-theme-success);
+  --br-warning: var(--br-theme-warning);
+  --br-error: var(--br-theme-error);
+
+  /* ---------- 分类与轨道语义色 ----------
+   * 仅用于类型标识（小标签、左边线、图标、细色条），不得刷整张卡片/主按钮/大面积面板。
+   * 选中/激活/焦点与运行中进度一律用 --br-accent；成功/警告/失败用对应状态色。 */
+  --br-category-character: var(--br-theme-category-character);   /* 角色标签、角色引用芯片 */
+  --br-category-scene: var(--br-theme-category-scene);           /* 场景标签、场景引用芯片 */
+  --br-category-prop: var(--br-theme-category-prop);             /* 道具标签、道具引用芯片 */
+  --br-track-video: var(--br-theme-track-video);                 /* 视频轨片段/轨道标记 */
+  --br-track-dialogue: var(--br-theme-track-dialogue);           /* 对白/配音轨、波形小标识 */
+  --br-track-music: var(--br-theme-track-music);                 /* 音乐轨、音乐素材标签 */
+  --br-track-effect: var(--br-theme-track-effect);               /* 音效/环境声轨标签 */
+  --br-track-text: var(--br-theme-track-text);                   /* 字幕、文字、叠加片段标签 */
+  --br-progress: var(--br-accent);          /* 运行中进度 */
+  --br-status-complete: var(--br-success);  /* 成功/已完成 */
+  --br-status-warning: var(--br-warning);   /* 警告/待检查 */
+  --br-status-failed: var(--br-error);      /* 失败/删除 */
+
+  /* ---------- 色相基元别名（半透明叠层专用） ----------
+   * 用法：rgb(var(--br-accent-rgb) / .14)，替换原来的 rgba(255,155,82,.14)。
+   * 好处：一个色相只需在 Part 1 改一次，所有透明度叠层同时跟随主题。 */
+  --br-accent-rgb: var(--br-theme-accent-rgb);
+  --br-success-rgb: var(--br-theme-success-rgb);
+  --br-warning-rgb: var(--br-theme-warning-rgb);
+  --br-error-rgb: var(--br-theme-error-rgb);
+  --br-category-character-rgb: var(--br-theme-category-character-rgb);
+  --br-category-scene-rgb: var(--br-theme-category-scene-rgb);
+  --br-category-prop-rgb: var(--br-theme-category-prop-rgb);
+  --br-track-video-rgb: var(--br-theme-track-video-rgb);
+  --br-track-dialogue-rgb: var(--br-theme-track-dialogue-rgb);
+  --br-track-music-rgb: var(--br-theme-track-music-rgb);
+  --br-track-effect-rgb: var(--br-theme-track-effect-rgb);
+  --br-track-text-rgb: var(--br-theme-track-text-rgb);
+
+  /* ---------- 兼容别名（供已迁移页面按语义取值） ---------- */
+  --br-page-bg: var(--br-canvas);
+  --br-panel-bg: var(--br-surface);
+  --br-panel-raised-bg: var(--br-surface-raised);
+}
+
+/* =============================================================================
+ * Part 3 · 尺寸 / 间距 / 字体 / 断点（与主题无关，换主题不需要改）
+ * ============================================================================ */
+:scope {
+  /* ---------- 圆角（出自首页组件实值，非全站单一值） ---------- */
+  --br-radius-xs: 7px;       /* 小参数输入框 */
+  --br-radius-sm: 8px;       /* 搜索输入、简单次级控件 */
+  --br-radius-md: 9px;       /* 导航项与主按钮 */
+  --br-radius-control: 10px; /* 个别常规控件容错值，不是统一卡片圆角 */
+  --br-radius-card: 11px;    /* 项目卡片 */
+  --br-radius-lg: 12px;      /* 创作输入区 .composer */
+  --br-radius-xl: 13px;      /* 六步工作流外围 */
+  --br-radius-dialog: 15px;  /* 弹窗 */
+  --br-radius-hero: 16px;    /* 首页双栏主创作区 */
+  --br-radius-full: 9999px;
+
+  /* ---------- 间距 ---------- */
+  --br-space-xxs: 4px;
+  --br-space-xs: 8px;
+  --br-space-sm: 12px;
+  --br-space-md: 16px;
+  --br-space-lg: 20px;
+  --br-space-xl: 24px;
+  --br-space-xxl: 32px;
+  --br-space-xxxl: 40px;
+
+  /* ---------- 字体栈（回退栈，不下载字体） ---------- */
+  --br-font-sans: Inter, -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei',
+    'Noto Sans SC', sans-serif;
+  --br-font-brand: STKaiti, KaiTi, 'Songti SC', serif;   /* 仅品牌字标 */
+  --br-font-hero: 'Songti SC', 'Noto Serif SC', serif;   /* 仅首页 hero 标题 */
+
+  /* ---------- 字号与字重 ---------- */
+  --br-text-micro: 11px;
+  --br-text-caption: 12px;
+  --br-text-label: 13px;
+  --br-text-body: 14px;
+  --br-text-section: 21px;
+  --br-text-page: 24px;
+  --br-text-hero: 25px;
+  --br-weight-regular: 400;
+  --br-weight-medium: 500;
+  --br-weight-semibold: 600;
+  --br-weight-bold: 700;
+
+  /* ---------- 组件尺寸 ---------- */
+  --br-topbar-h: 61px;
+  --br-nav-item-h: 46px;
+  --br-btn-h: 40px;
+  --br-input-h: 35px;
+  --br-side: 242px;
+
+  /* ---------- 主内容区 ---------- */
+  --br-content-width: min(1280px, calc(100% - 88px));
+  --br-page-gap-top: 47px;
+}
+
+/* =============================================================================
+ * Part 4 · 新增主题示例（一个「冷蓝」主题）
+ * 复制 Part 1 的整块，改成新主题的值即可；组件代码零改动。
+ * 最小可用做法：① 底色阶 ② 文字阶 ③ 品牌橙族 ④ 色相基元 ⑤ 叠层族。
+ * 只写与默认主题不同的项，其余继承默认值。
+ *
+ * :scope[data-theme="cold-blue"] {
+ *   --br-theme-canvas: #0A0D12;
+ *   --br-theme-surface: #131820;
+ *   --br-theme-accent: #4FA3D1;
+ *   --br-theme-cta-start: #6FC0E8;
+ *   --br-theme-cta-end: #2F7FB0;
+ *   --br-theme-cta-border: #9FD2EE;
+ *   --br-theme-peach: #9FD2EE;
+ *   --br-theme-copper: #7FB6D6;
+ *   --br-theme-accent-nav-text: #9FD2EE;
+ *   --br-theme-on-accent: #06131B;
+ *   --br-theme-glow: rgba(79, 163, 209, .22);
+ *   --br-theme-accent-rgb: 79 163 209;                    —— 必须与 --br-theme-accent 同色
+ *   --br-theme-accent-wash-11: rgba(79, 163, 209, .11);   —— wash 整族换成同色相
+ *   --br-theme-accent-wash-28: rgba(79, 163, 209, .28);
+ *   --br-theme-hero-tint-38: rgba(41, 66, 84, .38);
+ *   ……
+ * }
+ * 启用：document.documentElement.dataset.theme = 'cold-blue'
+ * ============================================================================ */
+
+/* 桌面侧栏三档：242 / 216 / 190（DESIGN.md v2.0 Layout） */
+@media (max-width: 1380px) {
+  :scope { --br-side: 216px; }
+}
+@media (max-width: 1100px) {
+  :scope { --br-side: 190px; }
+}
+/* ≤800px 由页面自行隐藏侧栏并提供手机可达导航（不得用 display:none 删除必需操作） */
+@media (max-width: 800px) {
+  :scope { --br-topbar-h: 56px; }
+}
+@media (max-width: 1100px) {
+  :scope { --br-text-hero: 23px; }
+}
+@media (max-width: 480px) {
+  :scope { --br-text-hero: 22px; }
+}
+
+}

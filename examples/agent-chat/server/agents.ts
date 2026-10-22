@@ -19,6 +19,7 @@ export function validateAgent(value: unknown, existing: StoredAgent[] = []): Sto
   if (typeof item.id !== 'string' || !idPattern.test(item.id) || typeof item.name !== 'string' || !item.name.trim()) throw new Error('Agent ID 或名称无效');
   if (item.avatar !== undefined && (typeof item.avatar !== 'string' || /[\u0000-\u001f\u007f]/.test(item.avatar) || (item.avatar.startsWith('data:image/') ? item.avatar.length > 12_000_000 || !/^data:image\/(?:png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/i.test(item.avatar) : item.avatar.length > 1000))) throw new Error('Agent 头像格式无效');
   if (typeof item.instructions !== 'string' || !item.instructions.trim()) throw new Error('Agent 系统提示词不能为空');
+  if (item.websiteInstructions !== undefined && typeof item.websiteInstructions !== 'string') throw new Error('网站专用系统提示词必须为文本');
   const skillIds = list(item.skillIds, 'Skill');
   const applicationIds = list(item.applicationIds, '应用', 20);
   if (item.enabled !== undefined && typeof item.enabled !== 'boolean') throw new Error('Agent 启用状态无效');
@@ -52,6 +53,7 @@ export function validateAgent(value: unknown, existing: StoredAgent[] = []): Sto
     avatar: typeof item.avatar === 'string' ? item.avatar.trim() || undefined : undefined,
     description: typeof item.description === 'string' ? item.description.trim().slice(0, 500) : undefined,
     instructions: item.instructions,
+    ...(item.websiteInstructions !== undefined ? { websiteInstructions: item.websiteInstructions } : {}),
     skillIds,
     ...(applicationIds.length ? { applicationIds } : {}),
     contextPolicy: { ...contextPolicy },

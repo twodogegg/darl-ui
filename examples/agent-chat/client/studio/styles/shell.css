@@ -1,0 +1,95 @@
+@scope (.rn-studio) {
+
+/* 视觉规范：DESIGN.md v2.0（曜石黑 × 赤铜橙）。外壳仅负责侧栏、顶栏与移动导航，页面内容由插槽提供。 */
+.app { min-height: 100dvh; display: grid; grid-template-columns: var(--br-side) minmax(0, 1fr); background: var(--br-canvas); color: var(--br-text-primary); font-family: var(--br-font-sans); color-scheme: dark; }
+.skip-link { position: fixed; top: 12px; left: 12px; z-index: 60; padding: 12px; border-radius: var(--br-radius-sm); background: var(--br-surface-raised); transform: translateY(-180%); }
+.skip-link:focus { transform: none; }
+
+/* ---------- 侧栏 ---------- */
+.br-sidebar { position: sticky; top: 0; height: 100dvh; align-self: start; display: flex; flex-direction: column; overflow: hidden; background: var(--br-sidebar-gradient); border-right: 1px solid var(--br-theme-hairline-11); isolation: isolate; z-index: 10; }
+.br-brand { display: flex; align-items: center; gap: 12px; padding: 29px 27px 25px; min-height: 99px; }
+.br-brand-symbol { width: 47px; height: 49px; flex: 0 0 auto; color: var(--br-peach); filter: drop-shadow(0 0 14px var(--br-theme-accent-wash-33)); }
+.br-brand-symbol svg { width: 100%; height: 100%; }
+.br-brand-symbol svg [stroke="#1b1713"] { stroke: var(--br-theme-brand-dot); }
+.br-brand-title { display: block; font-family: var(--br-font-brand); font-size: 24px; font-weight: 700; letter-spacing: 2px; color: var(--br-theme-ink-03); white-space: nowrap; }
+.br-brand-sub { display: block; margin-top: 4px; font-size: 9px; line-height: 1.2; letter-spacing: 2.6px; color: var(--br-theme-ink-41); white-space: nowrap; }
+.br-menu { padding: 11px 15px; display: flex; flex-direction: column; gap: 6px; }
+.br-group-title { padding: 13px 17px 8px; font-size: 10px; letter-spacing: 2px; color: var(--br-theme-ink-52); }
+.br-menu-divider { height: 1px; margin: 15px 12px 2px; background: var(--br-theme-hairline-10); }
+.br-nav { width: 100%; height: 46px; padding: 0 17px; display: flex; align-items: center; gap: 13px; border: 1px solid transparent; border-radius: var(--br-radius-md); background: transparent; color: var(--br-theme-ink-31); font-size: var(--br-text-label); text-align: left; transition: .16s; }
+.br-nav svg { width: 18px; height: 18px; flex: 0 0 auto; }
+.br-nav:hover { color: var(--br-theme-ink-05); background: var(--br-theme-wash-hover); }
+.br-nav--active { background: linear-gradient(90deg, var(--br-theme-accent-wash-28), var(--br-theme-accent-wash-11)); border-color: var(--br-theme-accent-wash-33b); box-shadow: inset 3px 0 0 var(--br-accent); color: var(--br-accent-nav-text); font-weight: 600; }
+.br-flow { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 4px; padding: 4px 15px 20px; overflow-y: auto; }
+.br-flow .br-group-title { padding: 11px 17px 8px; }
+.br-flow-head { display: flex; align-items: center; gap: 9px; margin: 4px 0 6px; padding: 9px 12px 9px 8px; border: 1px solid var(--br-theme-hairline-10); border-radius: var(--br-radius-md); background: var(--br-theme-surface-raised-soft); }
+.br-flow-back { flex: 0 0 auto; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 6px; color: var(--br-theme-ink-41); font-size: 10px; }
+.br-flow-back:hover { color: var(--br-accent); background: var(--br-theme-wash-hover); }
+.br-flow-project { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--br-theme-ink-14); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.br-flow-scope { flex: 0 0 auto; padding: 2px 6px; border: 1px solid var(--br-theme-accent-wash-28); border-radius: 4px; color: var(--br-accent); font-size: 9px; white-space: nowrap; }
+.br-flow-foot { margin-top: auto; padding-top: 10px; }
+.br-flow-foot .br-group-title { padding-left: 8px; }
+.br-flow-exit { display: grid; place-items: center; height: 34px; margin-top: 8px; border: 1px solid var(--br-theme-hairline-12); border-radius: var(--br-radius-sm); color: var(--br-theme-ink-41); font-size: 11px; }
+.br-flow-exit:hover { color: var(--br-theme-ink-12); border-color: var(--br-theme-accent-wash-33b); }
+.br-flow-step { display: flex; align-items: center; gap: 11px; min-height: 42px; padding: 0 12px; border: 1px solid transparent; border-radius: var(--br-radius-md); color: var(--br-theme-ink-31); font-size: var(--br-text-label); transition: .16s; }
+.br-flow-step:hover { color: var(--br-theme-ink-05); background: var(--br-theme-wash-hover); }
+.br-flow-icon { display: grid; place-items: center; width: 26px; height: 26px; flex: 0 0 auto; border-radius: 7px; background: var(--br-theme-surface-raised-soft); color: var(--br-theme-ink-37); }
+.br-flow-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.br-flow-num { margin-right: 6px; font-size: 9px; letter-spacing: 1px; color: var(--br-theme-ink-47); }
+.br-flow-state { margin-left: auto; flex: 0 0 auto; font-size: 9px; color: var(--br-theme-ink-47); }
+.br-flow-state.done { color: var(--br-accent); }
+.br-flow-state.active { color: var(--br-accent); }
+.br-flow-step--active { background: linear-gradient(90deg, var(--br-theme-accent-wash-28), var(--br-theme-accent-wash-11)); border-color: var(--br-theme-accent-wash-33b); box-shadow: inset 3px 0 0 var(--br-accent); color: var(--br-accent-nav-text); font-weight: 600; }
+.br-flow-step--active .br-flow-icon { background: var(--br-theme-accent-wash-24); color: var(--br-accent); }
+.br-flow-step--plain .br-flow-state { display: none; }
+.br-flow-episode { width: 100%; height: 34px; margin: 2px 0 4px; padding: 0 10px; border: 1px solid var(--br-theme-hairline-13); border-radius: var(--br-radius-xs); background: var(--br-input-bg); color: var(--br-theme-ink-22); font: 400 var(--br-text-caption) var(--br-font-sans); }
+.br-flow-episode:focus { outline: none; border-color: var(--br-accent); }
+.br-flow-step--active .br-flow-num, .br-flow-step--active .br-flow-state { color: var(--br-accent); }
+.br-sidebar-art { position: absolute; inset: auto 0 0; height: 38%; z-index: -1; background: linear-gradient(0deg, var(--br-theme-sidebar-scrim), var(--br-theme-canvas) 100%), url('/studio-assets/home-redesign/sidebar-backdrop.jpg') center bottom / cover no-repeat; opacity: .7; }
+.br-sidebar-quote { margin-top: auto; padding: 34px 30px 33px; font-family: var(--br-font-hero); font-size: 25px; line-height: 1.55; letter-spacing: 3px; color: var(--br-theme-ink-02); text-shadow: 0 1px 20px #000; }
+.br-sidebar-quote b { display: block; margin: 12px 0; width: 21px; height: 2px; background: var(--br-accent); box-shadow: 0 0 12px var(--br-accent); }
+.br-sidebar-quote small { display: block; font: 9px/1.6 var(--br-font-sans); letter-spacing: 1.8px; color: var(--br-theme-ink-36); }
+
+/* ---------- 顶栏 ---------- */
+.br-main { min-width: 0; position: relative; background: radial-gradient(ellipse 58% 33% at 69% 9%, var(--br-theme-accent-wash-12b), transparent 68%), var(--br-canvas); }
+.br-topbar { position: sticky; top: 0; z-index: 40; height: var(--br-topbar-h); display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 clamp(22px, 4.1vw, 66px); border-bottom: 1px solid var(--br-theme-hairline-09); background: var(--br-topbar-overlay); backdrop-filter: blur(16px); }
+.br-crumb { display: flex; align-items: center; gap: 7px; color: var(--br-theme-ink-45); font-size: var(--br-text-caption); }
+.br-crumb strong { color: var(--br-theme-ink-12); font-weight: 500; }
+.br-mobile-mark { display: none; color: var(--br-theme-ink-25); }
+.br-top-actions { display: flex; align-items: center; gap: 19px; }
+
+/* ---------- 主内容 ---------- */
+.br-content { width: var(--br-content-width); margin: 0 auto; padding: var(--br-page-gap-top) 0 75px; }
+/* 创作页满幅模式：内容区不再限宽与留白，由页面自身占满顶栏以下的可用高度 */
+.br-content--flush { width: 100%; max-width: none; margin: 0; padding: 0; min-height: 1px; height: calc(100dvh - var(--br-topbar-h)); display: flex; flex-direction: column; overflow: auto; }
+
+/* ---------- 移动端导航 ---------- */
+.br-mobile-nav { display: none; }
+
+@media (max-width: 1380px) {
+  .br-brand { padding-left: 20px; padding-right: 10px; }
+  .br-sidebar-quote { padding-left: 22px; }
+  .br-content { width: min(1220px, calc(100% - 58px)); padding-top: 39px; }
+}
+@media (max-width: 1100px) {
+  .br-content { width: calc(100% - 40px); }
+  .br-topbar { padding: 0 22px; }
+  .br-sidebar-quote { font-size: 20px; }
+}
+@media (max-width: 800px) {
+  .br-mobile-mark { display: block; }
+  .app, .app--flow { display: block; }
+  .br-sidebar { display: none; }
+  .br-topbar { height: var(--br-topbar-h); padding: 0 18px; }
+  .br-content { width: calc(100% - 36px); padding: 29px 0 100px; }
+  .br-content--flush { width: 100%; padding: 0; height: calc(100dvh - var(--br-topbar-h) - 61px - env(safe-area-inset-bottom)); }
+  .br-mobile-nav { position: fixed; inset: auto 0 0; z-index: 20; height: calc(61px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); display: flex; justify-content: space-around; background: var(--br-theme-menu-scrim); border-top: 1px solid var(--br-theme-hairline-12); backdrop-filter: blur(16px); }
+  .br-mobile-nav a, .br-mobile-nav button { width: 25%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 0; background: transparent; color: var(--br-theme-ink-43); font-size: 10px; }
+  .br-mobile-nav--active { color: var(--br-theme-ink-22); }
+  .br-mobile-nav svg { width: 19px; height: 19px; }
+}
+@media (max-width: 600px) {
+  .br-crumb { font-size: 11px; }
+  .br-top-actions { gap: 12px; }
+}
+}

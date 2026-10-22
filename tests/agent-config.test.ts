@@ -5,6 +5,12 @@ import { mentionedAgents, publicAgent, validateAgent, validateAgents } from '../
 const agent = (id: string) => ({ id, name: id, instructions: `负责 ${id}` });
 
 describe('server-managed Agent configuration', () => {
+  it('preserves optional website instructions, supports clearing, and rejects invalid values', () => {
+    expect(validateAgent(agent('old')).websiteInstructions).toBeUndefined();
+    expect(validateAgent({ ...agent('site'), websiteInstructions: '网站规则\n保留换行' }).websiteInstructions).toBe('网站规则\n保留换行');
+    expect(validateAgent({ ...agent('site'), websiteInstructions: '' }).websiteInstructions).toBe('');
+    expect(() => validateAgent({ ...agent('site'), websiteInstructions: 12 })).toThrow('网站专用');
+  });
   it('resolves explicit contacts by stable ID, including callable main Agents', () => {
     const entries = [validateAgent(agent('main')), validateAgent(agent('peer')), validateAgent({ ...agent('child'), type: 'sub_agent' })];
     expect(mentionedAgents('[任意名称](agent:peer) [重复](agent:peer) [专家](agent:child)', entries, 'main').map(item => item.id)).toEqual(['peer', 'child']);

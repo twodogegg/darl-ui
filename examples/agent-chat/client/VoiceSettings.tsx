@@ -11,6 +11,12 @@ async function result<T>(response: Response): Promise<T> {
   return data as T;
 }
 
+export const loadVoiceCatalog: AgentVoice['loadVoices'] = async (query, page, signal, filters) => {
+  const params = new URLSearchParams({ q: query, page: String(page), language: filters?.language ?? 'zh', sort: filters?.sort || 'score' });
+  filters?.tags?.forEach((tag) => params.append('tag', tag));
+  return result(await fetch(`/api/voice/voices?${params}`, { signal }));
+};
+
 export function useFishVoice() {
   const [settings, setSettings] = useState<Settings>({ ...defaultVoiceSettings, hasApiKey: false });
   const [error, setError] = useState('');
@@ -40,11 +46,7 @@ export function useFishVoice() {
     });
     return task;
   }, []);
-  const loadVoices = useCallback<AgentVoice['loadVoices']>(async (query, page, signal, filters) => {
-    const params = new URLSearchParams({ q: query, page: String(page), language: filters?.language ?? 'zh', sort: filters?.sort || 'score' });
-    filters?.tags?.forEach((tag) => params.append('tag', tag));
-    return result(await fetch(`/api/voice/voices?${params}`, { signal }));
-  }, []);
+  const loadVoices = loadVoiceCatalog;
   const synthesize = useCallback<AgentVoice['synthesize']>(async (text, voiceId, signal) => {
     const response = await fetch('/api/voice/speech', { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voiceId }) });
     if (!response.ok) { await result(response); throw new Error('语音请求失败'); }

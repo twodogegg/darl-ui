@@ -33,6 +33,14 @@ export async function resolveMediaReferencesInStore(options: Record<string, unkn
   if (!('references' in options) || options.references === undefined) return options;
   if (!Array.isArray(options.references)) throw new Error('参考素材必须是数组');
   const references = await Promise.all(options.references.map(async (reference) => {
+    const url = typeof reference === 'string' ? reference : reference && typeof reference === 'object' ? (reference as { url?: unknown }).url : undefined;
+    const local = typeof url === 'string' && /^\/api\/files\/([^/?#]+)(?:\/thumbnail)?(?:[?#].*)?$/.exec(url);
+    if (local) {
+      const file = files.get(decodeURIComponent(local[1]));
+      if (!file) throw new Error('参考素材文件不存在');
+      if (!file.mimeType.startsWith('image/')) throw new Error('参考素材必须是图片');
+      return storedReference(file);
+    }
     if (!reference || typeof reference !== 'object' || typeof (reference as { fileId?: unknown }).fileId !== 'string') return reference;
     const item = reference as { fileId: string; url?: unknown; name?: unknown };
     const existing = files.get(item.fileId);

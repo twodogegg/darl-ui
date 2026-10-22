@@ -3,12 +3,12 @@ import { Button } from '../ui/Button';
 import { StyleSelector, type StyleCreateRequest } from '../style-selector/StyleSelector';
 import { Alert, Choice, Popover } from './WorkspaceUI';
 import { durations, filterReferences, GENERATION_COUNTS, generationModeLabels, generationModes, outputLimit, referenceLimit, selectedGenerationMode, supportsFrames, type MediaInputMode } from './model';
-import type { GenerateRequest, MediaGenerationMode, MediaModel, MediaStyleOption } from './types';
+import type { GenerateRequest, MediaGenerationMode, MediaModel, MediaStyleOption, MediaWorkspaceProps } from './types';
 import type { ReferenceDraft } from './useReferences';
 
 const labels = { images: '参考图片', videos: '参考视频', audios: '参考音频' };
 const typeLabels = { image: '图片', video: '视频' };
-export function MediaComposer({ models, model, mediaType, onMediaTypeChange, options, generationCount, onGenerationCountChange, onModelChange, onOptionsChange, prompt, onPromptChange, draft, inputMode, onInputModeChange, generationMode, onGenerationModeChange, styles, styleId, onStyleChange, onCreateStyle, error, onError, pending, canGenerate, onGenerate }: {
+export function MediaComposer({ models, model, mediaType, onMediaTypeChange, options, generationCount, onGenerationCountChange, onModelChange, onOptionsChange, prompt, onPromptChange, draft, inputMode, onInputModeChange, generationMode, onGenerationModeChange, styles, styleId, onStyleChange, onCreateStyle, renderReferencePicker, error, onError, pending, canGenerate, onGenerate }: {
   models: MediaModel[]; model?: MediaModel; mediaType: MediaModel['type']; onMediaTypeChange: (type: MediaModel['type']) => void;
   options: GenerateRequest['options'];
   generationCount: number; onGenerationCountChange: (count: number) => void;
@@ -18,6 +18,7 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
   generationMode?: MediaGenerationMode; onGenerationModeChange: (mode: MediaGenerationMode) => void;
   styles: MediaStyleOption[]; styleId?: string; onStyleChange: (styleId: string) => void;
   onCreateStyle?: (request: StyleCreateRequest) => void | Promise<void>;
+  renderReferencePicker?: MediaWorkspaceProps['renderReferencePicker'];
   error: string; onError: (message: string) => void; pending: boolean; canGenerate: boolean; onGenerate: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
@@ -25,6 +26,7 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
   const inputId = useId();
   const frameRole = useRef<'firstFrame' | 'lastFrame'>('firstFrame');
   const [styleOpen, setStyleOpen] = useState(false);
+  const [referencePickerOpen, setReferencePickerOpen] = useState(false);
   const modelTypes = (['image', 'video'] as const).filter((type) => models.some((item) => item.type === type));
   const accept = model ? (['images', 'videos', 'audios'] as const).filter((kind) => referenceLimit(model, kind)).map((kind) => kind === 'images' ? 'image/*' : kind === 'videos' ? 'video/*' : 'audio/*') : [];
   const availableModes = generationModes(model);
@@ -55,7 +57,8 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
     frameInput.current?.click();
   };
   const chooseFiles = () => {
-    input.current?.click();
+    if (renderReferencePicker) setReferencePickerOpen(true);
+    else input.current?.click();
   };
   const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (canGenerate) onGenerate(); }
@@ -98,5 +101,17 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
       {model?.type === 'video' && model.capabilities.generateAudio === true && <Button variant="secondary" size="sm" role="switch" aria-label="生成声音" aria-checked={options.generateAudio ?? false} onClick={() => onOptionsChange({ ...options, generateAudio: !options.generateAudio })}>生成声音 {options.generateAudio ? '开' : '关'}</Button>}
       <Button className="darl-mw-generate" size="sm" disabled={!canGenerate} onClick={onGenerate}>{pending ? '提交中…' : '✧ 生成'}</Button>
     </div>
-  </div><div className="darl-mw-composer-hint">Enter 生成 · Shift + Enter 换行 · 支持粘贴和拖入参考素材</div></footer>;
+  </div><div className="darl-mw-composer-hint">Enter 生成 · Shift + Enter 换行 · 支持粘贴和拖入参考素材</div>
+    {referencePickerOpen && renderReferencePicker?.({
+      kinds: (['images', 'videos', 'audios'] as const).filter(kind => model && referenceLimit(model, kind) > 0),
+      references: draft.references,
+      onClose: () => setReferencePickerOpen(false),
+      onApply: references => {
+        const next = { ...draft.references, ...references };
+        draft.restore(next); setReferencePickerOpen(false); onError('');
+        const mode = selectedGenerationMode(model, 'references', next);
+        if (mode) onGenerationModeChange(mode);
+      },
+    })}
+  </footer>;
 }

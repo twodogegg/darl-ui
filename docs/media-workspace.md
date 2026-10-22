@@ -76,6 +76,7 @@ export function Studio({ startGeneration }: {
 | `onRenameTask` | `(taskId, title) => void`；不传时隐藏重命名入口 |
 | `onDeleteTask` | `(taskId) => void \| Promise<void>`；提供后任务项显示删除入口，删除确认由组件处理 |
 | `onGenerate` | `(request: GenerateRequest) => void \| Promise<void>`，必填 |
+| `renderReferencePicker` | `(props: MediaReferencePickerProps) => ReactNode`；可选宿主素材选择器。接收 `kinds`（模型支持的 images/videos/audios）、`references`、`onApply(references)` 和 `onClose()`；应用后替换指定类型的选择，取消保留草稿。不传则打开本地文件选择器；粘贴、拖拽仍使用上传适配器 |
 | `onRetry` | `(batchId, resultId) => void`；仅失败结果显示重试 |
 | `onCancel` | `(batchId, resultId) => void`；仅等待 / 运行结果显示取消 |
 | `onRegenerate` | `(batchId, resultId) => void`；重新生成当前这一张，宿主使用原批次快照发起一个结果的生成 |

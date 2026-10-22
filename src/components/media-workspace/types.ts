@@ -1,5 +1,6 @@
 import type { StyleCreateRequest } from '../style-selector/StyleSelector';
 import type { UploadContext } from '../file-uploader/types';
+import type { ReactNode } from 'react';
 
 export interface BaseCapabilities {
   aspectRatios?: string[];
@@ -121,6 +122,12 @@ export interface MediaBatch {
   results: MediaResult[];
 }
 export interface MediaTask { id: string; title: string; batches: MediaBatch[] }
+export interface MediaReferencePickerProps {
+  kinds: Array<'images' | 'videos' | 'audios'>;
+  references: MediaReferences;
+  onApply: (references: MediaReferences) => void;
+  onClose: () => void;
+}
 export interface MediaWorkspaceProps {
   models: MediaModel[];
   tasks: MediaTask[];
@@ -139,6 +146,8 @@ export interface MediaWorkspaceProps {
   onGenerate: (request: GenerateRequest) => void | Promise<void>;
   /** Host uploads each selected reference immediately and returns a stable file reference. */
   onUploadReference?: (file: File, context: UploadContext) => Promise<MediaInput>;
+  /** Replace the local file chooser with a host-owned asset picker. Paste and drop keep using the upload adapter. */
+  renderReferencePicker?: (props: MediaReferencePickerProps) => ReactNode;
   onRetry?: (batchId: string, resultId: string) => void;
   onCancel?: (batchId: string, resultId: string) => void;
   onRegenerate?: (batchId: string, resultId: string) => void;

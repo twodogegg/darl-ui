@@ -11,10 +11,11 @@ export class MediaJobRunner {
   private active = new Set<string>();
   private timer: ReturnType<typeof setInterval> | undefined;
   private busy = false;
-  constructor(readonly store: MediaJobStore, private credentials: CredentialsResolver, private onFailure: FailureReporter = () => {}) {}
+  constructor(readonly store: MediaJobStore, private credentials: CredentialsResolver, private onFailure: FailureReporter = () => {}, private onCompleted: (job: MediaJob) => void = () => {}) {}
 
   start() {
     this.store.recover();
+    for (const job of this.store.list()) if (job.status === 'completed') this.completed(job);
     if (!this.timer) {
       this.timer = setInterval(() => { void this.tick(); }, 2500);
       this.timer.unref?.();
@@ -95,6 +96,7 @@ export class MediaJobRunner {
       this.onFailure(job, job.error, config?.apiKey || '');
     }
     this.store.put(job);
+    if (job.status === 'completed') this.completed(job);
   }
   private async poll(job:MediaJob){
     try{
@@ -117,6 +119,11 @@ export class MediaJobRunner {
       this.onFailure(job, job.error, this.credentials(job)?.apiKey || '');
     }
     this.store.put(job);
+    if (job.status === 'completed') this.completed(job);
+  }
+  private completed(job: MediaJob) {
+    try { this.onCompleted(job); }
+    catch (error) { job.error = `生成已完成，写回失败：${error instanceof Error ? error.message : '未知错误'}`; this.store.put(job); }
   }
   async media(job:MediaJob,index=0):Promise<{bytes:Buffer;mime:string}|undefined>{
     if(job.status!=='completed')return undefined;

@@ -35,7 +35,7 @@ const builtinStyles: Array<[string, string, string, number]> = [
 ];
 
 export class ProjectStore {
-  private readonly db: DatabaseSync;
+  readonly db: DatabaseSync;
   readonly files: FileStore;
 
   constructor(path: string, files: FileStore) {
@@ -150,7 +150,7 @@ export class ProjectStore {
       id: Number(row.id), name: String(row.name), description: row.description ?? null,
       aspect_ratio: String(row.aspect_ratio), style_catalog_id: Number(row.style_catalog_id),
       cover_asset: coverFile && coverUrl && coverThumbnail ? { file_id: coverFile.id, storage_key: coverUrl, thumbnail_url: coverThumbnail, ...(coverPreview ? { preview_url: coverPreview } : {}) } : null,
-      style: style || null, episode_count: 0,
+      style: style || null, episode_count: this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='studio_records'").get() ? Number((this.db.prepare("SELECT COUNT(*) AS count FROM studio_records WHERE resource='episodes' AND json_extract(data,'$.projectId')=?").get(String(row.id)) as { count: number }).count) : 0,
       created_at: row.created_at, updated_at: row.updated_at,
     };
   }
@@ -185,6 +185,7 @@ export class ProjectStore {
     this.db.prepare(
       "UPDATE workspace_projects SET name = ?, description = ?, aspect_ratio = ?, style_catalog_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'active'",
     ).run(value.name, value.description, value.aspect_ratio, value.style_catalog_id, id);
+    this.touchStudioProject(id);
     return this.get(id);
   }
 
@@ -206,8 +207,13 @@ export class ProjectStore {
     const files = this.requiredFiles();
     const previous = this.db.prepare('SELECT cover_file_id FROM workspace_projects WHERE id = ?').get(projectId) as { cover_file_id?: string } | undefined;
     this.db.prepare("UPDATE workspace_projects SET cover_file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'active'").run(file.id, projectId);
+    this.touchStudioProject(projectId);
     if (previous?.cover_file_id && previous.cover_file_id !== file.id) await files.removeUnreferenced(previous.cover_file_id);
     return this.get(projectId);
+  }
+
+  private touchStudioProject(id: number) {
+    if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='studio_records'").get()) this.db.prepare("INSERT INTO studio_records(resource,id,data,version,position) VALUES('projects',?,'{}',2,0) ON CONFLICT(resource,id) DO UPDATE SET version=version+1").run(String(id));
   }
 
   private requiredFiles() {
