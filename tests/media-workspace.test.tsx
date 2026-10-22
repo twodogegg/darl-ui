@@ -79,7 +79,7 @@ describe('MediaWorkspace', () => {
     expect(screen.getByRole('radio', { name: '生成视频' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('radio', { name: '生成图片' })).toHaveAttribute('aria-checked', 'false');
     expect(screen.getByRole('button', { name: '选择模型' })).toHaveTextContent('视频 A');
-    expect(screen.getByRole('button', { name: '时长' })).toHaveTextContent('8秒');
+    expect(screen.getByRole('button', { name: '生成参数' })).toHaveTextContent('8秒');
     fireEvent.click(screen.getByRole('button', { name: '选择模型' }));
     expect(screen.getByRole('button', { name: '视频 B' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '图片 B' })).toBeNull();
@@ -110,7 +110,7 @@ describe('MediaWorkspace', () => {
     render(<MediaWorkspace models={models} tasks={tasks} onGenerate={onGenerate}/>);
     switchType('视频');
     expect(screen.getByRole('switch', { name: '生成声音' })).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByRole('button', { name: '时长' })).toHaveTextContent('8秒');
+    expect(screen.getByRole('button', { name: '生成参数' })).toHaveTextContent('8秒');
     switchInput('参考素材');
     fireEvent.change(screen.getByLabelText('选择参考素材'), { target: { files: [file('v.mp4', 'video/mp4'), file('a.mp3', 'audio/mpeg')] } });
     switchInput('首尾帧');
@@ -118,7 +118,7 @@ describe('MediaWorkspace', () => {
     fireEvent.change(screen.getByLabelText('选择帧图片'), { target: { files: [file('first.png')] } });
     switchType('图片');
     expect(screen.queryByRole('switch', { name: '生成声音' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '时长' })).toBeNull();
+    expect(screen.getByRole('button', { name: '生成参数' })).not.toHaveTextContent('秒');
     expect(screen.queryByRole('button', { name: '添加首帧' })).toBeNull();
     expect(screen.getByRole('button', { name: '移除参考视频 v.mp4' })).toBeInTheDocument();
     prompt(); submit(); await waitFor(() => expect(onGenerate).toHaveBeenCalled());
@@ -138,12 +138,12 @@ describe('MediaWorkspace', () => {
     const { rerender } = render(<MediaWorkspace models={models} tasks={history} onGenerate={onGenerate}/>);
     fireEvent.click(screen.getByRole('button', { name: '复用参数' }));
     expect(screen.getByRole('textbox', { name: '生成提示词' })).toHaveValue('旧提示词');
-    expect(screen.getByRole('button', { name: '时长' })).toHaveTextContent('6秒');
+    expect(screen.getByRole('button', { name: '生成参数' })).toHaveTextContent('6秒');
     rerender(<MediaWorkspace models={models.map((model) => ({ ...model }))} tasks={history} onGenerate={onGenerate}/>);
     submit(); await waitFor(() => expect(onGenerate).toHaveBeenCalled());
     expect(onGenerate.mock.calls[0][0]).toMatchObject({ modelId: 'video', prompt: '旧提示词', options: { count: 2, duration: 6, generateAudio: false }, references: { images: [{ id: 'ref', url: '/ref.png' }] } });
   });
-  it('宿主控制任务、混合批次、重试、取消、重新生成和收藏', () => {
+  it('宿主控制任务、混合批次、重试、取消、重新生成和收藏', async () => {
     const history: MediaTask[] = [{ ...tasks[0], batches: [
       { id: 'b1', modelId: 'image', prompt: '图片批次', options: { count: 2 }, results: [{ id: 'done', status: 'completed', url: '/done.png' }, { id: 'bad', status: 'failed', error: '失败信息' }] },
       { id: 'b2', modelId: 'video', prompt: '视频批次', options: { count: 2 }, results: [{ id: 'running', status: 'running' }, { id: 'cancelled', status: 'cancelled' }] }
@@ -166,9 +166,10 @@ describe('MediaWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: /^▧ 第二任务/ })); expect(callbacks.onTaskChange).toHaveBeenCalledWith('t2');
     expect(screen.getByRole('heading', { name: '测试任务' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '＋ 新建任务' })); expect(callbacks.onCreateTask).toHaveBeenCalled();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    fireEvent.click(screen.getByRole('button', { name: '删除任务 测试任务' })); expect(onDeleteTask).toHaveBeenCalledWith('t1');
-    confirm.mockRestore();
+    fireEvent.click(screen.getByRole('button', { name: '删除任务 测试任务' }));
+    expect(onDeleteTask).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: '删除' }));
+    await waitFor(() => expect(onDeleteTask).toHaveBeenCalledWith('t1'));
     fireEvent.click(screen.getByRole('button', { name: '重命名' }));
     const rename = screen.getByRole('textbox', { name: '任务名称' });
     fireEvent.change(rename, { target: { value: '临时标题' } });
@@ -341,11 +342,29 @@ describe('MediaWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('接口不可用'));
     expect(screen.getByRole('button', { name: '✧ 生成' })).toBeEnabled();
   });
+  it('参数面板统一设置清晰度、画幅、数量和视频时长，并同步摘要', async () => {
+    const onGenerate = vi.fn().mockResolvedValue(undefined);
+    render(<MediaWorkspace models={models} tasks={tasks} onGenerate={onGenerate}/>);
+    const trigger = screen.getByRole('button', { name: '生成参数' });
+    expect(trigger).toHaveTextContent('2K');
+    expect(trigger).toHaveTextContent('16:9');
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('radio', { name: '清晰度 1K' }));
+    fireEvent.click(screen.getByRole('radio', { name: '1:1' }));
+    fireEvent.click(screen.getByRole('radio', { name: '单次输出 4张' }));
+    expect(screen.getByRole('button', { name: '生成参数' })).toHaveTextContent('1K · 1:1');
+    prompt(); submit();
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith(expect.objectContaining({ options: { aspectRatio: '1:1', resolution: '1K', count: 4 } })));
+    switchType('视频');
+    if (!screen.queryByRole('radio', { name: '时长 4秒' })) fireEvent.click(screen.getByRole('button', { name: '生成参数' }));
+    fireEvent.click(screen.getByRole('radio', { name: '时长 4秒' }));
+    expect(screen.getByRole('button', { name: '生成参数' })).toHaveTextContent('4秒');
+  });
   it('提交成功后清空提示词，生成数量作为独立调用参数而不是供应商 count', async () => {
     const onGenerate = vi.fn().mockResolvedValue(undefined);
     render(<MediaWorkspace models={models} tasks={tasks} onGenerate={onGenerate}/>);
-    fireEvent.click(screen.getByRole('button', { name: '生成数量' }));
-    fireEvent.click(screen.getByRole('radio', { name: '3' }));
+    fireEvent.click(screen.getByRole('button', { name: '生成参数' }));
+    fireEvent.click(screen.getByRole('radio', { name: '生成数量 3张' }));
     prompt(); submit();
     await waitFor(() => expect(onGenerate).toHaveBeenCalledWith(expect.objectContaining({ modelId: 'image', generationCount: 3, options: { aspectRatio: '16:9', resolution: '2K', count: 2 } })));
     await waitFor(() => expect(screen.getByRole('textbox', { name: '生成提示词' })).toHaveValue(''));
