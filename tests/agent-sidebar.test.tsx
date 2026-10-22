@@ -307,6 +307,92 @@ describe('AgentSidebar', () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ content: '', files: [image], attachments: [expect.objectContaining({ name: '参考图.png', type: 'image/png', data: expect.stringMatching(/^data:image\/png;base64,/) })] })));
   });
 
+  it('粘贴多张图片只添加一次，保留选中文字，移除后只发送剩余图片', async () => {
+    const onSend = vi.fn();
+    const onFileUpload = vi.fn();
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockImplementation((file) => `blob:${(file as File).name}`);
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} onSend={onSend} onFileUpload={onFileUpload} />);
+    const editor = screen.getByRole('textbox', { name: '输入消息' });
+    fireEvent.input(editor, { target: { textContent: '保留草稿' } });
+    const range = document.createRange(); range.selectNodeContents(editor);
+    window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range);
+    const images = [new File(['first'], '截图.png', { type: 'image/png' }), new File(['second'], '参考.jpg', { type: 'image/jpeg' })];
+    const getAsFile = vi.fn(() => images[0]);
+    fireEvent.paste(editor, { clipboardData: { files: images, items: [{ kind: 'file', type: 'image/png', getAsFile }], getData: () => '' } });
+    expect(editor).toHaveTextContent('保留草稿');
+    expect(screen.getAllByRole('button', { name: /移除附件/ })).toHaveLength(2);
+    expect(getAsFile).not.toHaveBeenCalled();
+    expect(createObjectURL).toHaveBeenCalledWith(images[0]);
+    await waitFor(() => expect(onFileUpload).toHaveBeenCalledExactlyOnceWith(images));
+    fireEvent.click(screen.getByRole('button', { name: '移除附件 截图.png' }));
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:截图.png');
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ content: '保留草稿', files: [images[1]], attachments: [expect.objectContaining({ name: '参考.jpg', data: expect.stringMatching(/^data:image\/jpeg;base64,/) })] })));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /移除附件/ })).not.toBeInTheDocument());
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:参考.jpg');
+  });
+
+  it('从剪贴板 items 读取图片，同时在光标处粘贴纯文本', async () => {
+    const onSend = vi.fn();
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} onSend={onSend} />);
+    const editor = screen.getByRole('textbox', { name: '输入消息' });
+    fireEvent.input(editor, { target: { textContent: '前后' } });
+    const range = document.createRange(); range.setStart(editor.firstChild!, 1); range.collapse(true);
+    window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range);
+    const image = new File(['image'], 'image.png', { type: 'image/png' });
+    fireEvent.paste(editor, { clipboardData: { files: [], items: [
+      { kind: 'string', type: 'text/plain' },
+      { kind: 'file', type: 'image/png', getAsFile: () => null },
+      { kind: 'file', type: 'image/png', getAsFile: () => image },
+    ], getData: (type: string) => type === 'text/plain' ? '<图片说明>' : '<b>图片说明</b>' } });
+    expect(editor.textContent).toBe('前<图片说明>后');
+    expect(editor.querySelector('b')).toBeNull();
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ content: '前<图片说明>后', files: [image] })));
+  });
+
+  it('普通文字仍以纯文本粘贴，空剪贴板或非图片不会清除选中文字', () => {
+    const onFileUpload = vi.fn();
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} onFileUpload={onFileUpload} />);
+    const editor = screen.getByRole('textbox', { name: '输入消息' });
+    fireEvent.input(editor, { target: { textContent: '替换我' } });
+    const range = document.createRange(); range.selectNodeContents(editor);
+    window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range);
+    fireEvent.paste(editor, { clipboardData: { files: [new File(['doc'], 'notes.txt', { type: 'text/plain' })], getData: () => '' } });
+    expect(editor.textContent).toBe('替换我');
+    fireEvent.paste(editor, { clipboardData: { getData: (type: string) => type === 'text/plain' ? '第一行\n第二行' : '<b>富文本</b>' } });
+    expect(editor.textContent).toBe('第一行\n第二行');
+    expect(editor.children).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: /移除附件/ })).not.toBeInTheDocument();
+    expect(onFileUpload).not.toHaveBeenCalled();
+  });
+
+  it('粘贴图片复用宿主上传，失败可重试且不同会话的附件隔离', async () => {
+    const onSend = vi.fn();
+    const image = new File(['image'], 'pasted.png', { type: 'image/png' });
+    const attachment = { name: image.name, type: image.type, fileId: 'pasted-file', url: '/api/files/pasted-file' };
+    const uploadAttachment = vi.fn().mockRejectedValueOnce(new Error('图片上传失败')).mockResolvedValue(attachment);
+    const props = { open: true, onOpenChange: vi.fn(), sessions: [...sessions, { id: 'two', title: '另一个会话', messages: [] }], onSend, uploadAttachment };
+    const { rerender } = render(<AgentSidebar {...props} activeSessionId="one" />);
+    fireEvent.paste(screen.getByRole('textbox', { name: '输入消息' }), { clipboardData: { files: [image], getData: () => '' } });
+    expect(uploadAttachment).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('图片上传失败');
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '移除附件 pasted.png' })).toBeInTheDocument();
+    rerender(<AgentSidebar {...props} activeSessionId="two" />);
+    expect(screen.queryByRole('button', { name: /移除附件/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled();
+    rerender(<AgentSidebar {...props} activeSessionId="one" />);
+    expect(screen.getByRole('button', { name: '移除附件 pasted.png' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'one', content: '', files: [image], uploadedAttachments: [attachment] })));
+    expect(uploadAttachment).toHaveBeenCalledTimes(2);
+    expect(uploadAttachment).toHaveBeenLastCalledWith(image, 0, [image]);
+  });
+
   it('宿主接管上传后可发送普通文件，并将其展示为下载链接', async () => {
     const onSend = vi.fn().mockResolvedValue(undefined);
     const attachment = { name: 'numbers.csv', type: 'text/csv', size: 8, fileId: 'csv-file', url: '/api/files/csv-file' };
