@@ -49,7 +49,7 @@ export const MEDIA_MODEL_IDS = ['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-im
 /** The DB, not a timer or browser tab, owns job state. One local Node server is supported. */
 export class MediaJobStore {
   private db: DatabaseSync;
-  constructor(dbPath: string, readonly files: FileStore) {
+  constructor(dbPath: string, readonly files: FileStore, private onChange?: (job: MediaJob) => void) {
     this.db = new DatabaseSync(dbPath);
     this.db.exec('PRAGMA journal_mode=WAL');
     this.db.exec('CREATE TABLE IF NOT EXISTS media_generation_jobs (id TEXT PRIMARY KEY, model_id TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL)');
@@ -79,6 +79,7 @@ export class MediaJobStore {
     job.updatedAt = now();
     this.db.prepare('INSERT INTO media_generation_jobs(id,model_id,status,updated_at,data) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at,data=excluded.data')
       .run(job.id, job.modelId, job.status, job.updatedAt, JSON.stringify(job));
+    this.onChange?.(job);
   }
   create(job: Omit<MediaJob,'id'|'attempts'|'createdAt'|'updatedAt'|'status'>): MediaJob {
     const item: MediaJob = { ...job, id: randomUUID(), status: 'queued', attempts: 0, createdAt: now(), updatedAt: now() };

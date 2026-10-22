@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import type { LocalStorage } from './storage';
 import { isLocalOrLanAddress } from './local-access';
+import { requestFailureStatus, type RequestRecordStore } from './request-records';
 
 import { defaultVoiceSettings, type VoiceSettings } from '../voice-config';
 export { defaultVoiceSettings, type VoiceSettings } from '../voice-config';
@@ -72,7 +73,7 @@ export function voiceSampleUrl(samples: unknown): string | undefined {
   }
 }
 
-export function createVoiceApi(storage: LocalStorage, env: Record<string, string>) {
+export function createVoiceApi(storage: LocalStorage, env: Record<string, string>, records?: RequestRecordStore) {
   const load = (): StoredVoiceSettings => ({ ...defaultVoiceSettings, ...storage.getConfig<StoredVoiceSettings>('voiceConfiguration') });
   return async (request: IncomingMessage, response: ServerResponse) => {
     const url = new URL(request.url || '/', 'http://localhost');
@@ -86,6 +87,7 @@ export function createVoiceApi(storage: LocalStorage, env: Record<string, string
     const abort = () => controller.abort();
     response.on('close', abort);
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]);
+    let recordId: string | undefined;
     try {
       const settings = load();
       const key = settings.apiKey || env.FISH_API_KEY || '';
@@ -133,6 +135,12 @@ export function createVoiceApi(storage: LocalStorage, env: Record<string, string
         if (!extensions[mime]) throw new Error('请上传支持的音频文件');
         const bytes = await readBytes(request, MAX_AUDIO);
         if (!bytes.length) throw new Error('录音为空，请重新录制');
+        if (records) {
+          recordId = records.begin({ type: 'audio', modelId: 'transcribe-1-pro', modelName: 'Fish 语音识别', providerId: 'fish', providerName: 'Fish Audio', method: 'POST', url: 'https://api.fish.audio/v1/asr', parameters: { model: 'transcribe-1-pro', mimeType: mime, size: bytes.length } }).id;
+          const file = await records.files.put(bytes, mime, `recording.${extensions[mime]}`);
+          const record = records.get(recordId)!;
+          records.put({ ...record, references: [records.media(file.id, 'audio')] });
+        }
         const form = new FormData();
         form.set('audio', new Blob([Uint8Array.from(bytes)], { type: mime }), `recording.${extensions[mime]}`);
         form.set('ignore_timestamps', 'true');
@@ -142,6 +150,7 @@ export function createVoiceApi(storage: LocalStorage, env: Record<string, string
         if (typeof result.text !== 'string') throw new Error('Fish 没有返回转写文字');
         const text = result.text.replace(/<\|speaker:\d+\|>/g, '').trim();
         if (!text) throw new Error('没有识别到语音，请重新录制');
+        if (recordId) records!.finish(recordId, { status: 'success', text, response: { text } });
         send(200, { text });
         return true;
       }
@@ -150,11 +159,14 @@ export function createVoiceApi(storage: LocalStorage, env: Record<string, string
         if (typeof body.text !== 'string' || !body.text.trim() || body.text.length > 2000) throw new Error('语音文案为空或超过 2000 字');
         const voiceId = body.voiceId || settings.voiceId;
         if (typeof voiceId !== 'string' || !/^[a-f\d]{32}$/i.test(voiceId)) throw new Error('请先选择音色');
-        const result = await upstream('/v1/tts', { method: 'POST', headers: { 'Content-Type': 'application/json', model: settings.ttsModel }, body: JSON.stringify({ text: body.text, reference_id: voiceId, format: 'pcm', sample_rate: 24000, prosody: { speed: settings.speed }, latency: 'balanced' }) });
+        const parameters = { text: body.text, reference_id: voiceId, format: 'pcm', sample_rate: 24000, prosody: { speed: settings.speed }, latency: 'balanced' };
+        if (records) recordId = records.begin({ type: 'audio', modelId: settings.ttsModel, modelName: settings.ttsModel, providerId: 'fish', providerName: 'Fish Audio', method: 'POST', url: 'https://api.fish.audio/v1/tts', parameters }).id;
+        const result = await upstream('/v1/tts', { method: 'POST', headers: { 'Content-Type': 'application/json', model: settings.ttsModel }, body: JSON.stringify(parameters) });
         if (!result.body) throw new Error('Fish 音频响应为空');
         response.writeHead(200, { 'Content-Type': 'application/octet-stream', 'X-Audio-Sample-Rate': '24000', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
         response.flushHeaders();
         let size = 0;
+        const chunks: Buffer[] = [];
         const reader = result.body.getReader();
         try { while (true) {
           const { value: chunk, done } = await reader.read();
@@ -162,15 +174,27 @@ export function createVoiceApi(storage: LocalStorage, env: Record<string, string
           signal.throwIfAborted();
           size += chunk.byteLength;
           if (size > MAX_AUDIO) throw new Error('语音输出超过大小限制');
+          if (records) chunks.push(Buffer.from(chunk));
           if (!response.write(chunk)) await once(response, 'drain', { signal });
         }
         } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
         if (!size) throw new Error('Fish 没有返回音频');
+        if (recordId && records) {
+          const pcm = Buffer.concat(chunks);
+          const header = Buffer.alloc(44);
+          header.write('RIFF'); header.writeUInt32LE(36 + pcm.length, 4); header.write('WAVEfmt ', 8);
+          header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20); header.writeUInt16LE(1, 22);
+          header.writeUInt32LE(24000, 24); header.writeUInt32LE(48000, 28); header.writeUInt16LE(2, 32); header.writeUInt16LE(16, 34);
+          header.write('data', 36); header.writeUInt32LE(pcm.length, 40);
+          const file = await records.files.put(Buffer.concat([header, pcm]), 'audio/wav', 'speech.wav');
+          records.finish(recordId, { status: 'success', text: body.text, results: [records.media(file.id, 'audio')], response: { sampleRate: 24000, size } });
+        }
         response.end();
         return true;
       }
       send(404, { error: '语音接口不存在' });
     } catch (reason) {
+      if (recordId) records!.finish(recordId, { status: requestFailureStatus(reason, signal), error: reason instanceof Error ? reason.message : String(reason) });
       if (!controller.signal.aborted) {
         if (response.headersSent) response.destroy();
         else send(400, { error: reason instanceof Error && reason.message.startsWith('Fish Audio HTTP') ? reason.message : signal.aborted ? '语音请求超时，请重试' : reason instanceof Error && !/fetch|network|json/i.test(reason.message) ? reason.message : '语音请求失败，请检查网络和设置' });

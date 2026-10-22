@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Blocks, Bot, Monitor, Settings2, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { Blocks, Bot, History, Monitor, Settings2, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { AgentSettingsCard, ModelManagementCard, SettingsPage, defaultModelConfiguration, type ModelConfiguration, type ModelProvider } from '../../src';
 
 import initialPrompt from '../../examples/agent-chat/prompts/system.md?raw';
+import { RequestRecordsDemo } from './RequestRecordsDemo';
 
 const initialProviders: ModelProvider[] = [{
   id: 'darl', name: 'Darl Gateway', baseUrl: 'https://api.darl.cn/v1', protocol: 'openai-completions', hasApiKey: true, status: 'connected', models: [
@@ -22,10 +23,11 @@ export function SettingsDemo() {
   const sections = [
     { id: 'general', label: '通用设置', icon: <Settings2 /> },
     { id: 'models', label: '模型', icon: <SlidersHorizontal /> },
+    { id: 'requests', label: '请求记录', icon: <History /> },
     { id: 'applications', label: '应用 / MCP', icon: <Blocks /> },
     { id: 'skills', label: 'Skills', icon: <Sparkles /> },
     { id: 'agent-presets', label: 'Agent 预设', icon: <Bot /> },
     { id: 'desktop', label: '桌面设置', icon: <Monitor /> },
   ];
-  return <SettingsPage sections={sections} activeSection={activeSection} onSectionChange={(section) => { if (section === 'models' || section === 'agent-presets') setActiveSection(section); }} title="设置">{activeSection === 'agent-presets' ? <><AgentSettingsCard systemPrompt={systemPrompt} onSave={setSystemPrompt} /><p className="demo-mock-hint">本地编辑演示，仅保存在当前页面内存中。真实 Markdown 文件编辑请使用 Agent Chat 示例。</p></> : <ModelManagementCard configuration={configuration} providers={providers} onSave={setConfiguration} onProviderSave={(provider) => setProviders((current) => [...current.filter((item) => item.id !== provider.id), provider])} onProviderDelete={(id) => setProviders((current) => current.filter((provider) => provider.id !== id))} onTestConnection={async () => undefined} />}</SettingsPage>;
+  return <SettingsPage sections={sections} activeSection={activeSection} onSectionChange={(section) => { if (section === 'models' || section === 'agent-presets' || section === 'requests') setActiveSection(section); }} title="设置">{activeSection === 'requests' ? <RequestRecordsDemo /> : activeSection === 'agent-presets' ? <><AgentSettingsCard systemPrompt={systemPrompt} onSave={setSystemPrompt} /><p className="demo-mock-hint">本地编辑演示，仅保存在当前页面内存中。真实 Markdown 文件编辑请使用 Agent Chat 示例。</p></> : <ModelManagementCard configuration={configuration} providers={providers} onSave={setConfiguration} onProviderSave={(provider) => setProviders((current) => [...current.filter((item) => item.id !== provider.id), provider])} onProviderDelete={(id) => setProviders((current) => current.filter((provider) => provider.id !== id))} onTestConnection={async () => undefined} />}</SettingsPage>;
 }

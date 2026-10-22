@@ -1,7 +1,7 @@
 import { useId, useRef, useState, type KeyboardEvent } from 'react';
 import { Button } from '../ui/Button';
 import { StyleSelector, type StyleCreateRequest } from '../style-selector/StyleSelector';
-import { Alert, Choice, Popover } from './WorkspaceUI';
+import { Alert, Choice, OptionPanel, Popover } from './WorkspaceUI';
 import { durations, filterReferences, GENERATION_COUNTS, generationModeLabels, generationModes, outputLimit, referenceLimit, selectedGenerationMode, supportsFrames, type MediaInputMode } from './model';
 import type { GenerateRequest, MediaGenerationMode, MediaModel, MediaStyleOption, MediaWorkspaceProps } from './types';
 import type { ReferenceDraft } from './useReferences';
@@ -63,6 +63,15 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
   const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (canGenerate) onGenerate(); }
   };
+  const capDurations = model ? durations(model) : [];
+  const outputValues = model ? Array.from({ length: outputLimit(model) }, (_, i) => i + 1) : [];
+  const hasPanel = Boolean(model && (model.capabilities.resolutions?.length || model.capabilities.aspectRatios?.length || capDurations.length || outputLimit(model) > 1));
+  const summary = model ? [
+    model.capabilities.resolutions?.length && options.resolution,
+    model.capabilities.aspectRatios?.length && options.aspectRatio,
+    model.type === 'video' && capDurations.length && options.duration !== undefined && `${options.duration}秒`,
+    `${generationCount}张`,
+  ].filter(Boolean).join(' · ') : '';
   return <footer className="darl-mw-composer-shell"><div className="darl-mw-composer" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); add(Array.from(event.dataTransfer.files)); }} onPaste={(event) => {
     const images = Array.from(event.clipboardData.items).filter((item) => item.kind === 'file' && item.type.startsWith('image/')).map((item) => item.getAsFile()).filter((file): file is File => !!file);
     if (images.length) { event.preventDefault(); add(images); }
@@ -93,11 +102,15 @@ export function MediaComposer({ models, model, mediaType, onMediaTypeChange, opt
         <Button variant="secondary" size="sm" onClick={() => setStyleOpen(true)} aria-label="选择风格">风格 <b>{styleId ? styles.find((style) => style.id === styleId)?.name || '已选择' : '默认'}</b></Button>
         <StyleSelector styles={styles} open={styleOpen} onOpenChange={setStyleOpen} value={styleId || null} onChange={(style) => onStyleChange(style?.id || '')} onCreate={onCreateStyle} />
       </>}
-      {!!model?.capabilities.aspectRatios?.length && <Choice label={model.type === 'image' ? '画幅' : '比例'} choices={model.capabilities.aspectRatios} value={options.aspectRatio} onChange={(aspectRatio) => onOptionsChange({ ...options, aspectRatio: String(aspectRatio) })}/>}
-      {!!model?.capabilities.resolutions?.length && <Choice label={model.type === 'image' ? '清晰度' : '分辨率'} choices={model.capabilities.resolutions} value={options.resolution} onChange={(resolution) => onOptionsChange({ ...options, resolution: String(resolution) })}/>}
-      {model && durations(model).length > 0 && <Choice label="时长" choices={durations(model)} value={options.duration} format={(value) => `${value}秒`} onChange={(duration) => onOptionsChange({ ...options, duration: Number(duration) })}/>}
-      {model && outputLimit(model) > 1 && <Choice label="单次输出" choices={Array.from({ length: outputLimit(model) }, (_, i) => i + 1)} value={options.count} onChange={(count) => onOptionsChange({ ...options, count: Number(count) })}/>}
-      <Choice label="生成数量" choices={[...GENERATION_COUNTS]} value={generationCount} onChange={(count) => onGenerationCountChange(Number(count))}/>
+      {hasPanel && model && <OptionPanel
+        label="生成参数"
+        summary={summary}
+        quality={model.capabilities.resolutions?.length ? { values: model.capabilities.resolutions, value: options.resolution, onChange: (resolution) => onOptionsChange({ ...options, resolution }) } : undefined}
+        ratio={model.capabilities.aspectRatios?.length ? { label: model.type === 'image' ? '画幅' : '比例', values: model.capabilities.aspectRatios, value: options.aspectRatio, onChange: (aspectRatio) => onOptionsChange({ ...options, aspectRatio }) } : undefined}
+        duration={model.type === 'video' && capDurations.length ? { values: capDurations, value: options.duration, onChange: (duration) => onOptionsChange({ ...options, duration }) } : undefined}
+        output={outputLimit(model) > 1 ? { values: outputValues, value: options.count, onChange: (count) => onOptionsChange({ ...options, count }) } : undefined}
+        generation={{ values: [...GENERATION_COUNTS], value: generationCount, onChange: (count) => onGenerationCountChange(count) }}
+      />}
       {model?.type === 'video' && model.capabilities.generateAudio === true && <Button variant="secondary" size="sm" role="switch" aria-label="生成声音" aria-checked={options.generateAudio ?? false} onClick={() => onOptionsChange({ ...options, generateAudio: !options.generateAudio })}>生成声音 {options.generateAudio ? '开' : '关'}</Button>}
       <Button className="darl-mw-generate" size="sm" disabled={!canGenerate} onClick={onGenerate}>{pending ? '提交中…' : '✧ 生成'}</Button>
     </div>

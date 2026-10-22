@@ -5,11 +5,12 @@ import { MediaJobStore } from './media-job-store';
 import { MediaJobRunner } from './media-runner';
 import { createFailureLog } from './failure-log';
 import { effectiveCapabilities, type ModelConfiguration } from '../../../src/components/settings/model-config';
-import { resolveMediaReferencesInStore } from './media-references';
+import { persistMediaReferencesInStore, resolveMediaReferencesInStore } from './media-references';
 import type { StoredProvider } from './models';
 import type { MediaStyleOption } from '../../../src/components/media-workspace/types';
 import { isLocalOrLanAddress } from './local-access';
 import type { FileStore } from './file-storage';
+import type { RequestRecordStore } from './request-records';
 
 /** Base64 reference images travel through this JSON endpoint. */
 const MAX_MEDIA_BODY = 128 * 1024 * 1024;
@@ -54,8 +55,12 @@ function presentJob(job: import('./media-job-store').MediaJob, files: FileStore)
   });
   return resultFiles.length ? { ...safe, resultFiles } : safe;
 }
-export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration, providers:()=>StoredProvider[], files:FileStore, hooks: { target?: (value: unknown, type: string) => Record<string, unknown>; completed?: (job: import('./media-job-store').MediaJob) => void } = {}){
-  const store=new MediaJobStore(dbPath, files);
+export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration, providers:()=>StoredProvider[], files:FileStore, hooks: { target?: (value: unknown, type: string) => Record<string, unknown>; completed?: (job: import('./media-job-store').MediaJob) => void } = {}, records?: RequestRecordStore){
+  const store=new MediaJobStore(dbPath, files, (job) => {
+    const provider = providers().find(item => item.id === job.providerId);
+    records?.syncMedia(job, { modelName: config().models.find(item => item.id === job.modelId)?.displayName, providerName: provider?.name, secret: provider?.apiKey });
+    hooks.completed?.(job);
+  });
   const logFailure = createFailureLog(join(dirname(dbPath), 'logs'));
   const runner=new MediaJobRunner(store,(job)=>{
     const provider=providers().find(p=>p.id===job.providerId);
@@ -98,7 +103,7 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         if (previous) { if (previous.options.studioFingerprint !== fingerprint) throw new Error('生成请求编号已用于其他内容'); return previous; }
         const target = rawOptions.studioTarget !== undefined ? hooks.target?.(rawOptions.studioTarget, type) : undefined;
         if (rawOptions.studioTarget !== undefined && !target) throw new Error('生成目标不可用');
-        const options=await resolveMediaReferencesInStore(rawOptions, files);
+        const options=await persistMediaReferencesInStore(await resolveMediaReferencesInStore(rawOptions, files), files);
         if (target) options.studioTarget = target;
         if (requestId) { options.studioRequestId = requestId; options.studioFingerprint = fingerprint; }
         const raced = existing();

@@ -26,6 +26,10 @@ export function Field({ className = '', ...props }: HTMLAttributes<HTMLDivElemen
   return <div data-slot="field" className={`darl-field ${className}`} {...props} />;
 }
 
+export function FieldGroup({ className = '', ...props }: HTMLAttributes<HTMLDivElement> & ClassNameProps) {
+  return <div data-slot="field-group" className={`darl-field-group ${className}`} {...props} />;
+}
+
 export function FieldLabel({ className = '', ...props }: LabelHTMLAttributes<HTMLLabelElement> & ClassNameProps) {
   return <label data-slot="field-label" className={`darl-field-label ${className}`} {...props} />;
 }

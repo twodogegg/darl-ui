@@ -7,6 +7,7 @@
 @import './components/style-selector/style-selector.css';
 @import './components/default-model-selector/default-model-selector.css';
 @import './components/interactive-confirm-dialog/interactive-confirm-dialog.css';
+@import './components/request-records/request-records.css';
 
 /* 触屏设备统一兜底：文本类输入控件字号不小于 16px。
    iOS/WebKit 会为字号 < 16px 的输入框自动放大页面且失焦后不还原；

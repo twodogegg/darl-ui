@@ -5,6 +5,7 @@ import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv
 import { dynamicTool, jsonSchema, stepCountIs, streamText, ToolLoopAgent, type LanguageModel, type ModelMessage, type OutputInterface } from 'ai';
 import { failure } from './errors';
 import { sourceBoundMessage, structuredAgentResult, type StructuredAgentResult } from './context';
+import { recordLanguageModel } from './model-records';
 
 export interface StoredProvider extends ModelProvider { apiKey: string }
 export interface ChatImage { type: 'image'; name: string; mimeType: string; data: string; size?: number; fileId?: string }
@@ -105,9 +106,9 @@ function reasoningValue(effort: string | undefined) {
 export function languageModel(provider: StoredProvider, model: AgentModelConfig): LanguageModel {
   if (!provider.apiKey) throw new Error('请先在设置中保存 API Key');
   if (provider.protocol === 'openai-responses') {
-    return createOpenAI({ baseURL: provider.baseUrl, apiKey: provider.apiKey, name: provider.id }).responses(model.id);
+    return recordLanguageModel(createOpenAI({ baseURL: provider.baseUrl, apiKey: provider.apiKey, name: provider.id }).responses(model.id), provider, model);
   }
-  return createOpenAICompatible({ baseURL: provider.baseUrl, apiKey: provider.apiKey, name: provider.id, includeUsage: true }).chatModel(model.id);
+  return recordLanguageModel(createOpenAICompatible({ baseURL: provider.baseUrl, apiKey: provider.apiKey, name: provider.id, includeUsage: true }).chatModel(model.id), provider, model);
 }
 
 export function modelMessages(messages: ChatMessage[]): ModelMessage[] {

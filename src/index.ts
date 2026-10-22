@@ -1,4 +1,6 @@
 import './styles.css';
+export { RequestRecords } from './components/request-records/RequestRecords';
+export type { RequestModelType, RequestRecord, RequestRecordStatus, RequestRecordMedia, RequestRecordFilters, RequestRecordPage, RequestRecordRetention, RequestRecordsProps } from './components/request-records/types';
 export { FileUploader } from './components/file-uploader/FileUploader';
 export { DarlUIProvider, useDarlTheme } from './theme/DarlUIProvider';
 export type { DarlTheme, ThemeMode, DarlUIProviderProps } from './theme/DarlUIProvider';

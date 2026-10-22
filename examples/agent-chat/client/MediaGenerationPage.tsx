@@ -29,7 +29,7 @@ function supportedModels(configuration: ModelConfiguration): MediaModel[] {
     : model);
 }
 
-export function MediaGenerationPage({ onBack, renderReferencePicker }: { onBack: () => void; renderReferencePicker?: MediaWorkspaceProps['renderReferencePicker'] }) {
+export function MediaGenerationPage({ onBack, initialTaskId, renderReferencePicker }: { onBack: () => void; initialTaskId?: string; renderReferencePicker?: MediaWorkspaceProps['renderReferencePicker'] }) {
   const [models, setModels] = useState<MediaModel[]>([]);
   const [styles, setStyles] = useState<MediaStyleOption[]>([]);
   const [tasks, setTasks] = useState<MediaTask[]>([]);
@@ -84,7 +84,8 @@ export function MediaGenerationPage({ onBack, renderReferencePicker }: { onBack:
         const loaded = jobsToTasks(jobs);
         const draft = newTask();
         setTasks(loaded.length ? loaded : [draft]);
-        setActiveTaskId(loaded[0]?.id || draft.id);
+        setActiveTaskId(loaded.find(task => task.id === initialTaskId)?.id || loaded[0]?.id || draft.id);
+        if (initialTaskId && !loaded.some(task => task.id === initialTaskId)) setError('关联媒体任务已删除');
       } catch (reason) {
         if (alive) setError(reason instanceof Error ? reason.message : '无法读取模型或任务');
       } finally {
@@ -96,7 +97,7 @@ export function MediaGenerationPage({ onBack, renderReferencePicker }: { onBack:
       request<MediaJob[]>('media-generation/jobs').then((jobs) => { if (alive) mergeJobs(jobs); }).catch(() => {});
     }, 2500);
     return () => { alive = false; clearInterval(timer); };
-  }, [mergeJobs]);
+  }, [mergeJobs, initialTaskId]);
 
   const createTask = () => {
     const task = newTask();
