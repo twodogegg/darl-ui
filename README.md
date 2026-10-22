@@ -430,6 +430,29 @@ Agent 的 `@` 只对当前用户消息生效，历史提及不会每轮重复触
 设置中心当前提供模型、Agents 和应用 / MCP 入口；页面内容由宿主通过 `children` 接入。文本模型编辑器提供 `vision` 图片输入开关；模型配置完成后，将 `providers` 中启用的模型转换为 `AgentSidebar` 的 `models` 即可复用同一个聊天侧栏。
 
 
+## RequestRecords｜请求记录
+
+真实示例的「设置 → 请求记录」提供文本、图片、音频、视频类型筛选，并支持状态、供应商、模型、日期范围和请求 ID/错误搜索，服务端分页。详情展示参考图、生成图片、可播放的音频/视频、文本结果、请求参数、响应摘要和真实 Token 用量，支持返回关联对话或媒体任务。素材已删除或加载失败时显示「素材不可用」。
+
+请求记录保存在同一服务端 SQLite 中。文本在 AI SDK 模型调用边界逐次记录步骤与重试，媒体跟踪任务最终状态，Fish 语音识别保存输入音频及转写结果，语音合成保存可回放的 WAV。已有媒体任务在首次启用时导入；历史聊天无法恢复为准确的模型请求，不倒推生成记录。凭证在写入前脱敏，二进制/Base64 不进入记录，参数与结果正文为有大小上限的快照，不保存隐藏推理。
+
+自动清理默认开启、保留 30 天，可关闭或设置 1–3650 天。服务启动、每小时及保存设置时清理已结束且过期的记录；排队中/进行中的记录、项目、任务和素材文件不会被清理。API 沿用宿主同源检查，且仅允许本机和局域网访问。
+
+```tsx
+import { RequestRecords } from '@darl/ui';
+
+<RequestRecords
+  loadRecords={(filters, signal) => host.listRequests(filters, signal)}
+  loadRecord={(id, signal) => host.getRequest(id, signal)}
+  loadRetention={(signal) => host.getRetention(signal)}
+  saveRetention={(settings) => host.saveRetention(settings)}
+  onOpenSession={(id) => openSession(id)}
+  onOpenTask={(id) => openMediaTask(id)}
+/>
+```
+
+组件通过宿主回调获取数据和持久化设置，不自行调用 API。`loadRecords` 返回 `{ items, total, models, providers }`；`loadRecord` 返回含 `references` / `results` 文件引用和可访问 URL 的详情。回调应遵守 `AbortSignal`，组件切换筛选或卸载时会取消请求。Playground 的 `/#settings` →「请求记录」使用明确标注的本地示例，支持真实筛选、预览和设置交互。
+
 ## DefaultModelSelector｜默认模型向导
 
 默认顺序为文本 → 图片 → 音频 → 视频，也可以通过 `kinds` 只配置宿主需要的类型。传入模型（必填）及可选能力、默认值；组件以弹窗提供选择流程，只管理选择和交互，`onComplete` 交给宿主保存。缺少已配置类型的模型时不允许完成；最后一步确认配置并保存。模型使用下拉框，支持手机端布局与 DarlUIProvider 主题。

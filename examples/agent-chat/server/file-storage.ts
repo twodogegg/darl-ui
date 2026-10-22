@@ -37,7 +37,7 @@ export type FileStoreOptions = {
 };
 
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
-const FILE_MIMES = new Set([...IMAGE_MIMES, 'video/mp4', 'audio/mpeg', 'audio/wav', 'application/pdf', 'text/plain', 'application/zip', 'application/octet-stream']);
+const FILE_MIMES = new Set([...IMAGE_MIMES, 'video/mp4', 'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/x-wav', 'audio/ogg', 'audio/opus', 'audio/flac', 'application/pdf', 'text/plain', 'application/zip', 'application/octet-stream']);
 const WIDTHS = new Set([160, 320, 1024]);
 const extensionFor = (mime: string, name = '') => {
   const fromName = extname(name).replace(/^\./, '').toLowerCase();

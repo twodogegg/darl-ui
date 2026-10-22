@@ -4,11 +4,12 @@ import { MediaJobStore } from './media-job-store';
 import { MediaJobRunner } from './media-runner';
 import { createFailureLog } from './failure-log';
 import { effectiveCapabilities, type ModelConfiguration } from '../../../src/components/settings/model-config';
-import { resolveMediaReferencesInStore } from './media-references';
+import { persistMediaReferencesInStore, resolveMediaReferencesInStore } from './media-references';
 import type { StoredProvider } from './models';
 import type { MediaStyleOption } from '../../../src/components/media-workspace/types';
 import { isLocalOrLanAddress } from './local-access';
 import type { FileStore } from './file-storage';
+import type { RequestRecordStore } from './request-records';
 
 /** Base64 reference images travel through this JSON endpoint. */
 const MAX_MEDIA_BODY = 128 * 1024 * 1024;
@@ -53,8 +54,11 @@ function presentJob(job: import('./media-job-store').MediaJob, files: FileStore)
   });
   return resultFiles.length ? { ...safe, resultFiles } : safe;
 }
-export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration, providers:()=>StoredProvider[], files:FileStore){
-  const store=new MediaJobStore(dbPath, files);
+export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration, providers:()=>StoredProvider[], files:FileStore, records?: RequestRecordStore){
+  const store=new MediaJobStore(dbPath, files, (job) => {
+    const provider = providers().find(item => item.id === job.providerId);
+    records?.syncMedia(job, { modelName: config().models.find(item => item.id === job.modelId)?.displayName, providerName: provider?.name, secret: provider?.apiKey });
+  });
   const logFailure = createFailureLog(join(dirname(dbPath), 'logs'));
   const runner=new MediaJobRunner(store,(job)=>{
     const provider=providers().find(p=>p.id===job.providerId);
@@ -100,7 +104,7 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         const maxReferences=effective&&'maxReferenceImages' in effective?effective.maxReferenceImages:0;
         if(referenceCount>maxReferences)throw new Error(`参考图片最多 ${maxReferences} 张`);
         // Large data URLs stay out of the job row; adapters read the saved files.
-        const options=await resolveMediaReferencesInStore(rawOptions, files);
+        const options=await persistMediaReferencesInStore(await resolveMediaReferencesInStore(rawOptions, files), files);
         const style = parseStyle(input.style);
         const job=store.create({taskId:input.taskId.trim(),...(typeof input.batchId==='string'?{batchId:input.batchId.trim()}:{}),modelId:model.id,type,prompt:input.prompt.trim(),...(style ? { style } : {}),providerId:provider.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey,baseUrl:provider.baseUrl,options});
         void runner.tick();
