@@ -148,3 +148,15 @@ export interface AgentSettingsCardProps {
   systemPrompt: string;
   onSave: (systemPrompt: string) => void | Promise<void>;
 }
+
+export type PromptKey = 'system' | 'voice';
+export interface PromptSettingsPrompts {
+  system: string;
+  voice: string;
+  defaults?: Partial<Record<PromptKey, string>>;
+}
+export interface PromptSettingsCardProps {
+  prompts: PromptSettingsPrompts;
+  onSave: (patch: Partial<Record<PromptKey, string>>) => void | Promise<void>;
+  onReset?: (prompts: PromptSettingsPrompts) => void | Promise<void>;
+}

@@ -20,6 +20,28 @@
 .darl-agent-settings-actions > span { color: var(--darl-settings-muted); font-size: 12px; }
 .darl-agent-settings-error { margin: 0; color: var(--darl-danger, #dc2626); overflow-wrap: anywhere; }
 @media (min-width: 701px) { .darl-agent-settings-body { padding: 24px; } }
+/* 提示词设置 */
+.darl-prompt-settings-card { max-width: 1000px; border: 1px solid var(--darl-settings-border); border-radius: 14px; background: var(--darl-settings-surface); overflow: hidden; }
+.darl-prompt-settings-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 0; }
+.darl-prompt-tabs { display: flex; flex-direction: column; gap: 4px; padding: 16px 12px; border-right: 1px solid var(--darl-settings-border); }
+.darl-prompt-tab { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 11px; border: 1px solid transparent; border-radius: 9px; background: none; color: var(--darl-settings-text); text-align: left; cursor: pointer; }
+.darl-prompt-tab:hover { background: var(--darl-settings-bg); }
+.darl-prompt-tab[data-active] { border-color: var(--darl-settings-primary); background: color-mix(in srgb, var(--darl-settings-primary) 10%, transparent); }
+.darl-prompt-tab span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.darl-prompt-tab strong { font-size: 13px; }
+.darl-prompt-tab small { color: var(--darl-settings-muted); font-size: 10px; letter-spacing: .08em; }
+.darl-prompt-tab em { font-style: normal; font-size: 10px; color: var(--darl-settings-muted); }
+.darl-prompt-editor { display: grid; gap: 10px; padding: 18px 20px; min-width: 0; }
+.darl-prompt-editor > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.darl-prompt-editor h3 { margin: 0 0 3px; font-size: 15px; }
+.darl-prompt-editor p { margin: 0; color: var(--darl-settings-muted); font-size: 12px; }
+.darl-prompt-badge { flex: none; padding: 2px 9px; border-radius: 999px; font-size: 10px; background: var(--darl-settings-bg); color: var(--darl-settings-muted); }
+.darl-prompt-badge[data-changed] { background: color-mix(in srgb, var(--darl-settings-primary) 15%, transparent); color: var(--darl-settings-primary); }
+.darl-prompt-editor textarea { box-sizing: border-box; width: 100%; min-width: 0; min-height: 360px; resize: vertical; padding: 12px; border: 1px solid var(--darl-settings-border); border-radius: 8px; background: var(--darl-settings-bg); color: var(--darl-settings-text); font: 13px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.darl-prompt-editor textarea:focus-visible { outline: 2px solid var(--darl-settings-primary); outline-offset: 2px; }
+.darl-prompt-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.darl-prompt-actions > span { color: var(--darl-settings-muted); font-size: 12px; }
+@media (max-width: 700px) { .darl-prompt-settings-layout { grid-template-columns: 1fr; }.darl-prompt-tabs { flex-direction: row; overflow: auto; border-right: 0; border-bottom: 1px solid var(--darl-settings-border); }.darl-prompt-tab { flex: none; }.darl-prompt-editor textarea { min-height: 260px; } }
 .darl-agent-config-list { display: grid; gap: 6px; margin: 16px 0; }
 .darl-agent-config-list > button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 10px 12px; border: 1px solid var(--darl-border, #e2e8f0); border-radius: 9px; background: var(--darl-surface, #fff); color: inherit; text-align: left; cursor: pointer; }
 .darl-agent-config-list > button.is-selected { border-color: var(--darl-primary, #2563eb); background: color-mix(in srgb, var(--darl-primary, #2563eb) 8%, var(--darl-surface, #fff)); }

@@ -265,10 +265,19 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     if (JSON.stringify(upgraded) !== JSON.stringify(storedConfiguration)) storage.setConfig('modelConfiguration', upgraded);
   }
   if (!storage.getConfig<DefaultMediaSelection>('defaultMediaModels')) storage.setConfig('defaultMediaModels', defaultMediaSelection);
+  const voicePromptFile = join(promptFile, '..', 'voice.md');
+  const readPromptFile = (file: string) => readFileSync(file, 'utf8').trim();
+  const readPromptFileIfExists = (file: string) => { try { return readPromptFile(file); } catch { return ''; } };
   if (!storage.getConfig<string>('systemPrompt')) {
     storage.setConfig('systemPrompt', validatePrompt(readFileSync(promptFile, 'utf8')));
   }
+  const initialVoicePrompt = readPromptFileIfExists(voicePromptFile);
+  if (!storage.getConfig<string>('voicePrompt') && initialVoicePrompt) {
+    storage.setConfig('voicePrompt', initialVoicePrompt);
+  }
   const loadPrompt = async () => validatePrompt(storage.getConfig<string>('systemPrompt'));
+  const loadVoicePrompt = () => (storage.getConfig<string>('voicePrompt') || readPromptFileIfExists(voicePromptFile)).trim();
+  const promptDefaults = () => ({ system: readPromptFile(promptFile), voice: readPromptFileIfExists(voicePromptFile) });
   const load = async (): Promise<StoredProvider[]> => storage.getConfig<StoredProvider[]>('providers') || initial;
   const loadModelConfiguration = async (): Promise<ModelConfiguration> => {
     const value = storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration();
@@ -425,6 +434,22 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const systemPrompt = validatePrompt(value);
         storage.setConfig('systemPrompt', systemPrompt);
         return send(200, { systemPrompt });
+      }
+      // 提示词设置：系统提示词(system.md) 与 语音提示词(voice.md) 的统一读写入口。
+      if (path === '/api/prompts' && request.method === 'GET') return send(200, { system: await loadPrompt(), voice: loadVoicePrompt(), defaults: promptDefaults() });
+      if (path === '/api/prompts' && request.method === 'POST') {
+        const body = await readBody(request);
+        if (body.system !== undefined) {
+          const system = typeof body.system === 'string' ? body.system.trim() : '';
+          if (!system) throw new Error('系统提示词不能为空');
+          storage.setConfig('systemPrompt', system);
+        }
+        if (body.voice !== undefined) {
+          const voice = typeof body.voice === 'string' ? body.voice.trim() : '';
+          if (!voice) throw new Error('语音提示词不能为空');
+          storage.setConfig('voicePrompt', voice);
+        }
+        return send(200, { system: await loadPrompt(), voice: loadVoicePrompt(), defaults: promptDefaults() });
       }
       if (path === MCP_OAUTH_CALLBACK_PATH && request.method === 'GET') {
         const callback = new URL(request.url, 'http://localhost');
@@ -673,7 +698,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         if (body.voiceMode !== undefined && typeof body.voiceMode !== 'boolean') throw new Error('语音模式状态无效');
         const voiceMode = body.voiceMode === true;
         const voiceGuide = voiceMode ? voiceGuideForTurn(storage, `${sessionId}:${provider.id}:${model.id}`, loadVoiceGuide(promptFile)) : undefined;
-        const voiceInstructions = voiceMode ? [readFileSync(join(promptFile, '..', 'voice.md'), 'utf8'), voiceGuide?.instructions].join('\n\n') : '';
+        const voiceInstructions = voiceMode ? [loadVoicePrompt(), voiceGuide?.instructions].join('\n\n') : '';
         const skillsForAgent = (ownerAgentId?: string) => {
           const allowedIds = ownerAgentId ? agents.find(agent => agent.id === ownerAgentId)?.skillIds : undefined;
           return skillLibrary.list().filter(skill =>
