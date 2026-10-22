@@ -4,7 +4,12 @@
 # 任何失败都不影响提交结果。用 `npm run hooks:install` 启用（设置 core.hooksPath）。
 set -uo pipefail
 
-label="cn.darlai.agents-preview"
+read -r label public_host < <(node --input-type=module - <<'JS'
+import { loadEnv } from 'vite';
+const env = loadEnv('production', process.cwd(), '');
+console.log(env.AGENT_CHAT_PREVIEW_SERVICE || 'cn.darlai.agents-preview', env.AGENT_CHAT_PUBLIC_HOST || 'agents.darlai.cn');
+JS
+) || exit 0
 domain="gui/$(id -u)"
 
 # 只关心会影响打包产物的改动；纯文档提交跳过。
@@ -14,8 +19,8 @@ fi
 
 if launchctl print "$domain/$label" >/dev/null 2>&1; then
   launchctl kickstart -k "$domain/$label" >/dev/null 2>&1 \
-    && echo "agent-chat: preview 服务已重建并重启 (https://agents.darlai.cn)" \
-    || echo "agent-chat: 警告 - 重启 preview 服务失败，请查看 ~/.cloudflared/agents-preview.err.log"
+    && echo "agent-chat: preview 服务已重建并重启 (https://$public_host)" \
+    || echo "agent-chat: 警告 - 重启 $label 失败，请查看对应 launchd 日志"
 else
   echo "agent-chat: 警告 - 未找到 $label 服务，跳过自动重启"
 fi

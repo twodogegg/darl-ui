@@ -11,8 +11,12 @@ cd "$(dirname "$0")/.."
 NODE_BIN="${AGENT_CHAT_NODE_BIN:-/opt/homebrew/Cellar/node@24/24.22.0/bin}"
 export PATH="$NODE_BIN:$PATH"
 
-PORT="${AGENT_CHAT_PREVIEW_PORT:-5199}"
-PUBLIC_HOST="${AGENT_CHAT_PUBLIC_HOST:-agents.darlai.cn}"
+read -r PORT PUBLIC_HOST < <("$NODE_BIN/node" --input-type=module - <<'JS'
+import { loadEnv } from 'vite';
+const env = loadEnv('production', process.cwd(), '');
+console.log(env.AGENT_CHAT_PREVIEW_PORT || '5199', env.AGENT_CHAT_PUBLIC_HOST || 'agents.darlai.cn');
+JS
+)
 NOTIFY="${AGENT_CHAT_NOTIFY:-1}"
 BUILD_STAMP=".local/agent-chat-preview.build"
 IF_CHANGED=0
@@ -31,21 +35,11 @@ notify() {
   fi
 }
 
-# 释放端口：上一次 preview 的 node 进程可能变成孤儿仍占着端口，
-# 导致新实例启动失败并进入“KeepAlive 重启 → 再失败”的循环。
-free_port() {
-  local pids
-  pids=$(lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)
-  [ -z "$pids" ] && return 0
-  echo "[preview] 端口 $PORT 被占用，先停止残留进程：$pids"
-  kill $pids 2>/dev/null || true
-  for _ in $(seq 1 40); do
-    lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1 || return 0
-    sleep 0.25
-  done
-  kill -9 $pids 2>/dev/null || true
-  sleep 0.5
-}
+# worktree 使用独立端口，不停止其他工作区的服务。
+if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "[preview] 端口 $PORT 已被占用，请先停止对应的预览服务" >&2
+  exit 1
+fi
 
 start_server() {
   exec "$NODE_BIN/node" node_modules/vite/bin/vite.js preview --config vite.agent-chat.config.ts
@@ -56,11 +50,9 @@ HEAD_REV="$(git rev-parse HEAD 2>/dev/null || echo none)"
 # 同一提交已经构建过：直接起服务，不重建、不通知（避免无改动时的重复弹窗）。
 if [ "$IF_CHANGED" = "1" ] && [ -f "$BUILD_STAMP" ] && [ "$(cat "$BUILD_STAMP" 2>/dev/null)" = "$HEAD_REV" ] && [ -f dist/agent-chat/index.html ]; then
   echo "[preview] $HEAD_REV 已构建，跳过重建"
-  free_port
   start_server
 fi
 
-free_port
 notify "Agent Chat" "开始构建…" "Tink"
 
 if ! npm run build:agent-chat; then
