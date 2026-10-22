@@ -10,9 +10,10 @@ function read(node: Node): string {
   const text = Array.from(node.childNodes).map(read).join('');
   return node.nodeType === Node.TEXT_NODE ? node.textContent || '' : text + (node.nodeName === 'DIV' ? '\n' : '');
 }
-export function AgentComposerInput({ value, onChange, onSubmit, insertion, onInserted, applications = [], skills = [], agents = [], references = [], onReference }: {
+export function AgentComposerInput({ value, onChange, onSubmit, onPasteImages, insertion, onInserted, applications = [], skills = [], agents = [], references = [], onReference }: {
   applications?: AgentApplication[]; skills?: AgentSkill[]; agents?: AgentSidebarProps['agents']; references?: AgentSidebarProps['references']; onReference?: (id: string) => void;
   value: string; onChange: (value: string) => void; onSubmit: () => void;
+  onPasteImages?: (files: File[]) => void;
   insertion: { token: string; key: number } | null; onInserted: () => void;
 }) {
   const editor = useRef<HTMLDivElement>(null);
@@ -24,7 +25,7 @@ export function AgentComposerInput({ value, onChange, onSubmit, insertion, onIns
   const [activeIndex, setActiveIndex] = useState(0);
   const listId = useId();
   const options = [...references.map(item => ({ ...item, kind: 'node' as const })), ...agents.map(item => ({ ...item, kind: 'agent' as const })), ...applications.filter((item) => !item.status || item.status === 'connected').map((item) => ({ ...item, kind: 'app' as const })), ...skills.map((item) => ({ ...item, kind: 'skill' as const }))]
-    .filter((item) => `${item.name} ${item.description ?? ''}`.toLowerCase().includes(mention?.query.toLowerCase() ?? ''));
+    .filter((item) => [item.name, item.kind === 'skill' ? item.slug : ''].some((name) => name?.toLowerCase().includes(mention?.query.toLowerCase() ?? '')));
   const detectMention = () => {
     if (composing.current) return;
     const selection = window.getSelection();
@@ -113,8 +114,17 @@ export function AgentComposerInput({ value, onChange, onSubmit, insertion, onIns
     if (mention) document.getElementById(`${listId}-${activeIndex}`)?.scrollIntoView?.({ block: 'nearest' });
   }, [activeIndex, listId, mention]);
   return <div className="darl-agent-editor-shell"><div ref={editor} contentEditable suppressContentEditableWarning role="textbox" aria-label="输入消息" aria-multiline="true" aria-autocomplete="list" aria-expanded={Boolean(mention)} aria-controls={mention ? listId : undefined} aria-activedescendant={mention && options[activeIndex] ? `${listId}-${activeIndex}` : undefined} className="darl-agent-editor" data-placeholder="输入消息，@ 联系 Agent、引用应用或 Skill…" onInput={sync} onCompositionStart={() => { composing.current = true; setMention(null); }} onCompositionEnd={() => { composing.current = false; sync(); }} onKeyUp={(event) => { remember(); if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) detectMention(); }} onMouseUp={() => { remember(); detectMention(); }} onBlur={() => { remember(); setMention(null); }} onPaste={(event) => {
-    event.preventDefault(); const selection = window.getSelection(); if (!selection?.rangeCount) return;
-    const range = selection.getRangeAt(0); range.deleteContents(); const text = document.createTextNode(event.clipboardData.getData('text/plain')); range.insertNode(text); range.setStartAfter(text); range.collapse(true); remember(); sync();
+    event.preventDefault();
+    const images = Array.from(event.clipboardData.files ?? []).filter((file) => file.type.startsWith('image/'));
+    if (!images.length) Array.from(event.clipboardData.items ?? []).forEach((item) => {
+      const file = item.kind === 'file' && item.type.startsWith('image/') ? item.getAsFile() : null;
+      if (file) images.push(file);
+    });
+    if (images.length) onPasteImages?.(images);
+    const value = event.clipboardData.getData('text/plain');
+    if (!value) return;
+    const selection = window.getSelection(); if (!selection?.rangeCount || !editor.current?.contains(selection.anchorNode)) return;
+    const range = selection.getRangeAt(0); range.deleteContents(); const text = document.createTextNode(value); range.insertNode(text); range.setStartAfter(text); range.collapse(true); remember(); sync();
   }} onKeyDown={(event) => {
     if (event.nativeEvent.isComposing || composing.current) return;
     if ((event.key === 'Backspace' || event.key === 'Delete') && deleteAdjacentReference(event.key)) { event.preventDefault(); setMention(null); return; }
@@ -127,7 +137,7 @@ export function AgentComposerInput({ value, onChange, onSubmit, insertion, onIns
   }} />{mention && <div className="darl-agent-mention-menu">
     <div className="darl-agent-mention-heading">@ 联系 Agent · 引用应用或 Skill</div>
     <div id={listId} role="listbox" aria-label="能力建议">
-      {options.map((item, index) => <Button key={`${item.kind}:${item.id}`} variant="ghost" role="option" id={`${listId}-${index}`} aria-selected={activeIndex === index} className="darl-agent-mention-option" onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}><span className={`darl-agent-inline-reference darl-agent-inline-reference--${item.kind}`}>@</span><span><strong>{item.name}</strong><small>{item.kind === 'agent' ? 'Agent · ' : item.kind === 'app' ? '应用 · ' : item.kind === 'node' ? '画布节点 · ' : 'Skill · '}{item.description}</small></span></Button>)}
+      {options.map((item, index) => <Button key={`${item.kind}:${item.id}`} variant="ghost" role="option" id={`${listId}-${index}`} aria-selected={activeIndex === index} className="darl-agent-mention-option" onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}><span className={`darl-agent-inline-reference darl-agent-inline-reference--${item.kind}`}>@</span><span><strong>{item.name}{item.kind === 'skill' && item.slug && item.slug !== item.name ? ` (${item.slug})` : ''}</strong><small>{item.kind === 'agent' ? 'Agent · ' : item.kind === 'app' ? '应用 · ' : item.kind === 'node' ? '画布节点 · ' : 'Skill · '}{item.description}</small></span></Button>)}
       {!options.length && <p className="darl-agent-empty">没有匹配的 Agent、应用或 Skill</p>}
     </div>
   </div>}</div>;
