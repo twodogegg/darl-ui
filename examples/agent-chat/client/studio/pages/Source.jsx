@@ -1,10 +1,12 @@
 import { useProject, Workflow } from '../components/Shell'
+import { RedrawSource } from '../components/VideoRedraw'
 
 export default function Source() {
   const context = useProject()
   const { project } = context
   const text = String(project?.sourceScript || '').trim()
   const requirements = String(project?.requirements || '').trim()
+  if (project?.creationMode === 'video-redraw') return <Workflow context={context} projectLevel><RedrawSource key={context.projectId} context={context} /></Workflow>
   return (
     <Workflow key={context.projectId} context={context} projectLevel>
       <header className="workspace-toolbar">

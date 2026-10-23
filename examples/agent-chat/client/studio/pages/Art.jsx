@@ -8,6 +8,7 @@ import { studioApi, useStore } from '../store'
 import { types } from '../data'
 import ArtAssetDrawer from '../components/ArtAssetDrawer'
 import { assetJob, canBatchGenerate, generateAssetBatch, jobLabel, pendingJob } from '../art'
+import { SourceEvidence, SupplementAsset, MergeAsset } from '../components/VideoRedraw'
 
 export default function Art() {
   const context = useProject()
@@ -28,6 +29,7 @@ function ArtWorkspace({ context }) {
   const [editor, setEditor] = useState(null)
   const [voice, setVoice] = useState(null)
   const [deleting, setDeleting] = useState(null)
+  const [merging, setMerging] = useState(null)
   const [generationView, setGenerationView] = useState('')
   const [customPrompt, setCustomPrompt] = useState('')
   const [styles, setStyles] = useState([])
@@ -71,7 +73,7 @@ function ArtWorkspace({ context }) {
     }
   }
   return (
-    <div className="page-art">
+    <div className={`page-art ${context.project.creationMode === 'video-redraw' ? 'page-art--redraw' : ''}`}>
       <div className="art-page">
         <div className="art-workspace">
           <main className="art-main">
@@ -205,6 +207,8 @@ function ArtWorkspace({ context }) {
                           {a.alias && <span>（别名：{a.alias}）</span>}
                         </div>
                         <p>{a.description}</p>
+                        {a.source && <SourceEvidence source={a.source} />}
+                        {a.source && <button className="btn" onClick={() => setMerging(a.id)}>合并重复主体</button>}
                         {job?.error && <p className="asset-card__error" role="alert">{jobLabel(job)}：{job.error}</p>}
                         {a.type === '角色' && (
                           <button
@@ -245,7 +249,7 @@ function ArtWorkspace({ context }) {
             </div>
           </main>
         </div>
-        {editor && (
+        {editor === 'new' && context.project.creationMode === 'video-redraw' ? <SupplementAsset context={context} onClose={() => setEditor(null)} /> : editor && (
           <ArtAssetDrawer
             asset={
               editor === 'new'
@@ -265,6 +269,7 @@ function ArtWorkspace({ context }) {
             onClose={() => setVoice(null)}
           />
         )}
+        {merging && data.assets.find(asset => asset.id === merging) && <MergeAsset context={context} asset={data.assets.find(asset => asset.id === merging)} onClose={() => setMerging(null)} />}
         {deleting && (
           <Confirm
             danger
@@ -277,6 +282,7 @@ function ArtWorkspace({ context }) {
                 d.clips.forEach((s) => {
                   s.assetIds = s.assetIds.filter((a) => a !== deleting.id)
                 })
+                d.shots.forEach(shot => { if (shot.assetIds) shot.assetIds = shot.assetIds.filter(id => id !== deleting.id) })
               })
               if (!saved) return
               setDeleting(null)

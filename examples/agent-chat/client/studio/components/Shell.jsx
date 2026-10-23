@@ -18,11 +18,11 @@ import {
   IconFileText,
 } from '@tabler/icons-react'
 import { useStore } from '../store'
-import { steps } from '../data'
+import { projectSteps } from '../data'
 
 const stepIcons = [IconNotebook, IconScript, IconLayoutList, IconPhoto, IconVideo]
 // 项目级步骤：整个项目共用同一份内容，不按集拆分
-const projectLevelPaths = ['/source', '/outline', '/script', '/art']
+const projectLevelPaths = ['/source', '/outline', '/script', '/art', '/film']
 // 分集步骤：进入后才选择具体剧集
 const episodeLevelPaths = ['/storyboard', '/video']
 
@@ -43,9 +43,10 @@ export default function Shell({ children }) {
   const navigate = useNavigate()
   const { data, onNavigate } = useStore()
   const [params] = useSearchParams()
-  const workflow = steps.find((s) => s.path === pathname)
   const projectId = params.get('projectId')
   const activeProject = data.projects.find((p) => p.id === projectId)
+  const flowSteps = projectSteps(activeProject)
+  const workflow = flowSteps.find((s) => s.path === pathname)
   const activeEpisodeList = data.episodes.filter(
     (e) => e.projectId === projectId,
   )
@@ -111,7 +112,7 @@ export default function Shell({ children }) {
               </span>
             </div>
             <p className="br-group-title">创作流程</p>
-            {steps.map((s, i) => {
+            {flowSteps.map((s, i) => {
               const Icon = stepIcons[i]
               const active = pathname === s.path
               const done =
@@ -321,7 +322,7 @@ export function Banner({ context, projectLevel = false }) {
         </select>}
       </div>
       <nav className="workflow-steps" aria-label="五步创作流程">
-        {steps.map((s, i) => (
+        {projectSteps(project).map((s, i) => (
           <Link
             className={pathname === s.path ? 'active' : ''}
             to={stepLink(s.path)}

@@ -259,7 +259,8 @@ export class FileStore {
     if (this.tableExists('workspace_style_files')) rows.push(this.db.prepare('SELECT file_id FROM workspace_style_files WHERE file_id = ?').all(id));
     if (this.tableExists('workspace_projects')) rows.push(this.db.prepare('SELECT cover_file_id AS file_id FROM workspace_projects WHERE cover_file_id = ?').all(id));
     if (this.tableExists('media_generation_jobs')) rows.push(this.db.prepare('SELECT id FROM media_generation_jobs WHERE data LIKE ?').all(`%"fileId":"${id}"%`));
-    if (this.tableExists('studio_records')) rows.push(this.db.prepare('SELECT id FROM studio_records WHERE data LIKE ?').all(`%/api/files/${id}%`));
+    if (this.tableExists('studio_records')) rows.push(this.db.prepare('SELECT id FROM studio_records WHERE data LIKE ? OR data LIKE ?').all(`%/api/files/${id}%`, `%"fileId":"${id}"%`));
+    if (this.tableExists('video_redraw_jobs')) rows.push(this.db.prepare('SELECT id FROM video_redraw_jobs WHERE data LIKE ?').all(`%${id}%`));
     return rows.some((items) => items.length > 0);
   }
 

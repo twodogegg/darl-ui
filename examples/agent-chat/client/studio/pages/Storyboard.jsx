@@ -8,6 +8,7 @@ import { useStore } from '../store'
 import { id } from '../data'
 import { formatDialogue, shotNumber, totalDuration } from '../storyboard'
 import { episodeScenes, orderedShots, sceneLabel } from '../scenes'
+import { SourceEvidence, SourceShotEditor, SupplementShot, sourceTime } from '../components/VideoRedraw'
 
 function ShotInput({ value, version, label, multiline = false, number = false, onCommit, validate }) {
   const [draft, setDraft] = useState(String(value))
@@ -40,6 +41,8 @@ function ShotTable({ context }) {
   const [sceneId, setSceneId] = useState('')
   const [editing, setEditing] = useState(null)
   const [deleting, setDeleting] = useState(null)
+  const [sourceEditor, setSourceEditor] = useState(null)
+  const [adding, setAdding] = useState(null)
   const [insertedId, setInsertedId] = useState(null)
   const [dragging, setDragging] = useState(null)
   const drag = useRef(null)
@@ -55,6 +58,7 @@ function ShotTable({ context }) {
     ordered.forEach((shot, index) => { if (!index) shot.transition = '—'; else if (shot.transition === '—') shot.transition = '硬切' })
   }
   function addShot(sceneId, afterId) {
+    if (context.project.creationMode === 'video-redraw') { setAdding({ sceneId, afterId }); return }
     const shot = { id: id(), episodeId: episode.id, sceneId, scale: '', camera: '', transition: '硬切', description: '', dialogue: [], effects: '', duration: 4 }
     update((draft) => {
       const after = draft.shots.findIndex((item) => item.id === afterId)
@@ -131,7 +135,7 @@ function ShotTable({ context }) {
               {group.map((shot) => {
                 const index = shots.indexOf(shot), number = shotNumber(index)
                 return <tr key={shot.id} data-shot-id={shot.id} className={`${dragging?.sourceId === shot.id ? 'shot-row-dragging' : ''} ${dragging?.targetId === shot.id ? dragging.after ? 'shot-drop-after' : 'shot-drop-before' : ''}`}>
-                  <th scope="row"><strong>{number}</strong><div className="shot-row-actions">
+                  <th scope="row"><strong>{number}</strong>{shot.source && <button className="redraw-shot-link" onClick={() => setSourceEditor(shot.id)}><img src={`${shot.source.frames[0]?.url}?width=160`} alt={`镜头${number}原片`} />{sourceTime(shot.source.start)} – {sourceTime(shot.source.end)}<span>校对切点</span></button>}<div className="shot-row-actions">
                     <button className="shot-drag-handle" aria-label={`拖动镜头${number}排序`} title="拖动调整本场顺序，也可用键盘上下方向键" onPointerDown={(event) => startDrag(event, shot)} onPointerMove={moveDrag} onPointerUp={() => finishDrag()} onPointerCancel={() => finishDrag(true)} onLostPointerCapture={() => finishDrag(true)} onKeyDown={(event) => {
                       if (event.key === 'Escape') finishDrag(true)
                       if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return
@@ -142,7 +146,7 @@ function ShotTable({ context }) {
                     <button aria-label={`在镜头${number}后新增分镜`} title="在此镜后新增分镜" onClick={() => addShot(scene.id, shot.id)}>＋</button>
                     <button aria-label={`删除镜头${number}`} title="删除镜头" onClick={() => setDeleting(shot)}>×</button>
                   </div></th>
-                  {columns.map(([key, label]) => <td key={key}>{!index && key === 'transition' ? <span>—</span> : <ShotInput key={`${shot.id}-${key}`} version={shot._version} label={`镜头${number} ${label}`} value={shot[key]} multiline={key === 'description'} onCommit={(value) => patch('shots', shot.id, { [key]: key === 'transition' ? value.trim() || '硬切' : value })} />}</td>)}
+                  {columns.map(([key, label]) => <td key={key}>{key === 'description' && shot.source && <><SourceEvidence source={shot.source} /><details><summary>关联原片主体（{shot.assetIds?.length || 0}）</summary>{data.assets.filter(asset => asset.projectId === projectId).map(asset => <label className="redraw-asset-check" key={asset.id}><input type="checkbox" checked={shot.assetIds?.includes(asset.id) || false} onChange={event => patch('shots', shot.id, { assetIds: event.target.checked ? [...new Set([...(shot.assetIds || []), asset.id])] : shot.assetIds.filter(id => id !== asset.id) })} />{asset.type} · {asset.name}</label>)}</details></>}{!index && key === 'transition' ? <span>—</span> : <ShotInput key={`${shot.id}-${key}`} version={shot._version} label={`镜头${number} ${label}`} value={shot[key]} multiline={key === 'description'} onCommit={(value) => patch('shots', shot.id, { [key]: key === 'transition' ? value.trim() || '硬切' : value })} />}</td>)}
                   <td><button className="shot-dialogue-cell" aria-label={`编辑镜头${number}台词`} onClick={() => setEditing(shot.id)}>{!shot.dialogue.length ? '—' : shot.dialogue.map((line) => <p key={line.id}>{formatDialogue(line)}</p>)}<span>编辑台词</span></button></td>
                   <td><ShotInput key={`${shot.id}-effects`} version={shot._version} label={`镜头${number} 音效`} value={shot.effects} multiline onCommit={(value) => patch('shots', shot.id, { effects: value })} /></td>
                   <td><ShotInput key={`${shot.id}-duration`} version={shot._version} label={`镜头${number} 时长（秒）`} value={shot.duration} number validate={(value) => !value.trim() || !Number.isFinite(Number(value)) || Number(value) <= 0 ? '镜头时长须为大于 0 的秒数' : ''} onCommit={(duration) => patch('shots', shot.id, { duration })} /></td>
@@ -156,6 +160,8 @@ function ShotTable({ context }) {
       </div>
       <footer className="workspace-footer"><span className="muted">修改自动保存到当前项目 · 总时长 {totalDuration(shots)} 秒</span><Button primary onClick={confirm}>确认分镜，进入视频制作 ↗</Button></footer>
       {editing && shots.some(shot => shot.id === editing) && <DialogueEditor shot={shots.find((shot) => shot.id === editing)} characters={characters} onClose={() => setEditing(null)} onSave={(dialogue) => { patch('shots', editing, { dialogue }); setEditing(null) }} />}
+      {sourceEditor && shots.find(shot => shot.id === sourceEditor)?.source && <SourceShotEditor context={context} shot={shots.find(shot => shot.id === sourceEditor)} onClose={() => setSourceEditor(null)} />}
+      {adding && <SupplementShot context={context} {...adding} onClose={() => setAdding(null)} />}
       {deleting && <Confirm title="删除镜头" danger onClose={() => setDeleting(null)} onConfirm={() => {
         update((draft) => {
           draft.shots = draft.shots.filter((shot) => shot.id !== deleting.id)

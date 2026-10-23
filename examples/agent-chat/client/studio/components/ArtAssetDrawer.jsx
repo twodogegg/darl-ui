@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { SourceEvidence } from './VideoRedraw'
 import { useStore } from '../store'
 import { id } from '../data'
 import { download, readMedia } from '../files'
@@ -182,6 +183,7 @@ export default function ArtAssetDrawer({
           </header>
         }
       >
+        {form.source && <div className="redraw-drawer-source"><SourceEvidence source={form.source} /><label><input type="checkbox" checked={form.source.confirmed === true} onChange={event => change('source', { ...form.source, confirmed: event.target.checked })} />已核对原片主体与目标设定</label><Field label="原片主体描述"><textarea value={form.source.description || ''} onChange={event => change('source', { ...form.source, description: event.target.value })} /></Field></div>}
         {!liveAsset && <fieldset className="asset-drawer__fields" disabled={generating}>
           <div className="new-asset-fields">
             <Field label="资产名称">

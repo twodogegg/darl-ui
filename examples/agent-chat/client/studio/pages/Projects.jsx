@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../store'
 import {
-  Tabs,
   Confirm,
   TextDialog,
   Empty,
@@ -41,7 +40,7 @@ export function Projects() {
   return (
     <div className="projects-page">
       <div className="page-head">
-        <Tabs items={['剧本项目']} value="剧本项目" onChange={() => {}} />
+        <h2>我的项目</h2>
         <div className="toolbar">
           <input
             aria-label="搜索项目"
@@ -67,12 +66,12 @@ export function Projects() {
       <div className="projects-grid">
         {projects.map((p) => (
           <article className="project-card" key={p.id}>
-            <Link to={`/outline?projectId=${encodeURIComponent(p.id)}`}>
+            <Link to={`/${p.creationMode === 'video-redraw' ? 'source' : 'outline'}?projectId=${encodeURIComponent(p.id)}`}>
               <>{p.cover ? <img className="project-card-cover" src={p.cover} alt={p.title} /> : <div className="studio-cover-empty">未上传封面</div>}</>
               <div className="project-card-body">
                 <h2>{p.title}</h2>
                 <small>
-                  {data.episodes.filter((e) => e.projectId === p.id).length} 集
+                  {p.creationMode === 'video-redraw' ? `视频转绘 · ${{ japan: '日本', western: '欧美' }[p.targetRegion]} / ${{ ja: '日语', en: '英语' }[p.targetLanguage]}` : `${data.episodes.filter((e) => e.projectId === p.id).length} 集`}
                   · {p.ratio} · 创作中
                 </small>
               </div>

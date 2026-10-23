@@ -406,7 +406,9 @@ export function App() {
       setDrafts(current => ({ ...current, [session.id]: studioAgentContent(task) }));
       return;
     }
-    await run({ sessionId: session.id, agentId: selectedId, content: studioAgentContent(task), skillIds: [], applicationIds: [], modelId: selectedModel, reasoningEffort: activeEffort }, undefined, session);
+    const requestedSlugs: unknown[] = Array.isArray(task.skillSlugs) ? task.skillSlugs : [];
+    const requestedSkills = skills.filter(skill => requestedSlugs.includes(skill.slug || skill.name)).map(skill => skill.id);
+    await run({ sessionId: session.id, agentId: selectedId, content: studioAgentContent(task), skillIds: requestedSkills, applicationIds: [], modelId: selectedModel, reasoningEffort: activeEffort }, undefined, session);
   };
   const studioNavigate = (page: string) => {
     if (page === 'chat') { openStudioChat(); return; }

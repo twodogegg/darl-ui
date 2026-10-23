@@ -11,6 +11,7 @@ import Storyboard from './pages/Storyboard'
 import VideoProduction from './pages/VideoProduction'
 import Assets from './pages/Assets'
 import Prompts from './pages/Prompts'
+import { RedrawFilm } from './components/VideoRedraw'
 import { MediaGenerationPage } from '../MediaGenerationPage'
 import { ReferencePicker } from './components/ui'
 import './styles/brand-tokens.css'
@@ -25,6 +26,7 @@ import './styles/storyboard.css'
 import './styles/migration.css'
 import './styles/production.css'
 import './styles/integration.css'
+import './styles/video-redraw.css'
 
 function StudioMediaPage() {
   const navigate = useNavigate()
@@ -61,6 +63,7 @@ function Pages({ onContextChange }) {
     <Route path="/art" element={<Art />} />
     <Route path="/storyboard" element={<Storyboard />} />
     <Route path="/video" element={<VideoProduction />} />
+    <Route path="/film" element={<RedrawFilm />} />
     <Route path="/assets" element={<Assets />} />
     <Route path="/media" element={<StudioMediaPage />} />
     <Route path="/settings/prompts" element={<Prompts />} />

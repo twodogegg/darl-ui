@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react'
 import actionPrompts from '../../prompts/studio-actions.json'
 import promptCatalog from '../../prompts/studio-prompt-catalog.json'
+import redrawPrompts from '../../prompts/video-redraw.json'
 import { emptyStudioData, studioFields, studioPositions } from '../../studio-schema'
 import { styleOptionsFromCatalog } from '../workspace-styles'
 
@@ -98,7 +99,8 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
     const entry = promptCatalog.find(item => item.action === task.action)
     const configured = entry && state.current.prompts.find(item => item.id === entry.id)
     const prompt = configured?.mode === 'replace' ? configured.text : configured?.defaultText || actionPrompts[task.action]
-    await onAgentRequest({ ...task, prompt, agentId: agentSelection, modelSelections })
+    const project = state.current.projects.find(project => project.id === task.projectId)
+    await onAgentRequest({ ...task, prompt, agentId: agentSelection, modelSelections, ...(project?.creationMode === 'video-redraw' ? { skillSlugs: ['video-redraw', 'darl-studio'] } : {}) })
   }
   const generateMedia = async ({ type = 'image', prompt, target, references = [], options = {}, modelId, applyStyle = true, styleId }) => {
     await queue.current
@@ -113,6 +115,17 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
     if (!item) throw new Error('请先保存生成目标')
     const episode = item.episodeId && state.current.episodes.find(episode => episode.id === item.episodeId)
     const project = state.current.projects.find(project => project.id === (item.projectId || episode?.projectId))
+    if (project?.creationMode === 'video-redraw') {
+      const kind = target.resource === 'assets' ? 'asset' : 'clip'
+      const entry = state.current.prompts.find(entry => entry.id === `4-${kind === 'asset' ? 1 : 2}`)
+      const directive = entry?.mode === 'replace' ? entry.text : entry?.defaultText || redrawPrompts[kind]
+      prompt = [directive, `目标地区：${project.targetRegion}；目标语言：${project.targetLanguage}`, prompt].join('\n')
+      if (target.resource === 'clips') {
+        const missing = state.current.assets.filter(asset => item.assetIds.includes(asset.id) && !asset.image)
+        if (missing.length) throw new Error(`请先准备目标资产图片：${missing.map(asset => asset.name).join('、')}`)
+        if (!references.length) throw new Error('视频转绘需要目标形象参考，请选择多模态参考并准备目标资产图片')
+      }
+    }
     const catalog = applyStyle ? await studioApi('workspace/styles') : null
     const style = catalog && styleOptionsFromCatalog(catalog.data).find(item => item.id === String(styleId ?? project?.style_catalog_id))
     if (applyStyle && !style) throw new Error('请先选择项目视觉风格')

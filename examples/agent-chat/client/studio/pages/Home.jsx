@@ -17,11 +17,13 @@ import { StyleSelector } from '@darl/ui'
 import { createWorkspaceStyle, styleOptionsFromCatalog } from '../../workspace-styles'
 import { FileButton, Processing, DirectorSelect, TextModelSelect } from '../components/ui'
 import { parseSource } from '../files'
+import { CreateRedraw } from '../components/VideoRedraw'
 
 export default function Home() {
   const { data, update, notify, reload, requestAgent, cancelAgent } = useStore()
   const navigate = useNavigate()
   const [requirements, setRequirements] = useState('')
+  const [creationMode, setCreationMode] = useState('script')
   const [script, setScript] = useState('')
   const [images, setImages] = useState([])
   const [fileName, setFileName] = useState('')
@@ -103,7 +105,8 @@ export default function Home() {
           查看全部项目 <IconArrowUpRight size={15} />
         </Link>
       </div>
-      <section className="br-hero" aria-label="新建创作">
+      <nav className="redraw-mode-tabs" aria-label="创作入口"><button aria-pressed={creationMode === 'script'} onClick={() => setCreationMode('script')}>剧本创作</button><button aria-pressed={creationMode === 'video-redraw'} onClick={() => setCreationMode('video-redraw')}>视频转绘</button></nav>
+      {creationMode === 'video-redraw' ? <CreateRedraw /> : <section className="br-hero" aria-label="新建创作">
         <div className="br-hero-left">
           <p className="br-overline">NEW PROJECT / 创作起点</p>
           <h2 className="br-hero-title">本入剧出，让故事开场。</h2>
@@ -271,7 +274,7 @@ export default function Home() {
         <div className="br-hero-right" role="img" aria-label="电影片场">
           <span className="br-hero-image-note">FROM SCRIPT TO SCREEN / 01</span>
         </div>
-      </section>
+      </section>}
       <section>
         <div className="br-section-header">
           <div>
@@ -287,7 +290,7 @@ export default function Home() {
             <Link
               className="br-project-card"
               key={p.id}
-              to={`/outline?projectId=${encodeURIComponent(p.id)}`}
+              to={`/${p.creationMode === 'video-redraw' ? 'source' : 'outline'}?projectId=${encodeURIComponent(p.id)}`}
             >
               <span className="br-cover">
                 <>{p.cover ? <img src={p.cover} alt={p.title} /> : <div className="studio-cover-empty">未上传封面</div>}</>

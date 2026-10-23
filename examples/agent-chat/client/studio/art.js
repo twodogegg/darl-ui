@@ -16,7 +16,7 @@ export function assetImageRequest(asset, { variantId = '', view = '', customProm
   if (selectedView === '自定义' && !customPrompt.trim()) throw new Error('请输入自定义提示词')
   return {
     prompt: [asset.prompt, asset.description, asset.appearance, variant?.description || asset.costume, selectedView === '自定义' ? customPrompt : prompts['asset-image-views'][selectedView]].filter(Boolean).join('\n'),
-    references: [...new Set([asset.image, ...(asset.references || []).map(item => typeof item === 'string' ? item : item.url)].filter(Boolean))],
+    references: [...new Set([asset.image, ...(!asset.image ? asset.source?.frames?.map(frame => frame.url) || [] : []), ...(asset.references || []).map(item => typeof item === 'string' ? item : item.url)].filter(Boolean))],
   }
 }
 

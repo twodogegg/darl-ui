@@ -72,10 +72,11 @@ function Production({ context }) {
     const selected = shots.filter((shot) => shot.sceneId === group.sceneId && group.shotIds.includes(shot.id))
     if (!group.title.trim() || !selected.length) return notify('请填写片段名称，并选择至少一个分镜')
     if (selected.some((shot) => occupiedShots.has(shot.id))) return notify('所选分镜已用于其他视频片段，请先调整原片段释放分镜')
-    const values = { sceneId: group.sceneId, sourceSignature: clipPrompt(selected, shots, scenes), title: group.title.trim(), shotIds: selected.map((shot) => shot.id), duration: totalDuration(selected), description: selected.map((shot) => shot.description).join('\n'), prompt: clipPrompt(selected, shots, scenes) }
+    const redraw = context.project.creationMode === 'video-redraw'
+    const values = { sceneId: group.sceneId, sourceSignature: clipPrompt(selected, shots, scenes), title: group.title.trim(), shotIds: selected.map((shot) => shot.id), duration: totalDuration(selected), description: selected.map((shot) => shot.description).join('\n'), prompt: clipPrompt(selected, shots, scenes), ...(redraw ? { assetIds: [...new Set(selected.flatMap(shot => shot.assetIds || []))] } : {}) }
     if (group.id) patch('clips', group.id, values)
     else {
-      const clip = { ...makeClips(episode.id, [])[0], ...values, ratio: context.project.ratio, id: id(), assetIds: [], image: '', imageHistory: [], storyboardImage: '', storyboardHistory: [], blockingImage: '', blockingHistory: [], videos: [] }
+      const clip = { ...makeClips(episode.id, [])[0], ...values, ...(redraw ? { mode: '多模态参考' } : {}), ratio: context.project.ratio, id: id(), assetIds: values.assetIds || [], image: '', imageHistory: [], storyboardImage: '', storyboardHistory: [], blockingImage: '', blockingHistory: [], videos: [] }
       update((draft) => draft.clips.push(clip))
       setActiveId(clip.id)
     }
@@ -203,6 +204,7 @@ function Production({ context }) {
   return (
     <div className="page-storyboard production-page">
       <header className="workspace-toolbar"><div className="sb-toolbar-head"><h2>视频制作</h2><label className="sb-episode-pick"><span>剧集</span><select aria-label="选择剧集" value={episode.id} onChange={(e) => navigate(`/video?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(e.target.value)}`)}>{context.episodes.map((e) => <option key={e.id} value={e.id}>第{e.number}集 · {e.title}</option>)}</select></label><p className="muted">共 {clips.length} 个视频片段 · 同一场的多个分镜组合成一个视频片段</p></div><Link className="btn" to={link('/storyboard')}>查看分镜脚本 ↗</Link></header>
+      {context.project.creationMode === 'video-redraw' && <p className="redraw-production-note">当前使用目标资产和分镜重新生成，连续动作不保证逐帧还原。请试听生成结果的目标语言对白。<Link to={link('/film')}>进入合成导出 ↗</Link></p>}
       <div className="production-layout">
         <aside className="production-list" aria-label="视频片段列表">
           <h3>视频片段</h3>

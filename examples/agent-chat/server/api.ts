@@ -1,4 +1,4 @@
-import { createVoiceApi, loadVoiceGuide, voiceGuideForTurn } from './voice';
+import { createVoiceApi, loadVoiceGuide, voiceGuideForTurn, transcribeVideoAudio } from './voice';
 import { VoiceOutputParser, voiceOutputFormat } from './voice-output';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,6 +28,7 @@ import { SkillLibrary } from './skill-library';
 import { RequestRecordStore, requestRecordsApi, requestRecordScope } from './request-records';
 import { createPromptOptimization, type OptimizationPromptKey } from './prompt-optimization';
 import { RequestTimeout } from './request-timeout';
+import { VideoRedraw, REDRAW_TOOLS, handleRedrawRequest } from './video-redraw';
 
 /** Resolve the model selected in the current chat against an enabled text binding. */
 export function resolveTextModel(providers: StoredProvider[], configuration: ModelConfiguration, providerId: string, modelId: string) {
@@ -47,7 +48,7 @@ export function resolveTextModel(providers: StoredProvider[], configuration: Mod
       ...directory,
       id: modelId, name: configured.item.displayName, type: 'text' as const, providerId, enabled: true,
       reasoningEfforts: text?.reasoningEfforts.filter((effort) => effort !== 'none') ?? [],
-      capabilities: { ...directory?.capabilities, tools: text?.tools, contextWindow: text?.contextWindow },
+      capabilities: { ...directory?.capabilities, vision: text?.vision, tools: text?.tools, contextWindow: text?.contextWindow },
     },
   };
 }
@@ -245,6 +246,28 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const storageSettings = new StorageSettings(storage, files, fileConfig);
   const projectStore = new ProjectStore(storage.path, files);
   const studio = new StudioStore(projectStore);
+  const videoRedraw = new VideoRedraw(studio, {
+    model: modelId => {
+      const configuration = storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration();
+      const logical = configuration.models.find(item => item.id === modelId && item.type === 'text' && item.enabled !== false);
+      const bindings = logical && enabledBindings(configuration, logical);
+      if (!logical || !bindings?.length || bindings.length !== 1) throw new Error('请选择只有一个有效渠道绑定的文本模型');
+      const selected = resolveTextModel(storage.getConfig<StoredProvider[]>('providers') || [], configuration, bindings[0].providerId, bindings[0].upstreamModelId);
+      if (!selected?.provider.apiKey || selected.model.capabilities?.vision !== true) throw new Error('拉片分析需要已配置密钥且支持图片输入的视觉模型');
+      return selected;
+    },
+    instructions: async agentId => {
+      await skillLibrary.ready;
+      const agent = loadAgents(storage).find(agent => agent.id === agentId && agent.enabled !== false && agent.selectable !== false);
+      if (!agent) throw new Error('请选择已启用的主 Agent');
+      const skill = skillLibrary.list().find(skill => skill.slug === 'video-redraw');
+      const skillRoot = join(promptFile, '..', '..', 'skills', 'video-redraw');
+      const instructions = skill?.instructions || readFileSync(join(skillRoot, 'SKILL.md'), 'utf8');
+      const resources = ['references/source-analysis.md', 'references/localization.md'].map(path => skill?.resources?.find(resource => resource.path === path)?.content || readFileSync(join(skillRoot, path), 'utf8'));
+      return [agent.instructions, agent.websiteInstructions, instructions, ...resources].filter(Boolean).join('\n\n');
+    },
+    transcribe: (bytes, language, signal) => transcribeVideoAudio(storage, env, bytes, language, signal, requestRecords),
+  });
   const mediaJobs = createMediaJobsApi(storage.path, () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), () => storage.getConfig<StoredProvider[]>('providers') || [], files, { target: (value, type) => studio.mediaTarget(value, type), completed: job => studio.attachMedia(job) }, requestRecords);
   if (!storage.getConfig<boolean>('requestRecordsInitialized')) {
     for (const job of mediaJobs.store.list()) {
@@ -379,6 +402,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       return;
     }
     if (await handleWorkspaceProjectRequest(request, response, projectStore)) return;
+    if (await handleRedrawRequest(request, response, videoRedraw)) return;
     if (await handleStudioRequest(request, response, studio)) return;
     if (await mediaJobs.handle(request, response)) return;
     const controller = new AbortController();
@@ -411,7 +435,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       const defaultAgent: StoredAgent = { id: 'default', name: savedDefault?.name || '网站助手', avatar: savedDefault?.avatar || '/agent-default-avatar.png', description: savedDefault?.description || '系统默认 Agent', type: 'main_agent', source: 'system_default', selectable: true, callable: true, contextStrategy: 'inherit_filtered', instructions: savedDefault?.instructions || await loadPrompt(), websiteInstructions: savedDefault?.websiteInstructions ?? readFileSync(new URL('../prompts/website.md', import.meta.url), 'utf8'), skillIds: [], contextPolicy: savedDefault?.contextPolicy || { childContext: 'task-only', historyMode: 'summary', toolResultMode: 'standard' }, enabled: true, isDefault: true, builtIn: true };
       const agents = [defaultAgent, ...configuredAgents.filter((agent) => agent.id !== defaultAgent.id)];
       const path = request.url.split('?')[0];
-      if (path === '/api/tools' && request.method === 'GET') return send(200, [...MEDIA_TOOLS, ...RUNTIME_TOOLS, ...STUDIO_TOOLS].map((tool) => ({ ...tool, inputSchema: tool.parameters, parameters: undefined })));
+      if (path === '/api/tools' && request.method === 'GET') return send(200, [...MEDIA_TOOLS, ...RUNTIME_TOOLS, ...STUDIO_TOOLS, ...REDRAW_TOOLS].map((tool) => ({ ...tool, inputSchema: tool.parameters, parameters: undefined })));
       if (path === '/api/approval-settings' && request.method === 'GET') return send(200, storage.getConfig('approvalSettings') || { mode: DEFAULT_APPROVAL_MODE });
       if (path === '/api/approval-settings' && request.method === 'POST') {
         if (!isLocalOrLanAddress(request.socket.remoteAddress) || (origin && new URL(origin).host !== host)) return send(403, { error: '仅允许本机或局域网同源修改审批模式' });
@@ -814,7 +838,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           const functions = ownedConnections.flatMap((connection, appIndex) => connection.tools.map((tool, index) => ({ name: `mcp_${appIndex}_${index}`, connection, tool })));
           if (functions.length > 128) throw new Error('所选应用合计超过 128 个工具，请减少应用数量');
           const mediaTools = MEDIA_TOOLS;
-          const hostTools = [...RUNTIME_TOOLS.map(tool => ({ ...tool, execute: (args: Record<string, unknown>, context: Parameters<typeof runtime.execute>[2]) => runtime.execute(tool.name, args, context) })), ...STUDIO_TOOLS.map(tool => ({ ...tool, execute: async (args: Record<string, unknown>) => tool.risk === 'read' ? studio.query(args) : args.undoBatchId ? studio.undo(String(args.undoBatchId), String(args.requestId)) : studio.apply(String(args.requestId), args.changes as import('../studio-schema').StudioChange[]) }))];
+          const hostTools = [...RUNTIME_TOOLS.map(tool => ({ ...tool, execute: (args: Record<string, unknown>, context: Parameters<typeof runtime.execute>[2]) => runtime.execute(tool.name, args, context) })), ...STUDIO_TOOLS.map(tool => ({ ...tool, execute: async (args: Record<string, unknown>) => tool.risk === 'read' ? studio.query(args) : args.undoBatchId ? studio.undo(String(args.undoBatchId), String(args.requestId)) : studio.apply(String(args.requestId), args.changes as import('../studio-schema').StudioChange[]) })), ...REDRAW_TOOLS.map(tool => ({ ...tool, execute: async (args: Record<string, unknown>) => tool.risk === 'read' ? videoRedraw.read(args) : videoRedraw.edit(args) }))];
           const execution: ToolExecution = {
           maxSteps: runtimeAllowed ? 32 : 8,
           tools: [...functions.map(({ name, connection, tool }) => ({ name, description: `${connection.app.name} / ${tool.title || tool.name} (${tool.name}): ${tool.description || ''}`, parameters: tool.inputSchema })), ...mediaTools, ...(runtimeAllowed ? hostTools : [])],
@@ -1147,5 +1171,5 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     }
   };
   const scopedMiddleware = (request: IncomingMessage, response: ServerResponse, next: () => void) => requestRecordScope.run({ store: requestRecords, requestId: crypto.randomUUID() }, () => middleware(request, response, next));
-  return Object.assign(scopedMiddleware, { dispose: () => { mediaJobs.runner.stop(); requestRecords.close(); return runtime.dispose(); } });
+  return Object.assign(scopedMiddleware, { dispose: () => { videoRedraw.dispose(); mediaJobs.runner.stop(); requestRecords.close(); return runtime.dispose(); } });
 }

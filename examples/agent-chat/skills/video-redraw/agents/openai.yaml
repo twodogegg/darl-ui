@@ -1,0 +1,4 @@
+interface:
+  display_name: "视频转绘"
+  short_description: "从原视频提取分镜和资产，按日本或欧美地区语言改编并保留原片依据"
+  default_prompt: "使用 $video-redraw，读取原视频与项目设置，完成拉片、资产核对和目标地区语言改编。"

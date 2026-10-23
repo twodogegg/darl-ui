@@ -1,4 +1,5 @@
 import promptCatalog from '../prompts/studio-prompt-catalog.json';
+import redrawPrompts from '../prompts/video-redraw.json';
 import { createHash, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { emptyStudioData, studioChangeSchema, studioDefaults, studioFields, studioRequiredOnCreate, studioResource, studioValueSchema, validateStudioValues, type StudioChange, type StudioData, type StudioRecord, type StudioResource } from '../studio-schema';
@@ -23,7 +24,8 @@ export class StudioStore {
     const insert = this.db.prepare("INSERT OR IGNORE INTO studio_records(resource,id,data,version,position) VALUES('prompts',?,?,1,?)");
     const current = this.db.prepare("SELECT data,version FROM studio_records WHERE resource='prompts' AND id=?");
     const update = this.db.prepare("UPDATE studio_records SET data=?,version=? WHERE resource='prompts' AND id=?");
-    promptCatalog.forEach(({ id, action: _, ...values }, index) => {
+    const catalog = [...promptCatalog, ...Object.entries(redrawPrompts).map(([key, defaultText], index) => ({ id: `4-${index}`, action: `redraw-${key}`, group: 4, name: { analysis: '视频拉片与改编', asset: '转绘资产', clip: '转绘镜头' }[key] || key, mode: 'default', text: '', defaultText }))];
+    catalog.forEach(({ id, action: _, ...values }, index) => {
       insert.run(id, JSON.stringify(values), index);
       const saved = current.get(id) as { data: string; version: number } | undefined;
       const existing = JSON.parse(saved!.data) as Record<string, unknown>;
@@ -175,6 +177,16 @@ export class StudioStore {
     if (!item || item._version !== target.version) throw new StudioConflict('生成目标已变化，请重新读取');
     const fields = type === 'video' ? resource === 'clips' ? ['videos'] : [] : resource === 'assets' ? ['image'] : ['image', 'storyboardImage', 'blockingImage'];
     if (!fields.includes(String(target.field))) throw new Error('生成类型与目标字段不匹配');
+    if (resource === 'clips') {
+      const state = this.snapshot(), episode = state.episodes.find(episode => episode.id === item.episodeId);
+      const project = state.projects.find(project => project.id === episode?.projectId);
+      if (project?.creationMode === 'video-redraw') {
+        const assets = state.assets.filter(asset => (item.assetIds as string[]).includes(asset.id));
+        if (!assets.length) throw new Error('视频转绘片段须关联原片提取的目标资产');
+        const missing = assets.filter(asset => !asset.image);
+        if (missing.length) throw new Error(`请先准备目标资产图片：${missing.map(asset => asset.name).join('、')}`);
+      }
+    }
     if (target.variantId && !(item.variants as Array<{ id: string }> | undefined)?.some(variant => variant.id === target.variantId)) throw new Error('资产形态不存在');
     return { resource, id: item.id, version: item._version, field: target.field, ...(target.variantId ? { variantId: target.variantId } : {}) };
   }
@@ -213,6 +225,25 @@ export class StudioStore {
         if (!(episode.scenes as Array<{ id: string }>).some(scene => scene.id === item.sceneId)) throw new Error('分镜或片段引用了不存在的场次');
       }
       if (resource === 'projects') {
+        if (item.creationMode && !['script', 'video-redraw'].includes(String(item.creationMode))) throw new Error('项目创作模式无效');
+        if (item.creationMode === 'video-redraw') {
+          if (!['japan', 'western'].includes(String(item.targetRegion)) || !['ja', 'en'].includes(String(item.targetLanguage))) throw new Error('目标地区或语言无效');
+          const source = item.sourceVideo as Record<string, unknown>;
+          if (source.fileId && this.projects.files.get(String(source.fileId))?.mimeType !== 'video/mp4') throw new Error('原片须引用已上传的 MP4');
+          if (source.duration !== undefined && !finitePositive(source.duration)) throw new Error('原片时长无效');
+          if (source.segments !== undefined) {
+            if (!Array.isArray(source.segments) || source.segments.length > 80) throw new Error('原片镜头列表无效');
+            const ids = new Set<string>();
+            for (const segment of source.segments as Array<Record<string, unknown>>) {
+              const id = recordId(segment.id);
+              if (ids.has(id) || !Number.isFinite(segment.start) || !Number.isFinite(segment.end) || Number(segment.start) < 0 || Number(segment.end) <= Number(segment.start)
+                || Number(segment.end) > Number(source.duration) || !Array.isArray(segment.frames) || segment.frames.length > 12) throw new Error('原片镜头区间或参考帧无效');
+              ids.add(id);
+              for (const frame of segment.frames as Array<Record<string, unknown>>) if (this.projects.files.get(String(frame.fileId))?.mimeType !== 'image/jpeg'
+                || frame.url !== `/api/files/${frame.fileId}` || !Number.isFinite(frame.time) || Number(frame.time) < Number(segment.start) || Number(frame.time) > Number(segment.end)) throw new Error('原片参考帧无效');
+            }
+          }
+        }
         if (item.planned !== null && (!Number.isInteger(item.planned) || Number(item.planned) < 1 || Number(item.planned) > 100)) throw new Error('计划集数应为1–100或留空');
         if (![item.durationMin,item.durationMax].every(value => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 60) || Number(item.durationMin) > Number(item.durationMax)) throw new Error('单集时长范围无效');
       }
@@ -234,6 +265,10 @@ export class StudioStore {
       if (resource === 'shots') {
         if (!finitePositive(item.duration) || !Array.isArray(item.dialogue)) throw new Error('镜头时长或对白无效');
         const episode = required('episodes', item.episodeId, `${path}.episodeId`);
+        if (item.assetIds !== undefined) {
+          if (!Array.isArray(item.assetIds) || new Set(item.assetIds).size !== item.assetIds.length) throw new Error('镜头资产关联无效');
+          for (const id of item.assetIds as string[]) if (required('assets', id, `${path}.assetIds`).projectId !== episode.projectId) throw new Error('镜头资产不属于当前项目');
+        }
         for (const [index, line] of (item.dialogue as Array<Record<string, unknown>>).entries()) {
           if (!['角色', '旁白'].includes(String(line.type)) || typeof line.text !== 'string') throw new Error('对白类型或文本无效');
           if (line.type === '角色') { const asset = required('assets', line.assetId, `${path}.dialogue[${index}].assetId`); if (asset.type !== '角色' || asset.projectId !== episode.projectId) throw new Error(`${path}.dialogue[${index}].assetId：对白角色不属于当前项目`); }
@@ -244,6 +279,24 @@ export class StudioStore {
         for (const id of item.episodeIds as string[]) if (required('episodes', id, `${path}.episodeIds`).projectId !== item.projectId) throw new Error('资产关联剧集不属于当前项目');
         if (item.voiceId) required('voices', item.voiceId, `${path}.voiceId`);
         if (data.assets.some(other => other.id !== item.id && other.projectId === item.projectId && other.type === item.type && String(other.name).trim() === String(item.name).trim())) throw new Error('同类型同名资产已存在，请复用已有记录');
+      }
+      if (resource === 'assets' || resource === 'shots') {
+        const owner = byId('projects', resource === 'assets' ? item.projectId : byId('episodes', item.episodeId)?.projectId);
+        if (owner?.creationMode === 'video-redraw' && item.source === undefined) throw new Error('转绘资产和镜头须提供原片来源，请先截帧补入或应用拉片草稿');
+      }
+      if ((resource === 'assets' || resource === 'shots') && item.source !== undefined) {
+        const source = item.source as Record<string, unknown>;
+        const project = required('projects', resource === 'assets' ? item.projectId : required('episodes', item.episodeId, path).projectId, path);
+        const video = project.sourceVideo as Record<string, unknown>;
+        if (!source || !Number.isFinite(video.duration) || source.fileId !== video.fileId || !Number.isFinite(source.start) || !Number.isFinite(source.end)
+          || Number(source.start) < 0 || Number(source.end) <= Number(source.start) || Number(source.end) > Number(video.duration) + 0.001) throw new Error('原片来源区间无效');
+        if (!Array.isArray(source.frames) || source.frames.length > 12) throw new Error('原片参考帧无效');
+        for (const frame of source.frames as Array<Record<string, unknown>>) {
+          if (!Number.isFinite(frame.time) || Number(frame.time) < Number(source.start) || Number(frame.time) > Number(source.end)
+            || this.projects.files.get(String(frame.fileId))?.mimeType !== 'image/jpeg' || frame.url !== `/api/files/${frame.fileId}`) throw new Error('原片参考帧或时间无效');
+        }
+        if (source.confirmed !== undefined && typeof source.confirmed !== 'boolean') throw new Error('来源确认状态无效');
+        for (const key of ['description', 'name', 'dialogue', 'notes']) if (source[key] !== undefined && typeof source[key] !== 'string') throw new Error('来源描述须为文本');
       }
       if (resource === 'clips') {
         const episode = required('episodes', item.episodeId, `${path}.episodeId`);
@@ -259,7 +312,7 @@ export class StudioStore {
       }
       const collect = (value: unknown) => { if (typeof value === 'string' && (/^(?:data:|javascript:)/i.test(value))) throw new Error('媒体请先上传到文件服务'); if (value && typeof value === 'object') Object.values(value).forEach(collect); };
       // Only media-bearing fields are URLs; script text may legitimately contain arbitrary text.
-      for (const key of ['image', 'imageHistory', 'history', 'storyboardImage', 'storyboardHistory', 'blockingImage', 'blockingHistory', 'videos', 'currentVideo', 'url', 'firstFrame', 'lastFrame', 'variants', 'references']) if (resource !== 'history' && item[key] !== undefined) urls.push(item[key]);
+      for (const key of ['image', 'imageHistory', 'history', 'storyboardImage', 'storyboardHistory', 'blockingImage', 'blockingHistory', 'videos', 'currentVideo', 'url', 'firstFrame', 'lastFrame', 'variants', 'references', 'source', 'sourceVideo']) if (resource !== 'history' && item[key] !== undefined) urls.push(item[key]);
       urls.splice(0).forEach(collect);
     }
   }

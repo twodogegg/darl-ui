@@ -1,9 +1,9 @@
 /** Existing RN web fields. Version is transport metadata, not an editable field. */
 export const studioFields = {
-  projects: 'title summary cover ratio style_catalog_id generationMode planned durationMin durationMax duration requirements outline sourceScript updated',
+  projects: 'title summary cover ratio style_catalog_id generationMode planned durationMin durationMax duration requirements outline sourceScript updated creationMode targetRegion targetLanguage sourceVideo',
   episodes: 'projectId number title cover script scenes duration stage',
-  assets: 'projectId episodeIds name type role alias description appearance costume voiceDescription image prompt variants history voiceId references',
-  shots: 'episodeId sceneId description scale camera transition dialogue effects duration',
+  assets: 'projectId episodeIds name type role alias description appearance costume voiceDescription image prompt variants history voiceId references source',
+  shots: 'episodeId sceneId description scale camera transition dialogue effects duration source assetIds',
   clips: 'episodeId sceneId title shotIds sourceSignature description duration prompt assetIds references disabledVoiceIds lastGenerationVoiceIds image imageHistory storyboardImage storyboardHistory blockingImage blockingHistory videos currentVideo model resolution ratio mode firstFrame lastFrame',
   films: 'projectId episodeId title name url',
   history: 'projectId episodeId message time',
@@ -44,7 +44,7 @@ export function studioPositions(before: Array<{ id: string; _position?: number }
   return positions;
 }
 export const studioDefaults: Partial<Record<StudioResource, Record<string, unknown>>> = {
-  projects: { cover: '', generationMode: '故事版', planned: null, durationMin: 2, durationMax: 5, duration: 120, requirements: '', outline: { core: '', story: '', keep: '', remove: '', merge: '', risks: '', episodes: '', roles: [], scenes: [] }, sourceScript: '' },
+  projects: { cover: '', generationMode: '故事版', planned: null, durationMin: 2, durationMax: 5, duration: 120, requirements: '', outline: { core: '', story: '', keep: '', remove: '', merge: '', risks: '', episodes: '', roles: [], scenes: [] }, sourceScript: '', creationMode: 'script', targetRegion: 'japan', targetLanguage: 'ja', sourceVideo: {} },
   episodes: { number: 1, title: '新剧集', cover: '', script: '', scenes: [], duration: 120, stage: 1 },
   assets: { episodeIds: [], name: '', type: '角色', role: '', alias: '', description: '', appearance: '', costume: '', voiceDescription: '', image: '', prompt: '', variants: [], history: [], voiceId: '', references: [] },
   shots: { description: '', scale: '中景', camera: '固定', transition: '硬切', dialogue: [], effects: '', duration: 3 },
@@ -57,6 +57,21 @@ export function studioResource(value: unknown): StudioResource {
 const idFields = new Set(['projectId', 'episodeId', 'sceneId', 'voiceId', 'folderId']);
 const arrayFields = new Set(['episodeIds', 'scenes', 'variants', 'history', 'references', 'dialogue', 'shotIds', 'assetIds', 'disabledVoiceIds', 'lastGenerationVoiceIds', 'imageHistory', 'storyboardHistory', 'blockingHistory', 'videos']);
 const numericFields = new Set(['number', 'duration', 'stage', 'planned', 'durationMin', 'durationMax', 'updated', 'group', 'style_catalog_id']);
+const objectFields = new Set(['outline', 'sourceVideo', 'source']);
+const frameSchema = { type: 'object', additionalProperties: false, properties: { fileId: { type: 'string' }, time: { type: 'number', minimum: 0 }, url: { type: 'string' } }, required: ['fileId', 'time', 'url'] };
+const segmentSchema = { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, start: { type: 'number', minimum: 0 }, end: { type: 'number', exclusiveMinimum: 0 }, frames: { type: 'array', items: frameSchema, maxItems: 12 } }, required: ['id', 'start', 'end', 'frames'] };
+const videoSourceSchema = { type: 'object', additionalProperties: false, properties: {
+  fileId: { type: 'string' }, url: { type: 'string' }, name: { type: 'string' }, duration: { type: 'number', exclusiveMinimum: 0 },
+  width: { type: 'integer', minimum: 1 }, height: { type: 'integer', minimum: 1 }, fps: { type: 'number', minimum: 0 }, hasAudio: { type: 'boolean' },
+  segments: { type: 'array', items: segmentSchema, maxItems: 80 },
+} };
+export const sourceSchema = {
+  type: 'object', additionalProperties: false, properties: {
+    fileId: { type: 'string' }, segmentId: { type: 'string' }, start: { type: 'number', minimum: 0 }, end: { type: 'number', exclusiveMinimum: 0 },
+    frames: { type: 'array', items: frameSchema, maxItems: 12 }, name: { type: 'string' }, description: { type: 'string' },
+    dialogue: { type: 'string' }, confirmed: { type: 'boolean' }, notes: { type: 'string' },
+  }, required: ['fileId', 'start', 'end', 'frames'],
+};
 export const studioRequiredOnCreate: Partial<Record<StudioResource, string[]>> = {
   projects: ['title', 'ratio', 'style_catalog_id'], episodes: ['projectId'], assets: ['projectId', 'name'],
   shots: ['episodeId', 'sceneId'], clips: ['episodeId', 'sceneId'], films: ['projectId'], history: ['projectId'],
@@ -74,7 +89,11 @@ export function studioValueSchema(resource: StudioResource): Record<string, unkn
     let schema: Record<string, unknown> = { type: 'string' };
     if (numericFields.has(key)) schema = { type: key === 'planned' ? ['number', 'null'] : 'number' };
     if (arrayFields.has(key)) schema = { type: 'array' };
-    if (key === 'outline') schema = { type: 'object' };
+    if (objectFields.has(key)) schema = key === 'source' ? sourceSchema : key === 'sourceVideo' ? videoSourceSchema : { type: 'object' };
+    if (key === 'creationMode') schema = { type: 'string', enum: ['script', 'video-redraw'] };
+    if (key === 'targetRegion') schema = { type: 'string', enum: ['japan', 'western'] };
+    if (key === 'targetLanguage') schema = { type: 'string', enum: ['ja', 'en'] };
+    if (key === 'assetIds') schema = { type: 'array', items: { type: 'string' }, uniqueItems: true };
     if (key === 'favorite') schema = { type: 'boolean' };
     if (key === 'projectId' || key === 'episodeId' || key === 'sceneId') schema = { type: 'string', minLength: 1, description: '关联记录的真实 ID；同批新建记录可用该记录的 ID。' };
     if (key === 'dialogue') schema = { type: 'array', items: dialogueSchema };
@@ -101,8 +120,8 @@ export function validateStudioValues(resource: StudioResource, values: unknown):
     if (idFields.has(key) && typeof value !== 'string') throw new Error(`${key} 必须是记录编号`);
     if (arrayFields.has(key) && !Array.isArray(value)) throw new Error(`${key} 必须是数组`);
     if (numericFields.has(key) && !(key === 'planned' && value === null) && (typeof value !== 'number' || !Number.isFinite(value))) throw new Error(`${key} 必须是有限数字`);
-    if (key === 'outline' && (!value || typeof value !== 'object' || Array.isArray(value))) throw new Error('大纲格式无效');
-    if (!idFields.has(key) && !arrayFields.has(key) && !numericFields.has(key) && key !== 'outline' && key !== 'favorite' && typeof value !== 'string') throw new Error(`${key} 必须是文本`);
+    if (objectFields.has(key) && (!value || typeof value !== 'object' || Array.isArray(value))) throw new Error(`${key} 必须是对象`);
+    if (!idFields.has(key) && !arrayFields.has(key) && !numericFields.has(key) && !objectFields.has(key) && key !== 'favorite' && typeof value !== 'string') throw new Error(`${key} 必须是文本`);
     if (key === 'favorite' && typeof value !== 'boolean') throw new Error('收藏状态无效');
   }
   return values as Record<string, unknown>;

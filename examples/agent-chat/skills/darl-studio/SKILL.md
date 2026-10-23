@@ -25,6 +25,10 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 | 创作提示词设置 | `prompts` | 各创作环节的全站规则 |
 | 视觉风格 | `styles` | 只读风格目录 |
 
+视频转绘项目与剧本项目共用这些资源。`projects` 增加 `creationMode`（`script` / `video-redraw`）、`targetRegion`（`japan` / `western`）、`targetLanguage`（`ja` / `en`）、`sourceVideo`。`sourceVideo` 保存原视频 `fileId/url/name`、真实 `duration/width/height/fps/hasAudio`、`segments`（每项 `id/start/end/frames`）；每帧是 `fileId/time/url`。先上传 MP4，再保存项目引用，用转绘工具取得真实元数据，不能编造时长或抽帧结果。
+
+`assets.source` 与 `shots.source` 保存原片 `fileId/start/end/frames`，可含原始 `name/description/dialogue/notes/confirmed`；镜头的 `source.segmentId` 指向原片候选镜头 ID，业务镜头 ID 按项目隔离，不与 segment ID 混用。目标设定继续使用现有资产/分镜字段。`shots.assetIds` 为本镜人物、场景、道具的稳定关联。原片与目标版本分别保留；资产必须有原片依据。完整字段和嵌套类型仍以 describe 为准。
+
 ### 查询
 
 调用 `builtin_read_studio`，先用 `describe=true` 获取该资源的字段、类型、必填项、默认值和嵌套结构，再按需要查询：
@@ -91,6 +95,33 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 `modelId` 与生成参数采用当轮 Tool schema。`options` 可含 `resolution`、`aspectRatio`、`duration`、`references`。参考编辑时将指定图片放入 `references`。
 
 自动关联生成结果使用 `options.studioTarget`，字段为 `resource`（`assets` 或 `clips`）、`id`、最新 `version`、`field`，形态另传 `variantId`。图片字段为资产 `image` 或片段 `image`、`storyboardImage`、`blockingImage`；视频字段为片段 `videos`。提交后用任务查询 Tool 获取结果。
+
+## 视频转绘
+
+具体创作规则按需加载 `video-redraw`；此处只说明网站操作。发现当轮转绘查询/操作能力后调用，不按名称猜测旧定义。
+
+| Tool | 用法 |
+| --- | --- |
+| `builtin_read_video_redraw` | `describe=true` 查询能力、地区与限制；否则以 `projectId` 查询原片、持久化任务、草稿和错误 |
+| `builtin_edit_video_redraw` | `projectId`、`action`，其他参数依操作及当前 schema |
+
+| action | 参数与行为 |
+| --- | --- |
+| `prepare` | `requestId`、最新项目 `version`；检测切镜并抽帧，成功后保存原片真实元数据和 `segments` |
+| `analyze` | `requestId`、`version`、逻辑文本 `modelId`、主 `agentId`；使用已配置的视觉模型。`sourceLanguage` 为原语言两位代码或空字符串自动识别；`visualOnly=true` 明确跳过原声分析。可传 `start/end` 只检查相交镜头 |
+| `apply` | `jobId`，可选 `shotIds` 为草稿的 segment ID，留空应用全部；同批写入分镜、关联资产和场次。保护人工修改，项目设置或版本冲突时重新读取 |
+| `cancel` | `jobId`；取消本项目运行中的转绘任务 |
+| `frame` | `start/end`；返回中间真实帧及 `source`，供手工补资产或镜头；返回截图本身不创建业务记录 |
+| `edit-shot` | `shotId`、`shotVersion`、`start/end`；更新原片切点与参考帧。另传 `split` 在指定原片时间拆分，已有片段引用时先调整关联 |
+| `merge-shots` | `fromId/toId/fromVersion/toVersion`；合并同场、原片时间相邻的两个镜头，保留 fromId，迁移内容。已有片段引用时阻止操作 |
+| `merge-assets` | `fromId/toId/fromVersion/toVersion`；确认是同一主体后合并同项目同类型资产，迁移分镜/片段引用，保留来源证据及目标图片历史；先处理源资产的衍生形态 |
+| `export` | `requestId`、`version`、`selections:[{clipId,start?,end?}]`；按数组顺序合成已选用的真实视频，裁剪点基于实际媒体时长。保留生成音轨，不加入原片声音；成功后写入 `films` |
+
+提交后读取任务真实状态：`queued/running/completed/failed/cancelled/interrupted`；`draft`、`segments`、`transcript` 为已完成阶段。提交返回任务不代表完成。原样重试沿用 requestId；继续失败/取消/中断任务用新 requestId 和 `resumeJobId`，项目设置、模型和区间须匹配，已完成分析与转写可复用。项目内同时一个转绘任务，全站同时两个。
+
+首版原片仅 MP4、50 MB、120 秒、自动检测最多40镜头。无声视频跳过转写；有声视频默认用现有 Fish 配置获取真实时间戳，缺配置/调用失败如实报告。仅画面分析不会推断对白。视频生成沿用当前图片参考能力，尚不承诺连续动作逐帧还原；最终目标语音和口型需检查实际结果。
+
+`prepare` 已使用脚本一次解码批量抽帧；`analyze` 自动将每批最多4镜头/12帧拼成带帧号和时间的图，并传入真实镜头映射和相交转写，无需另传拼图参数或重复运行脚本。离线使用随 `video-redraw` 打包的抽帧脚本时，先加载该 Skill 并读取 `references/source-analysis.md`；本地 `sample-N` 分组不是网站真实镜头 ID。
 
 ## 工作区文件与命令
 
