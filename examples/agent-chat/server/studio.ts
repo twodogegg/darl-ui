@@ -21,7 +21,16 @@ export class StudioStore {
       CREATE TABLE IF NOT EXISTS studio_versions (resource TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,PRIMARY KEY(resource,id));
       CREATE TABLE IF NOT EXISTS studio_batches (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, result TEXT NOT NULL, inverse TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
     const insert = this.db.prepare("INSERT OR IGNORE INTO studio_records(resource,id,data,version,position) VALUES('prompts',?,?,1,?)");
-    promptCatalog.forEach(({ id, action: _, ...values }, index) => insert.run(id, JSON.stringify(values), index));
+    const current = this.db.prepare("SELECT data,version FROM studio_records WHERE resource='prompts' AND id=?");
+    const update = this.db.prepare("UPDATE studio_records SET data=?,version=? WHERE resource='prompts' AND id=?");
+    promptCatalog.forEach(({ id, action: _, ...values }, index) => {
+      insert.run(id, JSON.stringify(values), index);
+      const saved = current.get(id) as { data: string; version: number } | undefined;
+      const existing = JSON.parse(saved!.data) as Record<string, unknown>;
+      if (existing.mode !== 'default') return;
+      const next = { group: values.group, name: values.name, mode: existing.mode, text: existing.text, defaultText: values.defaultText };
+      if (JSON.stringify(existing) !== JSON.stringify(next)) update.run(JSON.stringify(next), saved!.version + 1, id);
+    });
   }
   snapshot(): StudioData {
     const data = emptyStudioData();

@@ -24,7 +24,7 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
   const [agentSelection, setAgentSelection] = useState('')
   const [modelSelections, setModelSelections] = useState({})
   const [lastBatch, setLastBatch] = useState('')
-  const getModel = (type, modelId) => models.find(model => model.type === type && model.id === (modelId || modelSelections[type] || (type === 'text' ? currentTextModelId : mediaDefaults[type]?.modelId)))
+  const getModel = (type, modelId) => models.find(model => model.type === type && model.enabled !== false && model.id === (modelId || modelSelections[type] || (type === 'text' ? currentTextModelId : mediaDefaults[type]?.modelId)))
   const state = useRef(data), queue = useRef(Promise.resolve()), failed = useRef(false), count = useRef(0), timer = useRef(), mounted = useRef(true)
   const announce = useCallback(message => { if (!mounted.current) return; clearTimeout(timer.current); setToast(message); timer.current = setTimeout(() => setToast(''), 4000) }, [])
   const reload = useCallback(async () => {
@@ -36,11 +36,13 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
   useEffect(() => {
     mounted.current = true
     reload().catch(reason => { setError(reason.message); setLoading(false) })
-    studioApi('default-models').then(value => { if (mounted.current) setMediaDefaults(value) }).catch(reason => announce(reason.message))
+    const refreshDefaults = () => studioApi('default-models').then(value => { if (mounted.current) setMediaDefaults(value) }).catch(reason => announce(reason.message))
+    refreshDefaults()
     const refresh = () => { if (!count.current) reload().catch(reason => setError(reason.message)) }
     const interval = setInterval(refresh, 3000)
     window.addEventListener('studio-changed', refresh)
-    return () => { mounted.current = false; clearInterval(interval); clearTimeout(timer.current); window.removeEventListener('studio-changed', refresh) }
+    window.addEventListener('studio-defaults-changed', refreshDefaults)
+    return () => { mounted.current = false; clearInterval(interval); clearTimeout(timer.current); window.removeEventListener('studio-changed', refresh); window.removeEventListener('studio-defaults-changed', refreshDefaults) }
   }, [reload])
   const notify = useCallback(message => {
     if (!count.current) return announce(message)
@@ -123,7 +125,7 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
       options: { resolution, aspectRatio, ...options, ...(references.length ? { references } : {}), studioTarget: { ...target, version: item._version } },
     })
     if (mounted.current) setMediaJobs(current => [job, ...current.filter(item => item.id !== job.id)])
-    announce('生成任务已入队，可在“生成任务”中查看真实进度')
+    announce('生成任务已入队，页面将同步真实进度')
     return job
   }
   return <Store.Provider value={{ data, update, patch, notify, log, reload, requestAgent, agents, models, getModel, currentAgentId, mediaJobs, mediaDefaults, onNavigate, cancelAgent: onAgentCancel, generateMedia, agentSelection, setAgentSelection, modelSelections, setModelSelections }}>

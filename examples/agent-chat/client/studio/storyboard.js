@@ -33,7 +33,7 @@ export function clipMediaReferences(clip, data) {
     additional.push({ ...ref, id: ref.id || referenceKey(ref), name: ref.name || `${{ image: '图片', video: '视频', audio: '音频' }[ref.kind] || '素材'} ${index + 1}` })
   }
   const images = [...new Map([...imageRefs, ...additional.filter(ref => ref.kind === 'image')].map(ref => [referenceKey(ref), ref])).values()]
-  return { assets, additional, images, frames }
+  return { assets, additional, images, frames: frames.filter(frame => !assets.some(asset => asset.image && referenceKey(asset.image) === referenceKey(frame))) }
 }
 export const formatDialogue = (line) => `${line.type === '旁白' ? '旁白' : line.speaker}｜${line.description || '描述未指定'}｜${line.text}`
 export function clipVoices(clip, data) {

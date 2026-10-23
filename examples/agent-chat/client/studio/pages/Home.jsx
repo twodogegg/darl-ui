@@ -12,12 +12,11 @@ import {
   IconVideo,
 } from '@tabler/icons-react'
 import { studioApi, useStore } from '../store'
-import { id, steps, makeOutline } from '../data'
+import { steps, makeOutline } from '../data'
 import { StyleSelector } from '@darl/ui'
 import { createWorkspaceStyle, styleOptionsFromCatalog } from '../../workspace-styles'
 import { FileButton, Processing, DirectorSelect, TextModelSelect } from '../components/ui'
-import { parseScript } from '../files'
-import { parseScenes } from '../scenes'
+import { parseSource } from '../files'
 
 export default function Home() {
   const { data, update, notify, reload, requestAgent, cancelAgent } = useStore()
@@ -54,11 +53,11 @@ export default function Home() {
     if (!file || reading) return
     setReading(true)
     try {
-      const text = await parseScript(file)
+      const text = await parseSource(file)
       if (alive.current) {
         setScript(text)
         setFileName(file.name)
-        notify('剧本已在浏览器中读取')
+        notify('原始素材已在浏览器中读取')
       }
     } catch (e) {
       if (alive.current) notify(e.message)
@@ -69,7 +68,7 @@ export default function Home() {
     e.preventDefault()
     if (busy || reading) return
     const text = script.trim()
-    if (!text) return notify('请先上传剧本文件')
+    if (!text) return notify('请先上传原始素材')
     if (!styleId) return notify('请选择视觉风格')
     if (planned !== '' && (!Number.isInteger(Number(planned)) || planned < 1 || planned > 100)) return notify('计划集数应为1—100的整数')
     if (![durationMin, durationMax].every(value => Number.isInteger(Number(value)) && value >= 1 && value <= 60) || Number(durationMin) > Number(durationMax)) return notify('请填写有效的单集时长范围')
@@ -80,13 +79,12 @@ export default function Home() {
       projectId = String(result.data.project_id)
       if (images[0]?.fileId) await studioApi(`workspace/projects/${projectId}/covers/files/${images[0].fileId}/select`, {})
       await reload()
-      const episodeId = id(), scenes = parseScenes(text, episodeId)
       await update(draft => {
         Object.assign(draft.projects.find(item => item.id === projectId), { sourceScript: text, requirements: requirements.trim(), generationMode, planned: planned === '' ? null : Number(planned), durationMin: Number(durationMin), durationMax: Number(durationMax), duration: Number(durationMin)*60, outline: makeOutline({ summary: text.slice(0,2000) }) })
-        draft.episodes.push({ id: episodeId, projectId, number: 1, title: '导入剧本', cover: '', script: text, scenes, duration: Number(durationMin)*60, stage: 1 })
       })
       navigate(`/outline?projectId=${projectId}`)
-      await requestAgent({ action: 'outline', projectId })
+      await requestAgent({ action: 'outline', projectId, draftOnly: true })
+      notify('已填入项目大纲提示词，请确认后发送')
     } catch (reason) { notify(reason.message + (projectId ? '。项目已创建，可在我的项目中继续。' : '')) }
     finally { if (alive.current) setBusy(false) }
   }
@@ -98,7 +96,7 @@ export default function Home() {
           <p className="br-eyebrow">YOUR CREATIVE WORKSPACE</p>
           <h1 className="br-title">你的下一部作品，从这里开始。</h1>
           <p className="br-title-sub">
-            一份剧本，让故事逐步成为可以观看的影片。
+            一份原始素材，让故事逐步成为可以观看的影片。
           </p>
         </div>
         <Link className="br-text-link" to="/projects">
@@ -110,7 +108,7 @@ export default function Home() {
           <p className="br-overline">NEW PROJECT / 创作起点</p>
           <h2 className="br-hero-title">本入剧出，让故事开场。</h2>
           <p className="br-hero-desc">
-            上传剧本，填写创作要求，开始从故事到影像的创作。
+            上传小说或剧本等原始素材，填写创作要求，开始从故事到影像的创作。
           </p>
           <form className="br-creator" onSubmit={create}>
             <div className="br-composer">
@@ -123,11 +121,11 @@ export default function Home() {
                 }}
               >
                 <IconFileText size={24} />
-                <strong>{reading ? '读取中…' : fileName || '上传剧本'}</strong>
+                <strong>{reading ? '读取中…' : fileName || '上传原始素材'}</strong>
                 <span>{fileName ? '点击或拖入文件可重新上传' : '点击选择或拖入文件 · TXT / DOCX / MD / XLSX'}</span>
                 <input
                   type="file"
-                  aria-label="上传剧本"
+                  aria-label="上传原始素材"
                   accept=".txt,.md,.docx,.xlsx"
                   disabled={busy || reading}
                   onChange={(e) => {

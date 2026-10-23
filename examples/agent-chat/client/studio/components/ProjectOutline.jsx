@@ -22,7 +22,7 @@ const sceneColumns = [
 ]
 
 export default function ProjectOutline({ project, onWrite }) {
-  const { patch, notify } = useStore()
+  const { patch, notify, requestAgent } = useStore()
   const [outline, setOutline] = useState(() => ({ ...makeOutline(project), ...project.outline }))
   const base = useRef({ version: project._version, outline: JSON.stringify(project.outline) })
   useEffect(() => { if (JSON.stringify(outline) === base.current.outline) { setOutline(project.outline); base.current = { version: project._version, outline: JSON.stringify(project.outline) } } }, [project._version])
@@ -106,6 +106,7 @@ export default function ProjectOutline({ project, onWrite }) {
       <footer className="workspace-footer">
         <span className="muted">{dirty ? '项目大纲有未保存修改' : '项目大纲已保存，全部剧集共用'}</span>
         <div className="toolbar">
+          <Button onClick={() => requestAgent({ action: 'outline', projectId: project.id, draftOnly: true }).catch(reason => notify(reason.message))}>AI 生成大纲</Button>
           <Button onClick={() => save()}>保存项目大纲</Button>
           {onWrite && <Button primary onClick={() => { if (save(true)) onWrite() }}>
             编写分集剧本 ↗

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { jobResults, jobToBatch, jobsToTasks, type MediaJob } from '../examples/agent-chat/client/media-job-view';
+import { jobResults, jobToBatch, jobsToTasks, standaloneMediaJobs, type MediaJob } from '../examples/agent-chat/client/media-job-view';
 
 const job = (id: string, taskId: string | undefined, prompt: string): MediaJob => ({
   id, ...(taskId ? { taskId } : {}), modelId: 'gpt-image-2', type: 'image', status: 'completed', prompt,
@@ -7,6 +7,12 @@ const job = (id: string, taskId: string | undefined, prompt: string): MediaJob =
 });
 
 describe('media jobs to workspace tasks', () => {
+  it('keeps project image and video jobs out of the standalone media workspace', () => {
+    const independent = job('standalone', 'task', '单独生成');
+    const asset = { ...job('asset', 'asset-task', '角色'), options: { studioTarget: { resource: 'assets', id: 'asset' } } };
+    const clip = { ...job('clip', 'clip-task', '视频'), type: 'video' as const, options: { studioTarget: { resource: 'clips', id: 'clip' } } };
+    expect(standaloneMediaJobs([asset, independent, clip])).toEqual([independent]);
+  });
   it('passes through provider progress and leaves missing progress unknown', () => {
     const pending = { ...job('job-v', 't', '视频'), type: 'video' as const, status: 'running' as const };
     expect(jobResults({ ...pending, progress: 42 })[0].progress).toBe(42);

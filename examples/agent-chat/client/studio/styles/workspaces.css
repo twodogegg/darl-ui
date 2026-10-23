@@ -94,6 +94,12 @@
 .project-outline .field { margin-bottom: 0; }
 .project-outline section > .field > label, .project-outline h3 { display: block; margin-bottom: 12px; padding-left: 10px; border-left: 3px solid var(--br-accent); color: var(--br-text-primary); font-size: 14px; font-weight: 600; }
 .project-outline textarea { width: 100%; min-width: 0; padding: 14px 16px; background: var(--br-theme-surface); border-color: var(--br-theme-hairline-13); font-size: 13px; line-height: 1.9; resize: vertical; }
+.source-page { flex: 1; padding: 24px 30px; }
+.source-page section { min-width: 0; margin-bottom: 24px; }
+.source-page h3 { margin-bottom: 12px; padding-left: 10px; border-left: 3px solid var(--br-accent); color: var(--br-text-primary); font-size: 14px; font-weight: 600; }
+.source-requirements { padding: 16px 18px; border: 1px solid var(--br-theme-hairline-13); border-radius: 8px; background: var(--br-theme-surface); }
+.source-requirements p { color: var(--br-text-secondary); font-size: 13px; white-space: pre-wrap; }
+.source-text pre { max-height: calc(100dvh - 310px); overflow: auto; padding: 20px; border: 1px solid var(--br-theme-hairline-10); border-radius: 8px; background: var(--br-theme-surface); color: var(--br-theme-ink-14); font-family: inherit; font-size: 14px; line-height: 2; white-space: pre-wrap; overflow-wrap: anywhere; }
 .outline-choices { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .outline-choices > div { min-width: 0; }
 .outline-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
@@ -110,6 +116,8 @@
 }
 @media (max-width: 760px) {
   .project-outline { padding: 20px 16px; }
+  .source-page { padding: 20px 16px; }
+  .source-text pre { max-height: 60dvh; padding: 14px; font-size: 13px; }
   .outline-choices { grid-template-columns: minmax(0, 1fr); }
   .project-outline textarea { padding: 12px; }
   .outline-table, .outline-table tbody { display: block; }

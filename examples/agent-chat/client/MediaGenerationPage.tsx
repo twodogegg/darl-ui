@@ -99,7 +99,7 @@ export function MediaGenerationPage({ onBack, initialTaskId, renderReferencePick
         const draft = newTask();
         setTasks(loaded.length ? loaded : [draft]);
         setActiveTaskId(loaded.find(task => task.id === initialTaskId)?.id || loaded[0]?.id || draft.id);
-        if (initialTaskId && !loaded.some(task => task.id === initialTaskId)) setError('关联媒体任务已删除');
+        if (initialTaskId && !loaded.some(task => task.id === initialTaskId)) setError(jobs.some(job => (job.taskId || job.id) === initialTaskId && job.options.studioTarget) ? '该任务属于剧本项目，请在对应项目的生成历史中查看' : '关联媒体任务已删除');
       } catch (reason) {
         if (alive) setError(reason instanceof Error ? reason.message : '无法读取模型或任务');
       } finally {

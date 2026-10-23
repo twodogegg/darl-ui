@@ -5,6 +5,7 @@ import Shell from './components/Shell'
 import Home from './pages/Home'
 import { Projects } from './pages/Projects'
 import Script, { Outline } from './pages/Script'
+import Source from './pages/Source'
 import Art from './pages/Art'
 import Storyboard from './pages/Storyboard'
 import VideoProduction from './pages/VideoProduction'
@@ -55,6 +56,7 @@ function Pages({ onContextChange }) {
     <Route path="/projects" element={<Projects />} />
     <Route path="/projects/:id" element={<Navigate to="/projects" replace />} />
     <Route path="/outline" element={<Outline key={data.projects.map(item => item.id).join(',')} />} />
+    <Route path="/source" element={<Source key={data.projects.map(item => item.id).join(',')} />} />
     <Route path="/script" element={<Script />} />
     <Route path="/art" element={<Art />} />
     <Route path="/storyboard" element={<Storyboard />} />

@@ -232,7 +232,9 @@ export function Models({ image = false, video = false }) {
 }
 export function DirectorSelect({ label = '创作导演', disabled }) {
   const { agents, agentSelection, setAgentSelection, currentAgentId } = useStore()
-  return <label className="creative-director-select"><span>{label}</span><select aria-label={label} disabled={disabled} value={agentSelection || currentAgentId || ''} onChange={event => setAgentSelection(event.target.value)}>{!agents.some(agent => agent.id === (agentSelection || currentAgentId)) && <option value="">请选择 Agent</option>}{agents.filter(agent => agent.type !== 'sub_agent' && agent.enabled !== false).map(agent => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
+  const available = agents.filter(agent => agent.type !== 'sub_agent' && agent.enabled !== false)
+  const selectedId = available.find(agent => agent.id === (agentSelection || currentAgentId))?.id || ''
+  return <label className="creative-director-select"><span>{label}</span><select aria-label={label} disabled={disabled} value={selectedId} onChange={event => setAgentSelection(event.target.value)}>{!selectedId && <option value="">请选择 Agent</option>}{available.map(agent => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
 }
 export function TextModelSelect({ label = '文本模型', type = 'text', disabled }) {
   const { models, getModel, setModelSelections } = useStore()
@@ -462,7 +464,7 @@ export function VoiceModal({ asset, onClose }) {
       return notify('请填写声音描述')
     if (tab === '上传音频' && (!upload || !name.trim()))
       return notify('请选择有效音频并填写音色名称')
-    run({ action: 'voice', projectId: asset.projectId, assetId: asset.id, provider: 'fish', mode: tab, name, description, referenceAudio: upload?.url })
+    run({ action: 'voice', projectId: asset.projectId, assetId: asset.id, assetName: asset.name, provider: 'fish', mode: tab, name, description, referenceAudio: upload?.url })
   }
   return (
     <Modal

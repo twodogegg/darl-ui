@@ -1,8 +1,8 @@
-export async function parseScript(file) {
+export async function parseSource(file) {
   const extension = file.name.split('.').pop().toLowerCase()
   if (!['txt', 'md', 'docx', 'xlsx'].includes(extension))
-    throw new Error('请选择 TXT、MD、DOCX 或 XLSX 剧本文件')
-  if (file.size > 15 * 1024 * 1024) throw new Error('剧本文件不能超过 15 MB')
+    throw new Error('请选择 TXT、MD、DOCX 或 XLSX 原始素材文件')
+  if (file.size > 15 * 1024 * 1024) throw new Error('原始素材文件不能超过 15 MB')
   let text
   try {
     if (extension === 'docx') {
@@ -18,10 +18,10 @@ export async function parseScript(file) {
       ).join('\n\n')
     } else text = await file.text()
   } catch {
-    throw new Error('剧本文件解析失败，请确认文件内容与扩展名匹配后重试')
+    throw new Error('原始素材文件解析失败，请确认文件内容与扩展名匹配后重试')
   }
-  if (!text.trim()) throw new Error('文件中没有可读取的剧本文本')
-  if (text.length > 100000) throw new Error('剧本内容不能超过 100000 字')
+  if (!text.trim()) throw new Error('文件中没有可读取的文本')
+  if (text.length > 100000) throw new Error('原始素材内容不能超过 100000 字')
   return text
 }
 

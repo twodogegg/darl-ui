@@ -15,6 +15,7 @@ import { ToolsSettings } from './ToolsSettings';
 import { StorageSettings } from './StorageSettings';
 import { RequestRecordsPage } from './RequestRecordsPage';
 import { finishToolCalls, messageTextForModel } from './message-history';
+import { studioAgentContent } from './studio/agent-task';
 
 const persistedSessions = (sessions: AgentSession[]) => sessions.map((session) => ({ ...session, messages: session.messages.map((message) => ({ ...message, attachments: message.attachments?.map((attachment) => typeof attachment === 'string' ? attachment : { ...attachment, url: attachment.url?.startsWith('data:') ? undefined : attachment.url }), toolCalls: message.toolCalls?.map(({ output: _output, ...call }) => call) })) }));
 const interruptedExecutionStatuses = new Set<AgentExecutionEvent['status']>(['pending', 'started', 'running', 'retrying', 'confirmation']);
@@ -369,6 +370,7 @@ export function App() {
     const saved = await api<DefaultModelDraft>('default-models', { selection });
     setDefaultMediaSelection(saved);
     setDefaultMediaModelsOpen(false);
+    window.dispatchEvent(new Event('studio-defaults-changed'));
   };
   const defaultModelSettings = <section className="example-default-models" aria-labelledby="example-default-models-title">
     <header><div><span className="example-eyebrow">DEFAULT MEDIA MODELS</span><h2 id="example-default-models-title">默认模型</h2><p>为网站开发设置默认图片和视频模型，暂不配置文本与音频。</p></div><button className={buttonClass} onClick={() => setDefaultMediaModelsOpen(true)}><Settings2 size={15} />配置默认模型</button></header>
@@ -392,14 +394,19 @@ export function App() {
   };
   const studioTask = async (task: Record<string, unknown>) => {
     if (running.current) throw new Error('请先停止当前 Agent 任务');
+    const draftOnly = task.draftOnly === true;
     const selectedId = typeof task.agentId === 'string' && task.agentId ? task.agentId : agentId || 'default';
-    const session = newSession(selectedId);
+    const session = draftOnly ? sessions.find(item => item.id === activeId && !item.messages.length) || newSession(selectedId) : newSession(selectedId);
     const selections = task.modelSelections as Record<string, string> | undefined;
     const selectedModel = selections?.text || availableModelId;
-    if (!selectedModel) throw new Error('请先配置并启用文本模型');
-    setSessions(current => [session, ...current]); setActiveId(session.id); setOpen(true);
-    const { prompt, agentId: _agent, modelSelections: _selection, ...context } = task;
-    await run({ sessionId: session.id, agentId: selectedId, content: [String(prompt || ''), JSON.stringify({ ...context, modelPreferences: { ...defaultMediaSelection, ...selections } }, null, 2)].join('\n\n'), skillIds: [], applicationIds: [], modelId: selectedModel, reasoningEffort: activeEffort }, undefined, session);
+    if (!draftOnly && !selectedModel) throw new Error('请先配置并启用文本模型');
+    if (!sessions.some(item => item.id === session.id)) setSessions(current => [session, ...current]);
+    setActiveId(session.id); setOpen(true);
+    if (draftOnly) {
+      setDrafts(current => ({ ...current, [session.id]: studioAgentContent(task) }));
+      return;
+    }
+    await run({ sessionId: session.id, agentId: selectedId, content: studioAgentContent(task), skillIds: [], applicationIds: [], modelId: selectedModel, reasoningEffort: activeEffort }, undefined, session);
   };
   const studioNavigate = (page: string) => {
     if (page === 'chat') { openStudioChat(); return; }

@@ -69,6 +69,8 @@
 .production-image-actions { margin-bottom: 16px; }
 .production-history-items { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 6px; }
 .production-history-items article { display: flex; flex: 0 0 200px; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid var(--br-border); border-radius: 6px; }
+.production-history-items .production-job { min-height: 100px; justify-content: center; overflow-wrap: anywhere; font-size: 12px; }
+.production-job--failed, .production-job--uncertain, .production-job--cancelled { color: var(--br-error); }
 .production-history-items img, .production-history-items video { width: 100%; height: 84px; object-fit: contain; background: #000; }
 .clip-shot-picker { display: flex; flex-direction: column; gap: 10px; margin: 18px 0; }
 .clip-shot-picker > label { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border: 1px solid var(--br-border); border-radius: 8px; font-size: 12px; cursor: pointer; }
@@ -129,6 +131,9 @@
 .production-description .muted { font-size: 11px; margin-bottom: 10px; }
 .production-description pre { max-height: 230px; padding: 12px; border: 1px solid var(--br-border); border-radius: 6px; background: var(--br-canvas); }
 .production-generate { width: 100%; margin-top: 24px; }
+.production-prompt-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.production-prompt-comparison .field { min-width: 0; margin-bottom: 0; }
+.production-prompt-comparison textarea { height: 45dvh; min-height: 260px; resize: vertical; }
 @media (max-width: 1250px) and (min-width: 761px) {
   .production-layout { grid-template-columns: 150px minmax(0, 1fr) 310px; }
   .production-list { grid-row: auto; }
@@ -141,6 +146,8 @@
   .production-settings { grid-column: 2; position: static; max-height: none; margin: 0 12px 20px; border: 1px solid var(--br-border); border-radius: 8px; }
 }
 @media (max-width: 760px) {
+  .production-prompt-comparison { grid-template-columns: minmax(0, 1fr); }
+  .production-prompt-comparison textarea { height: 220px; min-height: 160px; }
   .script-scene-card { padding: 14px; }
   .script-scene-head { gap: 8px; flex-wrap: wrap; }
   .script-scene-head .toolbar { width: 100%; margin-left: 0; }

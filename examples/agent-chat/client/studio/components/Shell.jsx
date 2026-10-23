@@ -15,13 +15,14 @@ import {
   IconScript,
   IconLayoutList,
   IconVideo,
+  IconFileText,
 } from '@tabler/icons-react'
 import { useStore } from '../store'
 import { steps } from '../data'
 
 const stepIcons = [IconNotebook, IconScript, IconLayoutList, IconPhoto, IconVideo]
 // 项目级步骤：整个项目共用同一份内容，不按集拆分
-const projectLevelPaths = ['/outline', '/script', '/art']
+const projectLevelPaths = ['/source', '/outline', '/script', '/art']
 // 分集步骤：进入后才选择具体剧集
 const episodeLevelPaths = ['/storyboard', '/video']
 
@@ -60,8 +61,8 @@ export default function Shell({ children }) {
       ? `${path}?projectId=${encodeURIComponent(projectId)}`
       : `${path}?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(activeEpisode.id)}`
   const crumb =
-    workflow?.label || nav.find((n) => n.to === pathname)?.label || '工作台'
-  const showFlow = !!activeProject && (!!workflow || pathname === '/media')
+    workflow?.label || (pathname === '/source' ? '原始素材' : nav.find((n) => n.to === pathname)?.label) || '工作台'
+  const showFlow = !!activeProject && (!!workflow || projectLevelPaths.includes(pathname) || pathname === '/media')
   const mediaLink = activeProject ? `/media?projectId=${encodeURIComponent(projectId)}` : '/media'
   return (
     <div className="app">
@@ -151,6 +152,13 @@ export default function Shell({ children }) {
               <p className="br-group-title">创作管理</p>
               <NavLink
                 className={({ isActive }) => `br-flow-step br-flow-step--plain ${isActive ? 'br-flow-step--active' : ''}`}
+                to={flowLink('/source')}
+              >
+                <span className="br-flow-icon"><IconFileText size={17} stroke={1.7} /></span>
+                <span className="br-flow-label">原始素材</span>
+              </NavLink>
+              <NavLink
+                className={({ isActive }) => `br-flow-step br-flow-step--plain ${isActive ? 'br-flow-step--active' : ''}`}
                 to={mediaLink}
               >
                 <span className="br-flow-icon"><IconMovie size={17} stroke={1.7} /></span>
@@ -219,7 +227,7 @@ export default function Shell({ children }) {
             <IconMovie className="br-mobile-mark" size={20} />
             <span>本入剧出</span> / <strong>{crumb}</strong>
           </div>
-          <div className="br-top-actions"><button onClick={() => onNavigate('chat')}>AI 助手</button><button onClick={() => onNavigate('agents')}>Agents</button><button onClick={() => navigate(mediaLink)}>生成任务</button><button onClick={() => onNavigate('settings')}>设置</button></div>
+          <div className="br-top-actions"><button onClick={() => onNavigate('chat')}>AI 助手</button><button onClick={() => onNavigate('agents')}>Agents</button><button onClick={() => navigate(mediaLink)}>独立生成</button><button onClick={() => onNavigate('settings')}>设置</button></div>
         </header>
         <main
           id="main-content"

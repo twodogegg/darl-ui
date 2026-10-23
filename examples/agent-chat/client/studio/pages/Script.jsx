@@ -196,7 +196,7 @@ function ScriptList({ context }) {
           <Button disabled={busy || !active} onClick={() => setRegen(true)}>
             重新生成本集
           </Button>
-          <Button primary disabled={busy} onClick={confirmAll}>
+          <Button primary disabled={busy || !episodes.length} onClick={confirmAll}>
             确认全部剧本，进入分镜脚本 ↗
           </Button>
         </div>

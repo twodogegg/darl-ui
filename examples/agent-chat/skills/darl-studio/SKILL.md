@@ -13,7 +13,7 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 | 分类 | resource | 内容 |
 | --- | --- | --- |
-| 项目与大纲 | `projects` | 项目信息、`sourceScript`、`requirements`、`outline` |
+| 项目与大纲 | `projects` | 项目信息、`sourceScript`（用户提交的原始素材，不是剧集正文）、`requirements`、`outline` |
 | 剧本与场次 | `episodes` | 剧集、`script`、嵌套 `scenes` |
 | 美术资产 | `assets` | 角色、场景、道具、`variants`、单项资产 `prompt` |
 | 分镜 | `shots` | 画面、景别、运镜、对白、时长 |

@@ -12,7 +12,10 @@ import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv
 import { removeEpisode } from '../examples/agent-chat/client/studio/scenes';
 import { assetImageRequest, canBatchGenerate } from '../examples/agent-chat/client/studio/art';
 import { MediaJobStore } from '../examples/agent-chat/server/media-job-store';
+import { clipMediaReferences, videoDuration } from '../examples/agent-chat/client/studio/storyboard';
+import { defaultModelConfiguration, toMediaModels } from '../src/components/settings/model-config';
 import { studioPositions, type StudioChange } from '../examples/agent-chat/studio-schema';
+import { studioAgentContent } from '../examples/agent-chat/client/studio/agent-task';
 
 let directory: string, store: StudioStore, projectId: string, files: FileStore;
 beforeEach(() => {
@@ -28,6 +31,35 @@ afterEach(() => rmSync(directory, { recursive: true, force: true }));
 const shots = (count = 40): StudioChange[] => Array.from({ length: count }, (_, index) => ({ resource: 'shots', op: 'create', id: `shot-${index}`, position: index, values: { episodeId: 'episode-1', sceneId: 'scene-1', description: `动作 ${index}`, duration: 3 } }));
 
 describe('shared short drama business service', () => {
+  it('keeps agent tasks human-readable and lets tools read project context', () => {
+    expect(studioAgentContent({ action: 'outline', projectId: '6', modelPreferences: { text: 'model' }, prompt: '生成项目大纲' })).toBe('生成项目大纲');
+    expect(studioAgentContent({ action: 'rewrite-script', projectId: '6', notes: '加强冲突', prompt: '改写剧本' })).toBe('改写剧本\n\n补充要求：加强冲突');
+    expect(studioAgentContent({ action: 'voice', projectId: '6', assetId: 'character', assetName: '萧炎', description: '少年音', prompt: '配置音色' })).toBe('配置音色\n\n描述：少年音\n目标资产：萧炎');
+  });
+  it('refreshes default prompt text without overwriting a custom prompt', () => {
+    store.apply('custom-prompt', [{ resource: 'prompts', op: 'update', id: '0-0', version: 1, values: { mode: 'replace', text: '我的大纲提示词' } }]);
+    const restored = new StudioStore(store.projects).snapshot().prompts.find(item => item.id === '0-0');
+    expect(restored).toMatchObject({ mode: 'replace', text: '我的大纲提示词' });
+    expect(restored?.defaultText).toContain('网站上下文');
+  });
+  it('rounds shot duration up to supported whole seconds without shortening an overlong clip', () => {
+    const model = toMediaModels(defaultModelConfiguration()).find(model => model.type === 'video');
+    expect(videoDuration(11.1, model)).toBe(12);
+    expect(videoDuration(14.8, model)).toBe(15);
+    expect(videoDuration(11, model)).toBe(11);
+    expect(videoDuration(2.5, model)).toBe(4);
+    expect(() => videoDuration(15.1, model)).toThrow('上限 15 秒');
+    expect(() => videoDuration(0, model)).toThrow('有效时长');
+  });
+  it('normalizes URL references, excludes missing pictures and removes copies of linked assets', () => {
+    const data = { assets: [{ id: 'character', name: '角色', image: '/api/files/main' }, { id: 'scene', name: '场景', image: '' }] };
+    const clip = { id: 'clip', assetIds: ['character', 'scene'], references: ['/api/files/main', '/api/files/main?width=320', '', { id: 'missing', kind: 'image', name: '未生成', url: '' }, { id: 'extra', kind: 'image', url: '/api/files/extra' }] };
+    const refs = clipMediaReferences(clip, data);
+    expect(refs.images.map(ref => ref.url)).toEqual(['/api/files/main', '/api/files/extra']);
+    expect(refs.additional).toEqual([{ id: 'extra', kind: 'image', url: '/api/files/extra', name: '图片 5' }]);
+    expect(refs.frames).toEqual([]);
+    expect(refs.assets).toHaveLength(2);
+  });
   it('discovers required fields and reports the invalid query field with available choices', () => {
     expect(store.query({ resource: 'assets', describe: true })).toMatchObject({ requiredOnCreate: ['projectId', 'name'], valuesSchema: { properties: { projectId: { type: 'string', minLength: 1 } } } });
     expect(() => store.query({ resource: 'episodes', fields: ['plannedEpisodes'] })).toThrow('episodes.fields=["plannedEpisodes"]');
