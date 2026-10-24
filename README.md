@@ -459,7 +459,7 @@ Agent 的 `@` 只对当前用户消息生效，历史提及不会每轮重复触
 </SettingsPage>
 ```
 
-设置中心当前提供模型、Agents 和应用 / MCP 入口；页面内容由宿主通过 `children` 接入。文本模型编辑器提供 `vision` 图片输入开关；模型配置完成后，将 `providers` 中启用的模型转换为 `AgentSidebar` 的 `models` 即可复用同一个聊天侧栏。
+设置中心当前提供模型、Agents 和应用 / MCP 入口；页面内容由宿主通过 `children` 接入。模型配置完成后，将 `providers` 中启用的模型转换为 `AgentSidebar` 的 `models` 即可复用同一个聊天侧栏。
 
 
 ## RequestRecords｜请求记录

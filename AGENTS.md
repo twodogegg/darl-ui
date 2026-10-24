@@ -117,6 +117,8 @@ API Base URL：`https://api.darl.cn`
 | 视频快速 | `minimax-h3-flash` |
 | 视频标准 | `minimax-h3-standard` |
 
+视频工作台内置 `minimax-h3-flash` 与 `minimax-h3-standard` 两个逻辑模型，共用 `darl-h3-flash-unified` 协议；Standard 不支持 1080P。上游视频网关地址由供应商 `baseUrl` 配置，不硬编码。
+
 日常测试优先使用快速视频模型，正式生成优先使用标准模型；用户指定时以用户要求为准。
 
 - **开发和测试均使用真实 API，禁止 Mock、假数据、伪造任务 ID 或生成结果。**

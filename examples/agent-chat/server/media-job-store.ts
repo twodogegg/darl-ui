@@ -45,7 +45,7 @@ export function mediaTaskResult(job: MediaJob) {
   };
 }
 
-export const MEDIA_MODEL_IDS = ['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-image-preview', 'minimax-h3-flash'] as const;
+export const MEDIA_MODEL_IDS = ['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-image-preview', 'minimax-h3-flash', 'minimax-h3-standard'] as const;
 
 /** The DB, not a timer or browser tab, owns job state. One local Node server is supported. */
 export class MediaJobStore {

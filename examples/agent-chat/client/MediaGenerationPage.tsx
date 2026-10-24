@@ -31,10 +31,10 @@ function newTask(): MediaTask {
   return { id: crypto.randomUUID(), title: '新任务', batches: [] };
 }
 
-/** H3 accepts image references; video/audio references and first/last frames are not enabled yet. */
+/** H3 accepts image, video and audio references plus first/last frames; keep the per-type caps. */
 function supportedModels(configuration: ModelConfiguration): MediaModel[] {
   return toMediaModels(configuration).map((model) => model.type === 'video'
-    ? { ...model, capabilities: { ...model.capabilities, images: Math.min(model.capabilities.images ?? 0, 9), videos: 0, audios: 0, generationModes: ['text-to-video', 'reference'], firstLastFrame: false } }
+    ? { ...model, capabilities: { ...model.capabilities, images: Math.min(model.capabilities.images ?? 0, 9), videos: Math.min(model.capabilities.videos ?? 0, 3), audios: Math.min(model.capabilities.audios ?? 0, 3), generationModes: ['text-to-video', 'first-last-frame', 'reference'], firstLastFrame: true } }
     : model);
 }
 

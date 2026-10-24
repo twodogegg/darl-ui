@@ -24,14 +24,31 @@ describe('提示词优化上下文与配置', () => {
       expect(() => api.context({ ...input, mode: 'text-to-video' }, configuration)).toThrow('生成方式无效');
       expect(() => api.context({ ...input, prompt: '' }, configuration)).toThrow('请填写');
       expect(() => api.context({ ...input, references: { images: [{ fileId: 'missing' }] } }, configuration)).toThrow('不存在');
-      const defaults = api.models(configuration);
+      const providers = [{ id: 'darl', name: 'Darl', baseUrl: 'https://example.test/v1', protocol: 'openai-completions' as const, models: [] }];
+      const defaults = api.models(configuration, providers);
       expect(defaults.general).toContain('deepseek-v4.1-flash');
-      expect(() => api.saveModels({ general: 'missing', h3: defaults.h3 }, configuration)).toThrow('文本模型');
-      api.saveModels(defaults, configuration);
-      expect(createPromptOptimization(new LocalStorage(directory), files).models(configuration)).toEqual(defaults);
+      expect(defaults.h3).toContain('gemini-4-argon');
+      expect(() => api.saveModels({ general: 'missing', h3: defaults.h3 }, configuration, providers)).toThrow('文本模型');
+      // H3 优化不再按视觉能力过滤：任意文本模型都能作为 H3 优化模型。
+      const saved = api.saveModels({ general: defaults.general, h3: 'darl/deepseek-v4.1-flash' }, configuration, providers);
+      expect(saved.h3).toBe('darl/deepseek-v4.1-flash');
+      expect(api.models(configuration, providers).h3).toBe('darl/deepseek-v4.1-flash');
+      // H3 优化必须带上参考图，不能因为模型能力静默退化成纯文本。
+      const h3Body = { ...input, optimization: 'h3', modelId: 'minimax-h3-flash', mode: 'reference', references: { images: [{ fileId: file.id }] } };
+      const h3Messages = await api.messages(h3Body, api.context(h3Body, configuration));
+      expect(h3Messages).toMatchObject([{ role: 'user', content: [{ type: 'text' }, { type: 'image', fileId: file.id, mimeType: 'image/png' }] }]);
+      api.saveModels(defaults, configuration, providers);
+      expect(createPromptOptimization(new LocalStorage(directory), files).models(configuration, providers)).toEqual(defaults);
       storage.setConfig('optimization', '自定义规则');
       expect(api.prompts().optimization).toBe('自定义规则');
       expect(api.prompts().h3Optimization).toContain('integrated_multimodal_description');
+      expect(() => api.context({ ...input, optimization: 'h3', modelId: 'minimax-h3-flash', mode: 'text-to-video' }, configuration)).toThrow('至少一张参考图片');
+      const h3 = api.context({ ...input, optimization: 'h3', modelId: 'minimax-h3-flash', mode: 'reference', references: { images: [{ fileId: file.id }] } }, configuration);
+      expect(h3.mode).toBe('reference');
+      const h3FromTextMode = api.context({ ...input, optimization: 'h3', modelId: 'minimax-h3-flash', mode: 'text-to-video', references: { images: [{ fileId: file.id }] } }, configuration);
+      expect(h3FromTextMode.mode).toBe('reference');
+      const messages = await api.messages({ ...input, optimization: 'h3', modelId: 'minimax-h3-flash', mode: 'reference', references: { images: [{ fileId: file.id }] } }, h3);
+      expect(messages).toMatchObject([{ role: 'user', content: [{ type: 'text' }, { type: 'image', fileId: file.id, mimeType: 'image/png' }] }]);
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 });

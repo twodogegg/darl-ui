@@ -150,7 +150,7 @@ type GenerateRequest = {
 
 Agent Chat 的媒体请求将参考图片统一写入 `options.references`，生成、重试和历史复用共享同一提交入口；H3 适配器使用渠道绑定中的真实上游模型 ID。H3 接口约定见[创建任务](https://fwr0187eq6.apifox.cn/523019890e0)和[查询任务](https://fwr0187eq6.apifox.cn/523019892e0)。
 
-Agent Chat 的真实演示位于 `http://localhost:5197` 的「媒体生成」。宿主通过 `/api/prompt-optimization` 调用设置中选择的文本模型，将当前生成模型、模式、参数、风格和参考素材元数据作为 JSON 传给模型，不把元数据当作已识别的画面内容。普通与 H3 模板位于 `examples/agent-chat/prompts/optimize-prompt.md` 和 `optimize-h3-prompt.md`，可在「设置 → 提示词」覆盖并存入 SQLite；执行模型在「设置 → 模型」中分别配置。
+Agent Chat 的真实演示位于 `http://localhost:5197` 的「媒体生成」。宿主通过 `/api/prompt-optimization` 调用设置中选择的文本模型，将当前生成模型、模式、参数、风格和参考素材元数据作为 JSON 传给模型；H3 优化还会读取站内参考图片并作为图片输入一并发送，没有可读取的参考图时明确报错。普通与 H3 模板位于 `examples/agent-chat/prompts/optimize-prompt.md` 和 `optimize-h3-prompt.md`，可在「设置 → 提示词」覆盖并存入 SQLite；执行模型在「设置 → 模型」中分别配置；H3 优化会直接使用已提供的参考图片，不按文本模型的视觉能力开关过滤。
 
 ## 批次和结果
 

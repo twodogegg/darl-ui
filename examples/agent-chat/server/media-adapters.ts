@@ -1,5 +1,5 @@
 import type { MediaJob } from './media-job-store';
-import { createH3Video, getH3Video, downloadH3Video, resolveH3File, uploadH3File } from './h3-flash';
+import { createH3Video, downloadH3Video, getH3Video, uploadH3Asset, type H3Ratio, type H3Resolution } from './h3-flash';
 
 /** A finished image is either inline bytes or a link. The link IS the result. */
 export type MediaImage =
@@ -392,33 +392,68 @@ export async function generateImage(job: MediaJob, key: string, localMedia?: Loc
   return images[0];
 }
 
-export async function submitVideo(job:MediaJob,key:string,localMedia?:LocalMediaReader):Promise<string>{
-  ensureHttp(job.baseUrl);
-  const references=await normalizeImageReferences(job.options.references,9,localMedia);
-  const referenceImages:string[]=[];
-  for(const reference of references||[]){
-    if('url' in reference){referenceImages.push(reference.url);continue;}
-    const blob=new Blob([new Uint8Array(reference.data)],{type:reference.mimeType});
-    const uploaded=await uploadH3File(job.baseUrl,key,blob,reference.name,'vision',AbortSignal.timeout(60000));
-    const resolved=await resolveH3File(job.baseUrl,key,uploaded.id,AbortSignal.timeout(30000));
-    if(!resolved.url)throw new Error('H3 参考图片没有返回公网 URL');
-    referenceImages.push(resolved.url);
+/**
+ * Resolve job references for the video protocol. Local files are uploaded to the
+ * asset endpoint and referenced by their opaque id; remote HTTP(S) links pass
+ * through unchanged.
+ */
+async function videoAssetIds(job: MediaJob, key: string, rows: unknown[], localMedia?: LocalMediaReader): Promise<string[]> {
+  const ids: string[] = [];
+  for (const [index, row] of rows.entries()) {
+    const link = typeof row === 'string' ? row : row && typeof row === 'object' ? (row as { url?: unknown }).url : undefined;
+    if (typeof link === 'string' && /^https?:\/\//.test(link)) { ids.push(link); continue; }
+    const fileId = row && typeof row === 'object' ? (row as { fileId?: unknown }).fileId : undefined;
+    const saved = typeof fileId === 'string' ? await localMedia?.(`/api/files/${fileId}`) : undefined;
+    if (!saved) throw new Error(`第 ${index + 1} 个参考素材不存在或尚未完成`);
+    const uploaded = await uploadH3Asset(job.baseUrl, key, new Blob([new Uint8Array(saved.bytes)], { type: saved.mime }), `reference-${index + 1}`, AbortSignal.timeout(120000));
+    ids.push(uploaded.id);
   }
-  const result=await createH3Video(job.baseUrl,key,{
-    model:job.upstreamModelId,
-    prompt:promptFor(job), seconds:Number(job.options.duration??10),
-    resolution:(job.options.resolution ?? '768') as '480'|'768',
-    aspectRatio:(job.options.aspectRatio ?? '9:16') as '16:9'|'9:16',
-    ...(referenceImages.length?{referenceImages,mode:'reference' as const}:{mode:'text-to-video' as const}),
-  },AbortSignal.timeout(30000));
+  return ids;
+}
+
+function videoReferenceGroups(job: MediaJob) {
+  const value = job.options.references;
+  const groups: Record<'images' | 'videos' | 'audios', unknown[]> = { images: [], videos: [], audios: [] };
+  // A flat array is the documented image list; grouped objects carry every kind.
+  if (Array.isArray(value)) groups.images = value;
+  else if (value && typeof value === 'object') {
+    const refs = value as Partial<Record<'images' | 'videos' | 'audios', unknown[]>>;
+    groups.images = refs.images || [];
+    groups.videos = refs.videos || [];
+    groups.audios = refs.audios || [];
+  }
+  return groups;
+}
+
+export async function submitVideo(job: MediaJob, key: string, localMedia?: LocalMediaReader): Promise<string> {
+  ensureHttp(job.baseUrl);
+  const groups = videoReferenceGroups(job);
+  const images = await videoAssetIds(job, key, groups.images, localMedia);
+  const videos = await videoAssetIds(job, key, groups.videos, localMedia);
+  const audios = await videoAssetIds(job, key, groups.audios, localMedia);
+  const frame = async (value: unknown) => value ? (await videoAssetIds(job, key, [value], localMedia))[0] : undefined;
+  const firstFrameImage = await frame(job.options.firstFrame);
+  const lastFrameImage = await frame(job.options.lastFrame);
+  const result = await createH3Video(job.baseUrl, key, {
+    model: job.upstreamModelId,
+    prompt: promptFor(job),
+    seconds: Number(job.options.duration ?? 5),
+    size: (job.options.resolution ?? '480P') as H3Resolution,
+    ratio: (job.options.aspectRatio ?? '16:9') as H3Ratio,
+    ...(images.length ? { referenceImages: images } : {}),
+    ...(videos.length ? { referenceVideos: videos } : {}),
+    ...(audios.length ? { referenceAudios: audios } : {}),
+    ...(firstFrameImage ? { firstFrameImage } : {}),
+    ...(lastFrameImage ? { lastFrameImage } : {}),
+  }, AbortSignal.timeout(60000));
   return result.id;
 }
-export async function checkVideo(job:MediaJob,key:string):Promise<{state:'running'|'failed'|'completed';progress?:number;provider?:Record<string,unknown>;error?:string;media?:Buffer}>{
-  if(!job.remoteTaskId)throw new Error('视频远端编号未保存');
+export async function checkVideo(job: MediaJob, key: string): Promise<{ state: 'running' | 'failed' | 'completed'; progress?: number; provider?: Record<string, unknown>; error?: string; media?: Buffer }> {
+  if (!job.remoteTaskId) throw new Error('视频远端编号未保存');
   ensureHttp(job.baseUrl);
-  const remote=await getH3Video(job.baseUrl,key,job.remoteTaskId,AbortSignal.timeout(30000));
-  const metadata={...(remote.progress!==undefined?{progress:remote.progress}:{}),provider:{...remote}};
-  if(remote.status==='failed')return {...metadata,state:'failed',error:remote.error||'视频生成失败'};
-  if(remote.status==='succeeded')return {...metadata,state:'completed',media:Buffer.from(await downloadH3Video(job.baseUrl,key,remote,AbortSignal.timeout(120000)))};
-  return {...metadata,state:'running'};
+  const remote = await getH3Video(job.baseUrl, key, job.remoteTaskId, AbortSignal.timeout(30000));
+  const metadata = { ...(remote.progress !== undefined ? { progress: remote.progress } : {}), provider: { ...remote } };
+  if (remote.status === 'failed') return { ...metadata, state: 'failed', error: remote.error || '视频生成失败' };
+  if (remote.status === 'completed') return { ...metadata, state: 'completed', media: Buffer.from(await downloadH3Video(job.baseUrl, key, remote, AbortSignal.timeout(300000))) };
+  return { ...metadata, state: 'running' };
 }

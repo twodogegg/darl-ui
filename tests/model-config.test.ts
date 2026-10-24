@@ -5,9 +5,9 @@ describe('model configuration', () => {
   it('keeps zero and false overrides and replaces arrays', () => {
     const configuration = defaultModelConfiguration();
     const model = configuration.models.find((item) => item.id === 'minimax-h3-flash')!;
-    const binding = { ...model.bindings[0], capabilityOverrides: { maxReferenceVideos: 0, generateAudio: false, resolutions: ['768'] } };
+    const binding = { ...model.bindings[0], capabilityOverrides: { maxReferenceVideos: 0, generateAudio: false, resolutions: ['768P'] } };
     const resolved = effectiveCapabilities(configuration, model, binding)!;
-    expect(resolved).toMatchObject({ maxReferenceVideos: 0, generateAudio: false, resolutions: ['768'] });
+    expect(resolved).toMatchObject({ maxReferenceVideos: 0, generateAudio: false, resolutions: ['768P'] });
   });
 
   it('rejects mismatched templates and unknown protocols', () => {
@@ -22,7 +22,7 @@ describe('model configuration', () => {
   it('rejects defaults that fall outside a binding effective capability', () => {
     const configuration = defaultModelConfiguration();
     const model = configuration.models.find((item) => item.id === 'minimax-h3-flash')!;
-    model.bindings[0].capabilityOverrides = { resolutions: ['768'] };
+    model.bindings[0].capabilityOverrides = { resolutions: ['1080P'] };
     const errors = validateModelConfiguration(configuration);
     expect(errors.map((error) => error.message)).toContain('默认分辨率必须属于最终有效能力');
   });
@@ -59,11 +59,42 @@ describe('model configuration', () => {
     expect(runtime.defaultReasoningEffort).toBe('max');
   });
 
-  it('maps H3 media capabilities without enabling unverified frame generation', () => {
+  it('exposes both H3 video models with the documented capabilities', () => {
     const configuration = defaultModelConfiguration();
-    const models = toMediaModels(configuration, true);
-    const h3 = models.find((model) => model.id === 'minimax-h3-flash');
-    expect(h3).toMatchObject({ type: 'video', bindingId: 'h3-darl', providerId: 'darl', protocolKey: 'darl-h3-flash-unified', capabilities: { images: 9, videos: 3, audios: 3, generationModes: ['text-to-video', 'first-last-frame', 'reference'], resolutions: ['480', '768'], aspectRatios: ['16:9', '9:16'], firstLastFrame: false } });
+    const models = toMediaModels(configuration);
+    const flash = models.find((model) => model.id === 'minimax-h3-flash');
+    const standard = models.find((model) => model.id === 'minimax-h3-standard');
+    expect(flash).toMatchObject({
+      type: 'video', bindingId: 'h3-darl', providerId: 'darl', protocolKey: 'darl-h3-flash-unified',
+      capabilities: { images: 9, videos: 3, audios: 3, generationModes: ['text-to-video', 'first-last-frame', 'reference'], resolutions: ['480P', '768P', '1080P'], aspectRatios: ['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'], firstLastFrame: true, durations: { min: 4, max: 15 } },
+    });
+    expect(standard).toMatchObject({
+      type: 'video', bindingId: 'h3-standard-darl', upstreamModelId: 'minimax-h3-standard', protocolKey: 'darl-h3-flash-unified',
+      capabilities: { resolutions: ['480P', '768P'], aspectRatios: ['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'], firstLastFrame: true, images: 9, videos: 3, audios: 3 },
+    });
+    expect(validateModelConfiguration(configuration)).toEqual([]);
+  });
+
+  it('migrates a persisted H3 configuration onto the new size and ratio contract', () => {
+    const configuration = defaultModelConfiguration();
+    const template = configuration.templates.find((item) => item.id === 'h3-flash')!;
+    template.capabilities = { ...template.capabilities, resolutions: ['480', '768'], aspectRatios: ['16:9', '9:16'], firstLastFrame: 'unverified' };
+    template.defaults = { resolution: '480', aspectRatio: '16:9', duration: 10 };
+    configuration.templates = configuration.templates.filter((item) => item.id !== 'h3-standard');
+    configuration.models = configuration.models.filter((model) => model.id !== 'minimax-h3-standard');
+    const upgraded = upgradeModelConfiguration(configuration);
+    const upgradedTemplate = upgraded.templates.find((item) => item.id === 'h3-flash')!;
+    expect(upgradedTemplate.capabilities).toMatchObject({ resolutions: ['480P', '768P', '1080P'], aspectRatios: ['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'], firstLastFrame: 'supported' });
+    expect(upgradedTemplate.defaults).toEqual({ resolution: '480P', aspectRatio: '16:9', duration: 10 });
+    expect(upgraded.models.find((model) => model.id === 'minimax-h3-standard')).toMatchObject({ capabilityTemplateId: 'h3-standard', bindings: [{ protocolKey: 'darl-h3-flash-unified', upstreamModelId: 'minimax-h3-standard' }] });
+    expect(validateModelConfiguration(upgraded)).toEqual([]);
+  });
+
+  it('rejects 1080P on the Standard template', () => {
+    const configuration = defaultModelConfiguration();
+    const model = configuration.models.find((item) => item.id === 'minimax-h3-standard')!;
+    model.bindings[0].capabilityOverrides = { resolutions: ['480P', '1080P'] };
+    expect(validateModelConfiguration(configuration).map((error) => error.message)).toContain('H3 Standard 只支持 480P 或 768P');
   });
 
   it('exposes only the product image options for the first batch', () => {
@@ -108,8 +139,8 @@ describe('model configuration', () => {
   it('does not mutate the template when resolving overrides', () => {
     const configuration = defaultModelConfiguration();
     const template = configuration.templates.find((item) => item.id === 'h3-flash')!;
-    const resolved = resolveCapabilities(template, { resolutions: ['480'] });
-    expect((resolved as { resolutions: string[] }).resolutions).toEqual(['480']);
-    expect((template.capabilities as { resolutions: string[] }).resolutions).toEqual(['480', '768']);
+    const resolved = resolveCapabilities(template, { resolutions: ['1080P'] });
+    expect((resolved as { resolutions: string[] }).resolutions).toEqual(['1080P']);
+    expect((template.capabilities as { resolutions: string[] }).resolutions).toEqual(['480P', '768P', '1080P']);
   });
 });
