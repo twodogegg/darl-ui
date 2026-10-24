@@ -9,6 +9,9 @@ import { id } from '../data'
 import { formatDialogue, shotNumber, totalDuration } from '../storyboard'
 import { episodeScenes, orderedShots, sceneLabel } from '../scenes'
 import { SourceEvidence, SourceShotEditor, SupplementShot, sourceTime } from '../components/VideoRedraw'
+import AssetMentionInput from '../components/AssetMentionInput'
+import { assetMentionCandidates } from '../storyboard'
+import { validateAssetMentions } from '../../../asset-mentions'
 
 function ShotInput({ value, version, label, multiline = false, number = false, onCommit, validate }) {
   const [draft, setDraft] = useState(String(value))
@@ -25,6 +28,20 @@ function ShotInput({ value, version, label, multiline = false, number = false, o
     base.current = { value: draft, version: version + 1 }
   }} onKeyDown={event => { if (event.key === 'Escape') { setDraft(String(value)); base.current = { value: String(value), version } } }} />
 }
+function MentionShotInput({ value, version, label, candidates, onCommit }) {
+  const [draft, setDraft] = useState(String(value || ''))
+  const { notify } = useStore()
+  const base = useRef({ value: String(value || ''), version })
+  useEffect(() => { if (draft === base.current.value) { setDraft(String(value || '')); base.current = { value: String(value || ''), version } } }, [value, version])
+  return <AssetMentionInput value={draft} label={label} candidates={candidates} onChange={setDraft} onBlur={() => {
+    if (draft === base.current.value) return
+    if (version !== base.current.version) { notify('镜头已被其他操作修改，当前输入已保留。按 Escape 恢复最新值后可重新编辑。'); return }
+    const error = validateAssetMentions(draft, candidates)
+    if (error) { notify(error); return }
+    onCommit(draft)
+    base.current = { value: draft, version: version + 1 }
+  }} />
+}
 const columns = [['scale', '景别'], ['camera', '运镜'], ['transition', '切镜方式'], ['description', '画面']]
 
 export default function Storyboard() {
@@ -38,6 +55,7 @@ function ShotTable({ context }) {
   const scenes = episodeScenes(episode)
   const shots = orderedShots(data.shots.filter((shot) => shot.episodeId === episode.id), scenes)
   const characters = data.assets.filter((asset) => asset.projectId === projectId && asset.type === '角色')
+  const projectAssets = data.assets.filter((asset) => asset.projectId === projectId)
   const [sceneId, setSceneId] = useState('')
   const [editing, setEditing] = useState(null)
   const [deleting, setDeleting] = useState(null)
@@ -146,7 +164,7 @@ function ShotTable({ context }) {
                     <button aria-label={`在镜头${number}后新增分镜`} title="在此镜后新增分镜" onClick={() => addShot(scene.id, shot.id)}>＋</button>
                     <button aria-label={`删除镜头${number}`} title="删除镜头" onClick={() => setDeleting(shot)}>×</button>
                   </div></th>
-                  {columns.map(([key, label]) => <td key={key}>{key === 'description' && shot.source && <><SourceEvidence source={shot.source} /><details><summary>关联原片主体（{shot.assetIds?.length || 0}）</summary>{data.assets.filter(asset => asset.projectId === projectId).map(asset => <label className="redraw-asset-check" key={asset.id}><input type="checkbox" checked={shot.assetIds?.includes(asset.id) || false} onChange={event => patch('shots', shot.id, { assetIds: event.target.checked ? [...new Set([...(shot.assetIds || []), asset.id])] : shot.assetIds.filter(id => id !== asset.id) })} />{asset.type} · {asset.name}</label>)}</details></>}{!index && key === 'transition' ? <span>—</span> : <ShotInput key={`${shot.id}-${key}`} version={shot._version} label={`镜头${number} ${label}`} value={shot[key]} multiline={key === 'description'} onCommit={(value) => patch('shots', shot.id, { [key]: key === 'transition' ? value.trim() || '硬切' : value })} />}</td>)}
+                  {columns.map(([key, label]) => <td key={key}>{key === 'description' && shot.source && <><SourceEvidence source={shot.source} /><details><summary>关联原片主体（{shot.assetIds?.length || 0}）</summary>{projectAssets.map(asset => <label className="redraw-asset-check" key={asset.id}><input type="checkbox" checked={shot.assetIds?.includes(asset.id) || false} onChange={event => patch('shots', shot.id, { assetIds: event.target.checked ? [...new Set([...(shot.assetIds || []), asset.id])] : shot.assetIds.filter(id => id !== asset.id) })} />{asset.type} · {asset.name}</label>)}</details></>}{!index && key === 'transition' ? <span>—</span> : key === 'description' ? <MentionShotInput key={`${shot.id}-${key}`} version={shot._version} label={`镜头${number} ${label}`} value={shot[key]} candidates={assetMentionCandidates(projectAssets, { assetIds: [...(shot.assetIds || []), ...(shot.dialogue || []).map(line => line.assetId).filter(Boolean)] })} onCommit={(value) => patch('shots', shot.id, { description: value })} /> : <ShotInput key={`${shot.id}-${key}`} version={shot._version} label={`镜头${number} ${label}`} value={shot[key]} multiline={key === 'description'} onCommit={(value) => patch('shots', shot.id, { [key]: key === 'transition' ? value.trim() || '硬切' : value })} />}</td>)}
                   <td><button className="shot-dialogue-cell" aria-label={`编辑镜头${number}台词`} onClick={() => setEditing(shot.id)}>{!shot.dialogue.length ? '—' : shot.dialogue.map((line) => <p key={line.id}>{formatDialogue(line)}</p>)}<span>编辑台词</span></button></td>
                   <td><ShotInput key={`${shot.id}-effects`} version={shot._version} label={`镜头${number} 音效`} value={shot.effects} multiline onCommit={(value) => patch('shots', shot.id, { effects: value })} /></td>
                   <td><ShotInput key={`${shot.id}-duration`} version={shot._version} label={`镜头${number} 时长（秒）`} value={shot.duration} number validate={(value) => !value.trim() || !Number.isFinite(Number(value)) || Number(value) <= 0 ? '镜头时长须为大于 0 的秒数' : ''} onCommit={(duration) => patch('shots', shot.id, { duration })} /></td>

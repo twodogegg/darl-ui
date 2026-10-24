@@ -142,7 +142,7 @@ function ArtWorkspace({ context }) {
                     generateBatch()
                   }
                 >
-                  {batchBusy ? '批量生成中…' : '☷　批量生成'}
+                  {batchBusy ? '批量补图中…' : '☷　批量补齐缺图'}
                 </button>
               </div>
             </header>

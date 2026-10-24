@@ -1,3 +1,5 @@
+import { resolveAssetDependencies, sameDependencyImages, validateAssetDependencies, type DependencyImage } from '../asset-dependencies';
+import actionPrompts from '../prompts/studio-actions.json';
 import promptCatalog from '../prompts/studio-prompt-catalog.json';
 import redrawPrompts from '../prompts/video-redraw.json';
 import { createHash } from 'node:crypto';
@@ -13,6 +15,14 @@ const recordId = (value: unknown) => {
   return value;
 };
 const finitePositive = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value > 0;
+const redrawProjectFields = ['targetRegion', 'targetLanguage', 'sourceVideo'];
+function projectForMode(item: StudioRecord): StudioRecord {
+  if (item.creationMode === 'video-redraw') return { targetRegion: 'japan', targetLanguage: 'ja', sourceVideo: {}, ...item };
+  const project = { ...item };
+  for (const key of redrawProjectFields) delete project[key];
+  return project;
+}
+
 /** Shared business service for UI and Agent. One batch is one SQLite transaction. */
 export class StudioStore {
   private get db() { return this.projects.db; }
@@ -42,7 +52,7 @@ export class StudioStore {
       data[row.resource].push({ ...JSON.parse(row.data), id: row.id, _version: row.version, _position: row.position });
     }
     const extras = new Map(data.projects.map(project => [project.id, project]));
-    data.projects = this.projects.list().map(project => ({ ...structuredClone(studioDefaults.projects), ...extras.get(String(project.id)), id: String(project.id), _version: extras.get(String(project.id))?._version || 1,
+    data.projects = this.projects.list().map(project => projectForMode({ ...structuredClone(studioDefaults.projects), ...extras.get(String(project.id)), id: String(project.id), _version: extras.get(String(project.id))?._version || 1,
       title: project.name, summary: project.description || '', ratio: project.aspect_ratio, style_catalog_id: project.style_catalog_id,
       cover: project.cover_asset?.storage_key || '', updated: Date.parse(String(project.updated_at)) || 0 }));
     const projectIds = new Set(data.projects.map(project => project.id));
@@ -54,7 +64,7 @@ export class StudioStore {
   query(input: Record<string, unknown>) {
     if (input.resource === 'styles') return { resource: 'styles', ...this.projects.styles() };
     const resource = studioResource(input.resource);
-    if (input.describe === true) return { resource, fields: ['id', '_version', '_position', ...studioFields[resource].split(' ')], defaults: studioDefaults[resource] || {}, requiredOnCreate: studioRequiredOnCreate[resource] || [], valuesSchema: studioValueSchema(resource), versionField: '_version', operations: ['create', 'update', 'delete'], batchSemantics: 'atomic', maxBatch: 500, structures: { scenes: ['id', 'location', 'setting:内/外/内外', 'time', 'suggestedDuration:秒或空字符串', 'content:完整场次正文，动作、人物名和台词按发生顺序交错，保留Markdown；场次不支持独立dialogue字段'], dialogue: ['id', 'type:角色/旁白', 'assetId:角色类型必填，须引用当前项目的真实角色资产；旁白可省略', 'speaker', 'description', 'text'], outline: ['core', 'story', 'keep', 'remove', 'merge', 'risks', 'episodes', 'roles:[{id,name,position,relationships,arc}]', 'scenes:[{id,name,purpose}]', 'props:[{id,name,purpose,involvement}]'], variants: ['id', 'name', 'description', 'image', 'history:图片URL数组'] } };
+    if (input.describe === true) return { resource, fields: ['id', '_version', '_position', ...studioFields[resource].split(' ')], defaults: studioDefaults[resource] || {}, requiredOnCreate: studioRequiredOnCreate[resource] || [], valuesSchema: studioValueSchema(resource), versionField: '_version', operations: ['create', 'update', 'delete'], batchSemantics: 'atomic', maxBatch: 500, structures: { scenes: ['id', 'location', 'setting:内/外/内外', 'time', 'suggestedDuration:秒或空字符串', 'content:完整场次正文，动作、人物名和台词按发生顺序交错，保留Markdown；场次不支持独立dialogue字段'], dialogue: ['id', 'type:角色/旁白', 'assetId:角色类型必填，须引用当前项目的真实角色资产；旁白可省略', 'speaker', 'description', 'text'], outline: ['core', 'story', 'keep', 'remove', 'merge', 'risks', 'episodes', 'roles:[{id,name,position,relationships,arc}]', 'scenes:[{id,name,purpose}]', 'props:[{id,name,purpose,involvement}]'], dependencies: ['assetId:同项目资产ID', 'variantId:可选，引用具体形态', 'purpose:参考用途'], variants: ['id', 'name', 'description', 'prompt:场景道具形态独立生图提示词，生图必填且不回退描述；角色默认使用外貌与当前服饰设定', 'image', 'history:图片URL数组'] } };
     const data = this.snapshot();
     let items = data[resource];
     if (input.projectId !== undefined) {
@@ -78,7 +88,7 @@ export class StudioStore {
       const invalid = Array.isArray(input.fields) ? input.fields.filter(key => !allowedFields.includes(key)) : input.fields;
       throw failure('tool-validation', 'STUDIO_FIELD_INVALID', `查询字段无效：${resource}.fields=${JSON.stringify(invalid)}。可用字段：${allowedFields.join(', ')}`, false);
     }
-    const page = items.slice(offset, offset + limit).map(item => input.fields ? Object.fromEntries(['id', '_version', ...input.fields as string[]].map(key => [key, item[key]])) : item);
+    const page = items.slice(offset, offset + limit).map(item => input.fields ? Object.fromEntries(['id', '_version', ...input.fields as string[]].filter(key => Object.hasOwn(item, key)).map(key => [key, item[key]])) : item);
     return { resource, items: page, total: items.length, nextCursor: offset + limit < items.length ? String(offset + limit) : null };
   }
   apply(requestId: string, changes: StudioChange[]) {
@@ -115,7 +125,9 @@ export class StudioStore {
             aliases.set(id, String(created.project_id)); id = String(created.project_id);
           }
           const after = { ...structuredClone(studioDefaults[resource] || {}), ...before, ...values, id, _version: before?._version || 0, _position: change.position ?? before?._position ?? collection.reduce((max, item) => Math.max(max, item._position ?? 0), -1) + 1 } as StudioRecord;
-          if (before) collection[collection.indexOf(before)] = after; else collection.push(after);
+          if (resource === 'projects' && after.creationMode !== 'video-redraw' && redrawProjectFields.some(key => Object.hasOwn(values, key))) throw failure('tool-validation', 'STUDIO_FIELD_INVALID', 'targetRegion、targetLanguage、sourceVideo 仅适用于视频转绘项目，剧本项目不能设置这些字段。', false);
+          const saved = resource === 'projects' ? projectForMode(after) : after;
+          if (before) collection[collection.indexOf(before)] = saved; else collection.push(saved);
         }
       }
       for (const resource of Object.keys(data) as StudioResource[]) for (const item of data[resource]) if (aliases.has(String(item.projectId))) item.projectId = aliases.get(String(item.projectId));
@@ -160,7 +172,8 @@ export class StudioStore {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('生成目标无效');
     const target = value as Record<string, unknown>, resource = studioResource(target.resource);
     if (!['assets', 'clips'].includes(resource)) throw new Error('生成目标必须是资产或片段');
-    const item = this.snapshot()[resource].find(item => item.id === target.id);
+    const state = this.snapshot();
+    const item = state[resource].find(item => item.id === target.id);
     if (!item || item._version !== target.version) throw new StudioConflict('生成目标已变化，请重新读取');
     const fields = type === 'video' ? resource === 'clips' ? ['videos'] : [] : resource === 'assets' ? ['image'] : ['image', 'storyboardImage', 'blockingImage'];
     if (!fields.includes(String(target.field))) throw new Error('生成类型与目标字段不匹配');
@@ -175,7 +188,16 @@ export class StudioStore {
       }
     }
     if (target.variantId && !(item.variants as Array<{ id: string }> | undefined)?.some(variant => variant.id === target.variantId)) throw new Error('资产形态不存在');
-    return { resource, id: item.id, version: item._version, field: target.field, ...(target.variantId ? { variantId: target.variantId } : {}) };
+    return { resource, id: item.id, version: item._version, field: target.field, ...(resource === 'assets' ? { dependencyImages: resolveAssetDependencies(item, state.assets) } : {}), ...(target.variantId ? { variantId: target.variantId } : {}) };
+  }
+  prepareMedia(input: { prompt: string; options: Record<string, unknown> }, type: string) {
+    const target = input.options.studioTarget as Record<string, unknown> | undefined;
+    if (type !== 'image' || target?.resource !== 'assets') return input;
+    const dependencies = target.dependencyImages as DependencyImage[] || [];
+    const references = [...new Set([...(input.options.references as string[] || []), ...dependencies.map(item => item.image)])];
+    const notes = dependencies.map(item => `参考图 ${references.indexOf(item.image) + 1}：${item.name}；用途：${item.purpose}`).join('\n');
+    const prompt = dependencies.length ? `${input.prompt}\n${actionPrompts['asset-dependencies'].replace('{references}', notes)}` : input.prompt;
+    return { prompt, options: { ...input.options, references, aspectRatio: input.options.aspectRatio || '16:9' } };
   }
   attachMedia(job: import('./media-job-store').MediaJob) {
     const target = job.options.studioTarget as Record<string, unknown> | undefined;
@@ -185,17 +207,26 @@ export class StudioStore {
     if (!item) return; // Removed targets never get resurrected by a late result.
     if (job.resultFileIds.some(id => !this.projects.files.get(id)?.mimeType.startsWith(`${job.type}/`))) throw new Error('生成结果文件类型与任务不一致');
     const urls = job.resultFileIds.map(id => `/api/files/${id}`);
-    const values: Record<string, unknown> = {}, current = item._version === target.version;
+    const dependencies = target.dependencyImages as DependencyImage[] || [];
+    let dependenciesCurrent = true;
+    if (resource === 'assets') {
+      try { dependenciesCurrent = sameDependencyImages(dependencies, resolveAssetDependencies(item, this.snapshot().assets)); }
+      catch { dependenciesCurrent = false; }
+    }
+    const values: Record<string, unknown> = {}, current = item._version === target.version && dependenciesCurrent;
+    const dependencyHistory = (entry: Record<string, unknown>) => ({ ...(entry.imageDependencies as Record<string, unknown> || {}), ...Object.fromEntries(urls.map(url => [url, dependencies])) });
     if (target.variantId) {
-      values.variants = (item.variants as Array<Record<string, unknown>>).map(variant => variant.id === target.variantId ? { ...variant, history: [...urls, ...(variant.history as string[] || [])], ...(current ? { image: urls[0] } : {}) } : variant);
+      values.variants = (item.variants as Array<Record<string, unknown>>).map(variant => variant.id === target.variantId ? { ...variant, imageDependencies: dependencyHistory(variant), history: [...urls, ...(variant.history as string[] || [])], ...(current ? { image: urls[0] } : {}) } : variant);
     } else {
       const history = target.field === 'videos' ? 'videos' : target.field === 'image' && resource === 'assets' ? 'history' : `${String(target.field).replace(/Image$/, '')}History`;
+      if (resource === 'assets') values.imageDependencies = dependencyHistory(item);
       values[history] = [...urls, ...(item[history] as string[] || [])];
       if (current) values[target.field === 'videos' ? 'currentVideo' : String(target.field)] = urls[0];
     }
     this.apply(requestId, [{ resource, id: item.id, op: 'update', version: item._version, values }]);
   }
   private validate(data: StudioData) {
+    validateAssetDependencies(data.assets);
     const byId = (resource: StudioResource, id: unknown) => data[resource].find(item => item.id === id);
     const required = (resource: StudioResource, id: unknown, path: string) => {
       if (typeof id !== 'string' || !id.trim()) throw failure('tool-validation', 'STUDIO_FIELD_REQUIRED', `${path} 必填，须引用真实的 ${resource} 记录 ID。`, false);
@@ -276,7 +307,7 @@ export class StudioStore {
         const source = item.source as Record<string, unknown>;
         const project = required('projects', resource === 'assets' ? item.projectId : required('episodes', item.episodeId, path).projectId, path);
         const video = project.sourceVideo as Record<string, unknown>;
-        if (!source || !Number.isFinite(video.duration) || source.fileId !== video.fileId || !Number.isFinite(source.start) || !Number.isFinite(source.end)
+        if (!source || !video || !Number.isFinite(video.duration) || source.fileId !== video.fileId || !Number.isFinite(source.start) || !Number.isFinite(source.end)
           || Number(source.start) < 0 || Number(source.end) <= Number(source.start) || Number(source.end) > Number(video.duration) + 0.001) throw new Error('原片来源区间无效');
         if (!Array.isArray(source.frames) || source.frames.length > 12) throw new Error('原片参考帧无效');
         for (const frame of source.frames as Array<Record<string, unknown>>) {

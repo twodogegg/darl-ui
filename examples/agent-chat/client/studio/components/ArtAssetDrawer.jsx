@@ -1,3 +1,4 @@
+import { resolveAssetDependencies, assetDependenciesChanged, validateAssetDependencies } from '../../../asset-dependencies'
 import { useEffect, useRef, useState } from 'react'
 import { SourceEvidence } from './VideoRedraw'
 import { useStore } from '../store'
@@ -35,6 +36,8 @@ export default function ArtAssetDrawer({
       voiceDescription: '',
       prompt: '',
       image: '',
+      dependencies: [],
+      imageDependencies: {},
       variants: [],
       history: [],
     },
@@ -71,7 +74,7 @@ export default function ArtAssetDrawer({
   }, [liveAsset, form])
   const model = getModel('image')
   const resolution = options.resolution || (mediaDefaults.image?.modelId === model?.id ? mediaDefaults.image?.resolution : model?.defaults?.resolution) || model?.capabilities?.resolutions?.[0]
-  const aspectRatio = options.aspectRatio || data.projects.find(project => project.id === projectId)?.ratio || mediaDefaults.image?.aspectRatio || model?.defaults?.aspectRatio
+  const aspectRatio = options.aspectRatio || '16:9'
   const job = assetJob(mediaJobs, form.id, selected)
   const generating = busy || uploading || pendingJob(job)
   const stale = liveAsset && liveAsset._version !== form._version
@@ -80,7 +83,18 @@ export default function ArtAssetDrawer({
   const current = variant || form
   const history = [...new Set([...(current.history || []), current.image].filter(Boolean))]
   const image = historyIndex === null ? current.image : history[historyIndex] || ''
+  const dependencyAssets = data.assets.filter(item => item.projectId === projectId && item.id !== form.id)
+  const dependencyChoices = dependencyAssets.flatMap(item => [{ assetId: item.id, name: `${item.name} / 主形象` }, ...item.variants.map(variant => ({ assetId: item.id, variantId: variant.id, name: `${item.name} / ${variant.name}` }))])
+  let dependencyError = ''
+  try {
+    validateAssetDependencies([...data.assets.filter(item => item.id !== form.id), form])
+    resolveAssetDependencies(form, data.assets)
+  } catch (reason) { dependencyError = reason.message }
+  const dependencyChanged = assetDependenciesChanged(form, current, data.assets, image)
   const change = (key, value) => setForm(f => ({ ...f, [key]: value }))
+  const changeCurrent = (key, value) => selected
+    ? setForm(f => ({ ...f, variants: f.variants.map(v => v.id === selected ? { ...v, [key]: value } : v) }))
+    : change(key, value)
   function changeImage(url) {
     setForm(f => selected
       ? { ...f, variants: f.variants.map(v => v.id === selected ? { ...v, image: url, history: [...new Set([url, ...(v.history || []), v.image].filter(Boolean))] } : v) }
@@ -130,7 +144,8 @@ export default function ArtAssetDrawer({
     if (generating) return
     setBusy(true)
     try {
-      const request = assetImageRequest(form, { variantId: selected, view, customPrompt: form.prompt, ...(editImage ? { editPrompt, image } : {}) })
+      if (dependencyError) throw new Error(dependencyError)
+      const request = assetImageRequest(form, { variantId: selected, view, customPrompt: current.prompt || '', ...(editImage ? { editPrompt, image } : {}) })
       const latest = await persist()
       await generateMedia({ ...request, target: { resource: 'assets', id: latest.id, field: 'image', ...(selected ? { variantId: selected } : {}) }, options })
       setEditImage(false)
@@ -308,6 +323,7 @@ export default function ArtAssetDrawer({
                 id: id(),
                 name: '',
                 description: '',
+                prompt: '',
                 image: '',
                 history: [],
               })
@@ -323,6 +339,29 @@ export default function ArtAssetDrawer({
             </span>
           </button>
         </div>
+        <section className="asset-drawer__generator" aria-label="依赖资产">
+          <div className="row"><h4>{form.dependencies?.length ? '融合资产 · 依赖图片' : '依赖资产'}</h4><Button disabled={!dependencyChoices.some(choice => !(form.dependencies || []).some(item => item.assetId === choice.assetId && (item.variantId || '') === (choice.variantId || '')))} onClick={() => {
+            const choice = dependencyChoices.find(choice => !(form.dependencies || []).some(item => item.assetId === choice.assetId && (item.variantId || '') === (choice.variantId || '')))
+            if (choice) { const { name, ...reference } = choice; change('dependencies', [...(form.dependencies || []), { ...reference, purpose: '' }]) }
+          }}>添加依赖资产</Button></div>
+          <p className="muted">引用人物或物体形象时选择对应资产。依赖图片准备好后才能生成，参考图将自动传入。</p>
+          {(form.dependencies || []).map((dependency, index) => {
+            const source = dependencyAssets.find(item => item.id === dependency.assetId)
+            const reference = dependency.variantId ? source?.variants.find(item => item.id === dependency.variantId) : source
+            const edit = patch => change('dependencies', form.dependencies.map((item, i) => i === index ? { ...item, ...patch } : item))
+            return <div key={index} className="asset-drawer__dependency">
+              {reference?.image && <img src={reference.image} alt="依赖参考图" style={{ width: 64, height: 64, objectFit: 'contain' }} />}
+              <Field label={`依赖形象 ${index + 1}`}><select aria-label={`依赖形象 ${index + 1}`} value={JSON.stringify({ assetId: dependency.assetId, ...(dependency.variantId ? { variantId: dependency.variantId } : {}) })} onChange={event => {
+                const value = JSON.parse(event.target.value); edit({ ...value, variantId: value.variantId || '' })
+              }}><option value="" disabled>选择资产与形态</option>{dependencyChoices.map(({ name, ...value }) => <option key={JSON.stringify(value)} value={JSON.stringify(value)}>{name}</option>)}</select></Field>
+              <Field label={`参考用途 ${index + 1}`}><input aria-label={`参考用途 ${index + 1}`} placeholder="例如：仅作为照片内人物的身份参考" value={dependency.purpose} maxLength={1000} onChange={event => edit({ purpose: event.target.value })} /></Field>
+              <Button onClick={() => change('dependencies', form.dependencies.filter((_, i) => i !== index))}>移除依赖 {index + 1}</Button>
+              {!reference?.image && <p role="status">等待依赖图片</p>}
+            </div>
+          })}
+          {dependencyError && <p role="alert">{dependencyError}</p>}
+          {dependencyChanged && <p role="status">当前图片的依赖形象已更新或尚未记录引用，请重新生成后核对。</p>}
+        </section>
         <section className="asset-drawer__generator">
           <div
             className={`asset-drawer__parameters ${form.type === '角色' ? 'asset-drawer__character-parameters' : ''}`}
@@ -352,20 +391,13 @@ export default function ArtAssetDrawer({
                   aria-label={label}
                   maxLength={key === 'voiceDescription' ? 1000 : 5000}
                   value={
-                    key === 'costume' && variant
-                      ? variant.description
+                    variant && (key === 'costume' || (key === 'description' && form.type !== '角色') || key === 'prompt')
+                      ? variant[key === 'costume' ? 'description' : key] || ''
                       : form[key] || ''
                   }
                   onChange={(e) => {
-                    if (key === 'costume' && variant)
-                      change(
-                        'variants',
-                        form.variants.map((v) =>
-                          v.id === selected
-                            ? { ...v, description: e.target.value }
-                            : v,
-                        ),
-                      )
+                    if (key === 'costume' && variant) changeCurrent('description', e.target.value)
+                    else if ((key === 'description' && form.type !== '角色') || key === 'prompt') changeCurrent(key, e.target.value)
                     else change(key, e.target.value)
                   }}
                 />
@@ -378,8 +410,8 @@ export default function ArtAssetDrawer({
               <textarea
                 aria-label="自定义生图提示词"
                 maxLength={5000}
-                value={form.prompt}
-                onChange={(e) => change('prompt', e.target.value)}
+                value={current.prompt || ''}
+                onChange={(e) => changeCurrent('prompt', e.target.value)}
               />
             </label>
           )}
@@ -401,7 +433,7 @@ export default function ArtAssetDrawer({
                 {busy ? '正在提交…' : jobLabel(job)}
               </button>
             ) : (
-              <button className="generate" onClick={generate}>
+              <button className="generate" disabled={Boolean(dependencyError)} onClick={generate}>
                 生成图片
               </button>
             )}
