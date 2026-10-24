@@ -64,12 +64,12 @@ const MAX_IMAGE_DATA_URL_LENGTH = 64 + 4 * Math.ceil(MAX_IMAGE_BYTES / 3);
  * settings page can render the exact schema the model receives.
  */
 export const MEDIA_TOOLS = [
-  { name: 'builtin_generate_media', description: '向后台提交一条图片或视频生成任务。图片支持 gpt-image-2、gpt-image-2.5、gemini-3-pro-image-preview（可用参考图编辑），视频支持 minimax-h3-flash。调用前必须明确用户的生成意图，提交遵循项目审批模式。返回任务 ID，不等待媒体完成。', parameters: { type: 'object', properties: {
-    modelId: { type: 'string', enum: ['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-image-preview', 'minimax-h3-flash'] },
+  { name: 'builtin_generate_media', description: '向后台提交一条图片或视频生成任务。图片支持 gpt-image-2、gpt-image-2.5、gemini-3-pro-image-preview（可用参考图编辑），视频支持 minimax-h3-flash、minimax-h3-standard。调用前必须明确用户的生成意图，提交遵循项目审批模式。返回任务 ID，不等待媒体完成。', parameters: { type: 'object', properties: {
+    modelId: { type: 'string', enum: ['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-image-preview', 'minimax-h3-flash', 'minimax-h3-standard'] },
     prompt: { type: 'string', minLength: 1, maxLength: 16000, description: '图片描述或编辑指令。改编用户提供的图片时，描述要改什么，不需要复述原图内容。' },
     options: { type: 'object', properties: {
-      aspectRatio: { type: 'string', enum: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'], description: '画幅：按顺序为 1:1、2:3、3:2、3:4、4:3、9:16、16:9' },
-      resolution: { type: 'string', enum: ['1K', '2K', '4K', '480', '768'], description: '清晰度档位：图片为 1K/2K/4K，视频为 480/768。' },
+      aspectRatio: { type: 'string', enum: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9', 'adaptive'], description: '画幅：图片支持 1:1、2:3、3:2、3:4、4:3、9:16、16:9；视频另外支持 21:9 和 adaptive（adaptive 需要图片或视频参考）。' },
+      resolution: { type: 'string', enum: ['1K', '2K', '4K', '480P', '768P', '1080P'], description: '清晰度档位：图片为 1K/2K/4K，视频为 480P/768P/1080P（H3 Standard 不支持 1080P）。' },
       references: { type: 'array', maxItems: 16, items: { type: 'string' }, description: '必填场景：当用户提供了图片 URL 或要求改编已有图片（改风格、换背景、换配色、保持人物/物体一致性）时，必须把该 URL 放进这个数组。不填则视为纯文生图，原图会被忽略。支持公网 HTTP(S) URL 或 data: URL。仅图片模型支持，Gemini 最多 14 张。' },
       duration: { type: 'integer', minimum: 4, maximum: 15, description: '视频时长（秒），仅视频' },
     }, additionalProperties: false } },
@@ -78,13 +78,13 @@ export const MEDIA_TOOLS = [
 ] as const;
 type DefaultMediaSelection = {
   image: { modelId: string; resolution: '1K' | '2K' | '4K'; aspectRatio: '1:1' | '2:3' | '3:2' | '3:4' | '4:3' | '9:16' | '16:9' };
-  video: { modelId: 'minimax-h3-flash'; resolution: '480' | '768'; aspectRatio: '16:9' | '9:16' };
+  video: { modelId: 'minimax-h3-flash' | 'minimax-h3-standard'; resolution: '480P' | '768P' | '1080P'; aspectRatio: 'adaptive' | '21:9' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16' };
 };
 const IMAGE_MODEL_IDS = ['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-image-preview'];
 const IMAGE_ASPECT_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'];
 const defaultMediaSelection: DefaultMediaSelection = {
   image: { modelId: 'gpt-image-2', resolution: '2K', aspectRatio: '16:9' },
-  video: { modelId: 'minimax-h3-flash', resolution: '480', aspectRatio: '16:9' },
+  video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' },
 };
 
 function validateDefaultMediaSelection(value: unknown): DefaultMediaSelection {
@@ -97,11 +97,12 @@ function validateDefaultMediaSelection(value: unknown): DefaultMediaSelection {
   const videoChoice = video as Record<string, unknown>;
   const imageResolutions = ['1K', '2K', '4K'];
   if (!IMAGE_MODEL_IDS.includes(String(imageChoice.modelId)) || !imageResolutions.includes(String(imageChoice.resolution)) || !IMAGE_ASPECT_RATIOS.includes(String(imageChoice.aspectRatio))) throw new Error('默认图片模型参数不受支持');
-  if (videoChoice.modelId !== 'minimax-h3-flash' || !['480', '768'].includes(String(videoChoice.resolution)) || !['16:9', '9:16'].includes(String(videoChoice.aspectRatio))) throw new Error('默认视频模型参数不受支持');
+  const videoModels: Record<string, string[]> = { 'minimax-h3-flash': ['480P', '768P', '1080P'], 'minimax-h3-standard': ['480P', '768P'] };
+  if (!videoModels[String(videoChoice.modelId)]?.includes(String(videoChoice.resolution)) || !['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'].includes(String(videoChoice.aspectRatio))) throw new Error('默认视频模型参数不受支持');
   return {
     image: { modelId: String(imageChoice.modelId), resolution: imageChoice.resolution as DefaultMediaSelection['image']['resolution'], aspectRatio: imageChoice.aspectRatio as DefaultMediaSelection['image']['aspectRatio'] },
     video: {
-      modelId: 'minimax-h3-flash',
+      modelId: String(videoChoice.modelId) as DefaultMediaSelection['video']['modelId'],
       resolution: videoChoice.resolution as DefaultMediaSelection['video']['resolution'],
       aspectRatio: videoChoice.aspectRatio as DefaultMediaSelection['video']['aspectRatio'],
     },
@@ -893,8 +894,6 @@ export function createApi(directory: string, env: Record<string, string>, prompt
               if (options.references !== undefined && !Array.isArray(options.references))
                 return mediaFailure('参考图片格式无效', 'MEDIA_ARGUMENT_INVALID', args, 'generate_media');
               const referenceCount = Array.isArray(options.references) ? options.references.length : 0;
-              if (referenceCount && model.type === 'video')
-                return mediaFailure('视频暂不支持参考图，请去掉 references 后重试', 'MEDIA_REFERENCE_UNSUPPORTED', args, 'generate_media');
               const bindings = model.bindings.filter(item => item.enabled !== false);
               const binding = bindings[0];
               const selectedProvider = providers.find(item => item.id === binding?.providerId);

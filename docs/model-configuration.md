@@ -12,7 +12,7 @@
 - 只使用宿主已实现且验证过的协议。**协议包括请求构造、上传要求、异步任务、响应解析和错误映射**；不单独创建「响应处理」配置页。
 - 不引入万能 HTTP/JSON Schema 编辑器、任意脚本、seed / CFG / sampler 等通用炼丹参数。
 - 文本只暴露模型选择和支持的思考等级；**不提供关闭思考 / none 选项**。协议内部如何保证符合实际请求规范，由宿主负责。
-- 第一阶段不支持 Seedance、官方 MiniMax H3、本地 H3、`minimax-h3-standard` 或 `runninghub-minimax-h3`。视频仅针对新版统一接口的 `minimax-h3-flash` 网关协议。
+- 第一阶段不支持 Seedance、官方 MiniMax H3、本地 H3 或 `runninghub-minimax-h3`。视频统一使用新版 H3 网关协议 `darl-h3-flash-unified`，当前接入 `minimax-h3-flash` 与 `minimax-h3-standard` 两个逻辑模型。
 
 ## 2. 第一期模型范围
 
@@ -26,6 +26,7 @@
 | 图片 | `gpt-image-2.5` | GPT Image 2.5（共用模板） | 当前渠道上游 ID 为 `gpt-image-2.5-sunburst` |
 | 图片 | `gemini-3-pro-image-preview` | Gemini 3 Pro Image | `generateContent` + `imageConfig` |
 | 视频 | `minimax-h3-flash` | Darl API H3 Flash | **仅限第 7 节的新版统一 H3 API；不使用旧 RunningHub `task_*` 上传协议** |
+| 视频 | `minimax-h3-standard` | Darl API H3 Standard（独立模板，无 1080P） | 同上；`h3-standard` 模板继承同一协议，仅 480P/768P |
 
 首批文本思考等级（以官方资料作为模板初值，实际渠道允许覆写）：
 
@@ -114,9 +115,9 @@ DeepSeek 官方将请求 `medium` 映射到实际 `high`，因此不在 UI 中�
 
 - **生成方式**需要逐项声明：纯文生、仅首帧、仅尾帧、首尾帧、多模态参考。拥有普通参考图片字段**不等于**支持专门的首/尾帧角色。
 - `maxReferenceImages`、`maxReferenceVideos`、`maxReferenceAudios`；可选素材总数上限和不允许的混合组合。视频/音频的数量及长度限制需按渠道确认。
-- 画幅列表、分辨率可选值、生成时长离散值或区间、默认值；是否可控制音频生成（若无参数，不出现开关）。分辨率选项以各渠道实际可用值为准，H3 Flash 当前仅字符串 `"480"`、`"768"`；画幅仅 `16:9`、`9:16`。
+- 画幅列表、分辨率可选值、生成时长离散值或区间、默认值；是否可控制音频生成（若无参数，不出现开关）。分辨率选项以各渠道实际可用值为准：H3 Flash 为 `480P`/`768P`/`1080P`，H3 Standard 为 `480P`/`768P`；画幅为 `adaptive`、`21:9`、`16:9`、`4:3`、`1:1`、`3:4`、`9:16`。
 - 模式级别的输入/输出约束应能覆盖总体模板。缺少模式声明时不得自动推断支持。
-- 不把过时的 `megapixels` 或其他分辨率单位当作本期 H3 Flash 的接口选项；UI 只允许 `480`、`768`，提交时协议适配器传字符串 `"480"`、`"768"`。
+- 不把过时的 `megapixels` 当作 H3 的接口选项；UI 以 `480P`/`768P`/`1080P` 档位表示，适配器直接映射为接口的 `size` 字符串。
 
 ### 模板与覆盖规则
 

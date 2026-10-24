@@ -105,7 +105,7 @@ export const BUILTIN_PROTOCOLS: ProtocolAdapterDefinition[] = [
   { key: 'openai-responses', label: 'OpenAI Responses', types: ['text'], implemented: true },
   { key: 'openai-images', label: 'OpenAI Images', types: ['image'], implemented: true, description: '宿主已接通文生图与参考图编辑' },
   { key: 'gemini-generate-content', label: 'Gemini Generate Content', types: ['image'], implemented: true, description: '宿主已接通 imageConfig 生成与参考图编辑' },
-  { key: 'darl-h3-flash-unified', label: 'Darl H3 Flash（新版统一视频）', types: ['video'], implemented: true, description: '宿主已接通文生视频与参考图片；首尾帧仍待网关验收' },
+  { key: 'darl-h3-flash-unified', label: 'Darl H3（新版统一视频）', types: ['video'], implemented: true, description: '宿主已接通文生视频、首尾帧与参考图片/视频/音频' },
 ];
 
 export const BUILTIN_TEMPLATES: CapabilityTemplate[] = [
@@ -140,13 +140,25 @@ export const BUILTIN_TEMPLATES: CapabilityTemplate[] = [
   {
     id: 'h3-flash', name: 'MiniMax H3 Flash（新版统一视频）', type: 'video',
     capabilities: {
-      modes: ['text-to-video', 'first-last-frame', 'reference'], firstLastFrame: 'unverified',
+      modes: ['text-to-video', 'first-last-frame', 'reference'], firstLastFrame: 'supported',
       maxReferenceImages: 9, maxReferenceVideos: 3, maxReferenceAudios: 3,
-      aspectRatios: ['16:9', '9:16'], resolutions: ['480', '768'], durations: { min: 4, max: 15 }, maxOutputs: 1,
+      aspectRatios: ['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'], resolutions: ['480P', '768P', '1080P'], durations: { min: 4, max: 15 }, maxOutputs: 1,
     },
-    defaults: { resolution: '480', aspectRatio: '16:9', duration: 10 },
+    defaults: { resolution: '480P', aspectRatio: '16:9', duration: 5 },
+  },
+  {
+    id: 'h3-standard', name: 'MiniMax H3 Standard（新版统一视频）', type: 'video',
+    capabilities: {
+      modes: ['text-to-video', 'first-last-frame', 'reference'], firstLastFrame: 'supported',
+      maxReferenceImages: 9, maxReferenceVideos: 3, maxReferenceAudios: 3,
+      aspectRatios: ['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'], resolutions: ['480P', '768P'], durations: { min: 4, max: 15 }, maxOutputs: 1,
+    },
+    defaults: { resolution: '768P', aspectRatio: '16:9', duration: 5 },
   },
 ];
+
+/** Same unified H3 protocol; only the upstream model id and the 1080P limit differ. */
+const H3_TEMPLATE_BY_MODEL: Record<string, string> = { 'minimax-h3-flash': 'h3-flash', 'minimax-h3-standard': 'h3-standard' };
 
 export const BUILTIN_MODELS: LogicalModel[] = [
   { id: 'deepseek-v4.1-flash', displayName: 'DeepSeek V4.1 Flash', type: 'text', capabilityTemplateId: 'deepseek-thinking', bindings: [{ id: 'deepseek-darl', providerId: 'darl', upstreamModelId: 'deepseek-v4.1-flash', protocolKey: 'openai-completions', enabled: true }] },
@@ -157,6 +169,7 @@ export const BUILTIN_MODELS: LogicalModel[] = [
   { id: 'gpt-image-2.5', displayName: 'GPT Image 2.5', type: 'image', capabilityTemplateId: 'gpt-image-2', bindings: [{ id: 'gpt-image-2.5-darl', providerId: 'darl', upstreamModelId: 'gpt-image-2.5-sunburst', protocolKey: 'openai-images', enabled: true }] },
   { id: 'gemini-3-pro-image-preview', displayName: 'Gemini 3 Pro Image Preview', type: 'image', capabilityTemplateId: 'gemini-pro-image', bindings: [{ id: 'gemini-image-darl', providerId: 'darl', upstreamModelId: 'gemini-3-pro-image-preview', protocolKey: 'gemini-generate-content', enabled: true }] },
   { id: 'minimax-h3-flash', displayName: 'MiniMax H3 Flash', type: 'video', capabilityTemplateId: 'h3-flash', bindings: [{ id: 'h3-darl', providerId: 'darl', upstreamModelId: 'minimax-h3-flash', protocolKey: 'darl-h3-flash-unified', enabled: true }] },
+  { id: 'minimax-h3-standard', displayName: 'MiniMax H3 Standard', type: 'video', capabilityTemplateId: 'h3-standard', bindings: [{ id: 'h3-standard-darl', providerId: 'darl', upstreamModelId: 'minimax-h3-standard', protocolKey: 'darl-h3-flash-unified', enabled: true }] },
 ];
 
 export const defaultModelConfiguration = (): ModelConfiguration => ({ version: 1, templates: BUILTIN_TEMPLATES.map((template) => ({ ...template, capabilities: { ...template.capabilities } as CapabilityValues })), models: BUILTIN_MODELS.map((model) => ({ ...model, bindings: model.bindings.map((binding) => ({ ...binding })) })), protocols: BUILTIN_PROTOCOLS.map((protocol) => ({ ...protocol })) });
@@ -187,10 +200,27 @@ export function upgradeModelConfiguration(configuration: ModelConfiguration): Mo
       gptImage.defaults = { resolution: '2K', aspectRatio: '16:9' };
     }
   }
-  // H3 keeps its protocol values, so the builtin default moves onto them too.
+  // H3 moved to the documented `size`/`ratio` contract; bring inherited values up to it.
   const h3Flash = next.templates.find((template) => template.id === 'h3-flash');
-  if (h3Flash && h3Flash.defaults?.resolution === '768') h3Flash.defaults = { resolution: '480', aspectRatio: '16:9', duration: 10 };
-  const addedTemplates: CapabilityTemplate[] = BUILTIN_TEMPLATES.filter((template) => template.id === 'gemini-pro-image');
+  if (h3Flash) {
+    const builtin = BUILTIN_TEMPLATES.find((template) => template.id === 'h3-flash')!.capabilities as VideoCapabilities;
+    const capabilities = h3Flash.capabilities as VideoCapabilities;
+    const merge = (field: 'resolutions' | 'aspectRatios', legacy: (value: string) => boolean, next: string[]) => {
+      const current = capabilities[field];
+      if (!current?.length || current.some(legacy)) (capabilities as unknown as Record<string, unknown>)[field] = [...next];
+    };
+    merge('resolutions', (value) => value === '480' || value === '768', builtin.resolutions);
+    if (!capabilities.aspectRatios?.includes('adaptive')) merge('aspectRatios', () => true, builtin.aspectRatios);
+    if (capabilities.firstLastFrame !== 'supported') (capabilities as unknown as Record<string, unknown>).firstLastFrame = 'supported';
+    const defaults = h3Flash.defaults || {};
+    const normalized = String(defaults.resolution ?? '480');
+    h3Flash.defaults = {
+      resolution: normalized === '480' || normalized === '768' ? `${normalized}P` : (defaults.resolution as string) ?? '480P',
+      aspectRatio: String(defaults.aspectRatio ?? '16:9'),
+      duration: Number(defaults.duration ?? 5),
+    };
+  }
+  const addedTemplates: CapabilityTemplate[] = BUILTIN_TEMPLATES.filter((template) => ['gemini-pro-image', 'h3-standard'].includes(template.id));
   for (const template of addedTemplates) {
     if (!next.templates.some((item) => item.id === template.id)) {
       next.templates.push({ ...template, capabilities: { ...template.capabilities } as CapabilityValues });
@@ -200,11 +230,16 @@ export function upgradeModelConfiguration(configuration: ModelConfiguration): Mo
   for (const protocol of BUILTIN_PROTOCOLS) {
     if (!next.protocols.some((item) => item.key === protocol.key)) next.protocols.push({ ...protocol });
   }
-  const addedModels: LogicalModel[] = BUILTIN_MODELS.filter((model) => ['gpt-image-2.5', 'gemini-3-pro-image-preview'].includes(model.id));
+  const addedModels: LogicalModel[] = BUILTIN_MODELS.filter((model) => ['gpt-image-2.5', 'gemini-3-pro-image-preview', 'minimax-h3-standard'].includes(model.id));
   for (const model of addedModels) {
     if (!next.models.some((item) => item.id === model.id)) {
       next.models.push({ ...model, bindings: model.bindings.map((binding) => ({ ...binding })) });
     }
+  }
+  // An H3 binding whose template id drifted would keep the old capability set.
+  for (const model of next.models) {
+    const templateId = H3_TEMPLATE_BY_MODEL[model.id];
+    if (templateId && next.templates.some((item) => item.id === templateId)) model.capabilityTemplateId = templateId;
   }
   return next;
 }
@@ -399,8 +434,9 @@ export function validateModelConfiguration(configuration: ModelConfiguration): M
         const video = effective as VideoCapabilities;
         for (const key of ['maxReferenceImages', 'maxReferenceVideos', 'maxReferenceAudios'] as const) if (!Number.isInteger(video[key]) || video[key] < 0) errors.push({ path: `${bindingPath}.${key}`, message: '素材上限必须是非负整数' });
         if (!isStringArray(video.resolutions)) errors.push({ path: `${bindingPath}.resolutions`, message: '分辨率不能为空' });
-        if (model.id === 'minimax-h3-flash' && video.resolutions.some((value) => value !== '480' && value !== '768')) errors.push({ path: `${bindingPath}.resolutions`, message: 'H3 Flash 只支持 480 或 768' });
-        if (model.id === 'minimax-h3-flash' && video.aspectRatios.some((value) => value !== '16:9' && value !== '9:16')) errors.push({ path: `${bindingPath}.aspectRatios`, message: 'H3 Flash 只支持 16:9 或 9:16' });
+        // H3 ranks `480P`/`768P`/`1080P`; rankings are not a product option elsewhere.
+        if (model.id === 'minimax-h3-flash' && video.resolutions.some((value) => !['480P', '768P', '1080P'].includes(value))) errors.push({ path: `${bindingPath}.resolutions`, message: 'H3 Flash 只支持 480P、768P 或 1080P' });
+        if (model.id === 'minimax-h3-standard' && video.resolutions.some((value) => !['480P', '768P'].includes(value))) errors.push({ path: `${bindingPath}.resolutions`, message: 'H3 Standard 只支持 480P 或 768P' });
         if (video.modes.includes('first-last-frame') && video.firstLastFrame === 'supported' && !protocol?.implemented) errors.push({ path: `${bindingPath}.firstLastFrame`, message: '首尾帧协议尚未实现' });
         const resolution = configuredDefaults.resolution;
         if (typeof resolution === 'string' && !video.resolutions.includes(resolution)) errors.push({ path: `${bindingPath}.defaults.resolution`, message: '默认分辨率必须属于最终有效能力' });

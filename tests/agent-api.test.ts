@@ -203,13 +203,15 @@ describe('Agent configuration API', () => {
         const initial = await request('default-models');
         expect(await initial.json()).toEqual({
           image: { modelId: 'gpt-image-2', resolution: '2K', aspectRatio: '16:9' },
-          video: { modelId: 'minimax-h3-flash', resolution: '480', aspectRatio: '16:9' },
+          video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' },
         });
-        const saved = await request('default-models', { selection: { image: { modelId: 'gpt-image-2', resolution: '4K', aspectRatio: '9:16' }, video: { modelId: 'minimax-h3-flash', resolution: '480', aspectRatio: '16:9' } } });
+        const saved = await request('default-models', { selection: { image: { modelId: 'gpt-image-2', resolution: '4K', aspectRatio: '9:16' }, video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' } } });
         expect(saved.status).toBe(200);
         expect(await saved.json()).toMatchObject({ image: { resolution: '4K', aspectRatio: '9:16' } });
         expect(dbJson(directory, 'defaultMediaModels')).toMatchObject({ image: { resolution: '4K', aspectRatio: '9:16' } });
-        expect((await request('default-models', { selection: { image: { modelId: 'gpt-image-2', resolution: '8K', aspectRatio: '16:9' }, video: { modelId: 'minimax-h3-flash', resolution: '480', aspectRatio: '16:9' } } })).status).toBe(400);
+        expect((await request('default-models', { selection: { image: { modelId: 'gpt-image-2', resolution: '8K', aspectRatio: '16:9' }, video: { modelId: 'minimax-h3-flash', resolution: '480P', aspectRatio: '16:9' } } })).status).toBe(400);
+        expect((await request('default-models', { selection: { image: { modelId: 'gpt-image-2', resolution: '2K', aspectRatio: '16:9' }, video: { modelId: 'minimax-h3-standard', resolution: '1080P', aspectRatio: '16:9' } } })).status).toBe(400);
+        expect((await request('default-models', { selection: { image: { modelId: 'gpt-image-2', resolution: '2K', aspectRatio: '16:9' }, video: { modelId: 'minimax-h3-standard', resolution: '768P', aspectRatio: '21:9' } } })).status).toBe(200);
       });
     } finally { await rm(directory, { recursive: true, force: true }); }
   });

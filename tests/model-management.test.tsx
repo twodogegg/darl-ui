@@ -31,7 +31,7 @@ describe('ModelManagementCard image capabilities', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalled());
     expect(onProviderSave.mock.calls[0][0].models).toEqual([]);
     const next = onSave.mock.calls[0][0];
-    expect(next.models).toHaveLength(8);
+    expect(next.models).toHaveLength(9);
     expect(next.models.some((model: { id: string }) => model.id === 'grok-imagine-image-2.0')).toBe(false);
     const bindings = next.models.find((model: { id: string }) => model.id === 'minimax-h3-flash').bindings;
     expect(bindings.filter((binding: { enabled?: boolean }) => binding.enabled !== false)).toEqual([expect.objectContaining({ providerId: 'gateway', upstreamModelId: 'minimax-h3-flash', protocolKey: 'darl-h3-flash-unified' })]);

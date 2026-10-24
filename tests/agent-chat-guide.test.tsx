@@ -42,7 +42,8 @@ describe('agent chat development guide', () => {
     expect(screen.getByRole('button', { name: '模型配置与长文本' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '模型配置、长文本与路由' })).toBeInTheDocument();
     expect(screen.getByText(/1M token 上下文预算/)).toBeInTheDocument();
-    expect(screen.getByText(/H3 Flash 视频模型/)).toBeInTheDocument();
+    expect(screen.getByText(/H3 Flash \/ Standard 视频模型/)).toBeInTheDocument();
+    expect(screen.getAllByText(/\/v1\/h3\/assets/).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: '复制' }).some((button) => button.closest('.guide-code')?.textContent?.includes('toAgentModels'))).toBe(true);
   });
 });

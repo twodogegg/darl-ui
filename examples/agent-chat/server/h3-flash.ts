@@ -1,41 +1,57 @@
-export type H3Resolution = '480' | '768';
-export type H3AspectRatio = '16:9' | '9:16';
-/** Status vocabulary actually returned by the unified gateway. */
-export type H3VideoStatus = 'queued' | 'processing' | 'succeeded' | 'failed';
+/**
+ * MiniMax H3 video contract as published by the New API gateway:
+ * `POST /v1/h3/assets` upload, `POST /v1/videos` create, `GET /v1/videos/{id}`
+ * poll, `GET /v1/videos/{id}/content` download.
+ */
+export type H3ModelId = 'minimax-h3-flash' | 'minimax-h3-standard';
+export type H3Resolution = '480P' | '768P' | '1080P';
+export type H3Ratio = 'adaptive' | '21:9' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16';
+/** Contract status vocabulary; the hosted gateway also answers `in_progress` / `completed`. */
+export type H3VideoStatus = 'queued' | 'in_progress' | 'completed' | 'failed';
 
-export interface H3FlashOptions {
+export const H3_MODEL_IDS: H3ModelId[] = ['minimax-h3-flash', 'minimax-h3-standard'];
+export const H3_RESOLUTIONS: H3Resolution[] = ['480P', '768P', '1080P'];
+export const H3_RATIOS: H3Ratio[] = ['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
+export const H3_MAX_REFERENCE_IMAGES = 9;
+export const H3_MAX_REFERENCE_VIDEOS = 3;
+export const H3_MAX_REFERENCE_AUDIOS = 3;
+/** Upload limit documented for the asset endpoint; the server may enforce less. */
+export const H3_MAX_ASSET_BYTES = 64 * 1024 * 1024;
+
+export interface H3VideoOptions {
   model?: string;
   prompt: string;
   seconds?: number;
-  resolution?: H3Resolution;
-  aspectRatio?: H3AspectRatio;
+  size?: H3Resolution;
+  ratio?: H3Ratio;
   referenceImages?: string[];
   referenceVideos?: string[];
   referenceAudios?: string[];
-  referenceVideo?: string;
-  mode?: 'text-to-video' | 'reference' | 'first-last-frame';
+  firstFrameImage?: string;
+  lastFrameImage?: string;
 }
 
-export interface H3FlashRequest {
+export interface H3VideoRequest {
   model: string;
   prompt: string;
   seconds: number;
-  resolution: H3Resolution;
-  aspect_ratio: H3AspectRatio;
-  reference_images?: string[];
-  reference_videos?: string[];
-  reference_audios?: string[];
-  reference_video?: string;
+  size: H3Resolution;
+  ratio: H3Ratio;
+  images?: string[];
+  metadata?: {
+    first_frame_image?: string;
+    last_frame_image?: string;
+    reference_video?: string[];
+    reference_audio?: string[];
+  };
 }
 
-export interface H3FileDescriptor { id: string; url?: string; purpose?: string }
-export interface H3VideoTask { id: string; status: H3VideoStatus; progress?: number; videoUrl?: string; error?: string }
+export interface H3AssetDescriptor { id: string; fileName?: string; type?: string; size?: string; expires_in?: number }
+export interface H3VideoTask { id: string; status: H3VideoStatus; progress?: number; error?: string }
 
-const H3_STATUSES: H3VideoStatus[] = ['queued', 'processing', 'succeeded', 'failed'];
-
-/** The gateway returns relative `video_url` paths; they need the API origin. */
-function absolute(baseUrl: string, url: string) {
-  return new URL(url, `${baseUrl.replace(/\/$/, '')}/`).toString();
+/** Standard tops out at 768P; flash also accepts 1080P. */
+export function h3Resolutions(model: string | undefined): H3Resolution[] {
+  return model === 'minimax-h3-standard' ? ['480P', '768P'] : [...H3_RESOLUTIONS];
 }
 
 function apiUrl(baseUrl: string, path: string) {
@@ -44,87 +60,99 @@ function apiUrl(baseUrl: string, path: string) {
   return new URL(normalizedPath.replace(/^\//, ''), `${normalizedBase}/`).toString();
 }
 
-function assertUrlList(name: string, values: string[] | undefined, max: number) {
+function assertReferences(name: string, values: string[] | undefined, max: number) {
   if (!values) return;
-  if (values.length > max) throw new Error(`${name} 最多支持 ${max} 个`);
-  values.forEach((value) => { try { const url = new URL(value); if (!['http:', 'https:'].includes(url.protocol)) throw new Error(); } catch { throw new Error(`${name} 必须是公网 HTTP(S) URL`); } });
+  if (values.length > max) throw new Error(`${name}最多支持 ${max} 个`);
+  values.forEach((value) => { try { const url = new URL(value); if (!['http:', 'https:'].includes(url.protocol)) throw new Error(); } catch { throw new Error(`${name}必须是公网 HTTP(S) URL`); } });
 }
 
-/** Build only fields documented by the unified H3 Flash contract. */
-export function buildH3FlashRequest(options: H3FlashOptions): H3FlashRequest {
+/**
+ * Build only documented fields. Only `seconds` is sent so it can never disagree
+ * with the deprecated `duration`. A first/last frame cannot be mixed with
+ * `images` or reference video/audio, and `adaptive` needs visual input.
+ */
+export function buildH3VideoRequest(options: H3VideoOptions): H3VideoRequest {
   const prompt = options.prompt?.trim();
-  if (!prompt) throw new Error('H3 Flash 提示词不能为空');
-  const seconds = options.seconds ?? 10;
-  if (!Number.isInteger(seconds) || seconds < 4 || seconds > 15) throw new Error('H3 Flash 时长只能是 4–15 秒的整数');
-  const resolution = options.resolution ?? '768';
-  const aspectRatio = options.aspectRatio ?? '9:16';
-  if (resolution !== '480' && resolution !== '768') throw new Error('H3 Flash 分辨率只能是 480 或 768');
-  if (aspectRatio !== '16:9' && aspectRatio !== '9:16') throw new Error('H3 Flash 画幅只能是 16:9 或 9:16');
-  if (options.mode === 'first-last-frame') throw new Error('H3 Flash 首尾帧字段尚未完成网关核对');
-  assertUrlList('参考图片', options.referenceImages, 9);
-  assertUrlList('参考视频', options.referenceVideos, 3);
-  assertUrlList('参考音频', options.referenceAudios, 3);
-  if (options.referenceVideo && options.referenceVideos?.length) throw new Error('reference_video 不能与 reference_videos 同时提交');
-  const request: H3FlashRequest = { model: options.model || 'minimax-h3-flash', prompt, seconds, resolution, aspect_ratio: aspectRatio };
-  if (options.referenceImages?.length) request.reference_images = [...options.referenceImages];
-  if (options.referenceVideos?.length) request.reference_videos = [...options.referenceVideos];
-  if (options.referenceAudios?.length) request.reference_audios = [...options.referenceAudios];
-  if (options.referenceVideo) request.reference_video = options.referenceVideo;
+  if (!prompt) throw new Error('H3 提示词不能为空');
+  const model = options.model || 'minimax-h3-flash';
+  const seconds = options.seconds ?? 5;
+  if (!Number.isInteger(seconds) || seconds < 4 || seconds > 15) throw new Error('H3 时长只能是 4–15 秒的整数');
+  const size = options.size ?? '480P';
+  const resolutions = h3Resolutions(model);
+  if (!resolutions.includes(size)) throw new Error(`${model === 'minimax-h3-standard' ? 'H3 Standard' : 'H3 Flash'} 分辨率只能是 ${resolutions.join(' / ')}`);
+  const ratio = options.ratio ?? '16:9';
+  if (!H3_RATIOS.includes(ratio)) throw new Error(`H3 画幅只能是 ${H3_RATIOS.join(' / ')}`);
+  assertReferences('参考图片', options.referenceImages, H3_MAX_REFERENCE_IMAGES);
+  assertReferences('参考视频', options.referenceVideos, H3_MAX_REFERENCE_VIDEOS);
+  assertReferences('参考音频', options.referenceAudios, H3_MAX_REFERENCE_AUDIOS);
+  const frames = Boolean(options.firstFrameImage || options.lastFrameImage);
+  const references = Boolean(options.referenceImages?.length || options.referenceVideos?.length || options.referenceAudios?.length);
+  if (frames && references) throw new Error('首尾帧不能与参考图片或参考音视频同时提交');
+  if (ratio === 'adaptive' && !frames && !options.referenceImages?.length && !options.referenceVideos?.length) {
+    throw new Error('adaptive 画幅需要提供图片或视频参考素材');
+  }
+  const request: H3VideoRequest = { model, prompt, seconds, size, ratio };
+  if (!frames && options.referenceImages?.length) request.images = [...options.referenceImages];
+  const metadata: NonNullable<H3VideoRequest['metadata']> = {};
+  if (options.firstFrameImage) metadata.first_frame_image = options.firstFrameImage;
+  if (options.lastFrameImage) metadata.last_frame_image = options.lastFrameImage;
+  if (options.referenceVideos?.length) metadata.reference_video = [...options.referenceVideos];
+  if (options.referenceAudios?.length) metadata.reference_audio = [...options.referenceAudios];
+  if (Object.keys(metadata).length) request.metadata = metadata;
   return request;
 }
 
 async function h3Response(response: Response, apiKey: string) {
   if (response.ok) return response;
-  // The gateway answers 5xx with a flat { code, message } body instead of OpenAI's { error }.
-  const value = await response.json().catch(() => null) as { error?: { message?: string }; message?: string } | null;
-  const message = value?.error?.message || value?.message || `H3 Flash API 请求失败（HTTP ${response.status}）`;
+  // New API answers with { error: { message } } or a flat { code, message }; surface the real reason.
+  const value = await response.json().catch(() => null) as { error?: { message?: string; http_code?: string }; message?: string } | null;
+  const message = value?.error?.message || value?.message || `H3 API 请求失败（HTTP ${response.status}）`;
   throw new Error(message.replaceAll(apiKey, '[已隐藏]'));
 }
 
-export async function uploadH3File(baseUrl: string, apiKey: string, file: Blob, fileName: string, purpose?: string, signal?: AbortSignal): Promise<H3FileDescriptor> {
-  if (file.size > 100 * 1024 * 1024) throw new Error('H3 Flash 素材不能超过 100 MiB');
+/** Upload one image/video/audio asset and keep the opaque `id` for the create call. */
+export async function uploadH3Asset(baseUrl: string, apiKey: string, file: Blob, fileName: string, signal?: AbortSignal): Promise<H3AssetDescriptor> {
+  if (file.size > H3_MAX_ASSET_BYTES) throw new Error('H3 素材不能超过 64 MiB');
   const form = new FormData();
   form.append('file', file, fileName);
-  if (purpose) form.append('purpose', purpose);
-  const response = await fetch(apiUrl(baseUrl, '/v1/files'), { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form, signal });
-  const value = await h3Response(response, apiKey).then((item) => item.json()) as Partial<H3FileDescriptor>;
-  if (typeof value.id !== 'string' || !value.id.startsWith('file_')) throw new Error('H3 Flash 文件上传响应缺少 file_* ID');
-  return { id: value.id, ...(typeof value.url === 'string' ? { url: value.url } : {}), ...(typeof value.purpose === 'string' ? { purpose: value.purpose } : {}) };
+  const response = await fetch(apiUrl(baseUrl, '/v1/h3/assets'), { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form, signal });
+  const value = await h3Response(response, apiKey).then((item) => item.json()) as Partial<H3AssetDescriptor>;
+  if (typeof value.id !== 'string' || !value.id) throw new Error('H3 素材上传响应缺少 id');
+  return {
+    id: value.id,
+    ...(typeof value.fileName === 'string' ? { fileName: value.fileName } : {}),
+    ...(typeof value.type === 'string' ? { type: value.type } : {}),
+    ...(typeof value.size === 'string' ? { size: value.size } : {}),
+    ...(typeof value.expires_in === 'number' ? { expires_in: value.expires_in } : {}),
+  };
 }
 
-export async function resolveH3File(baseUrl: string, apiKey: string, fileId: string, signal?: AbortSignal): Promise<H3FileDescriptor> {
-  if (!/^file_[A-Za-z0-9_-]+$/.test(fileId)) throw new Error('H3 Flash 素材 ID 无效');
-  const response = await fetch(apiUrl(baseUrl, `/v1/files/${encodeURIComponent(fileId)}`), { headers: { Authorization: `Bearer ${apiKey}` }, signal });
-  const value = await h3Response(response, apiKey).then((item) => item.json()) as Partial<H3FileDescriptor>;
-  if (value.id !== fileId || typeof value.url !== 'string' || !/^https?:\/\//.test(value.url)) throw new Error('H3 Flash 文件没有返回可访问的公网 URL');
-  return { id: fileId, url: value.url, ...(typeof value.purpose === 'string' ? { purpose: value.purpose } : {}) };
-}
-
-export async function createH3Video(baseUrl: string, apiKey: string, options: H3FlashOptions, signal?: AbortSignal): Promise<{ id: string }> {
-  const body = buildH3FlashRequest(options);
+export async function createH3Video(baseUrl: string, apiKey: string, options: H3VideoOptions, signal?: AbortSignal): Promise<{ id: string }> {
+  const body = buildH3VideoRequest(options);
   const response = await fetch(apiUrl(baseUrl, '/v1/videos'), { method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
   const value = await h3Response(response, apiKey).then((item) => item.json()) as { id?: unknown };
-  if (typeof value.id !== 'string' || !value.id) throw new Error('H3 Flash 创建响应缺少任务 ID');
+  if (typeof value.id !== 'string' || !value.id) throw new Error('H3 创建响应缺少任务 ID');
   return { id: value.id };
 }
 
+/** Accept both the documented `in_progress`/`completed` and the hosted `processing`/`succeeded`. */
 export async function getH3Video(baseUrl: string, apiKey: string, taskId: string, signal?: AbortSignal): Promise<H3VideoTask> {
   const response = await fetch(apiUrl(baseUrl, `/v1/videos/${encodeURIComponent(taskId)}`), { headers: { Authorization: `Bearer ${apiKey}` }, signal });
-  const value = await h3Response(response, apiKey).then((item) => item.json()) as { id?: unknown; status?: unknown; progress?: unknown; video_url?: unknown; error?: string | { message?: string } };
-  const status = value.status === 'completed' ? 'succeeded' : value.status === 'in_progress' ? 'processing' : value.status;
-  if (value.id !== taskId || !H3_STATUSES.includes(status as H3VideoStatus)) throw new Error('H3 Flash 任务状态响应无效');
+  const value = await h3Response(response, apiKey).then((item) => item.json()) as { id?: unknown; status?: unknown; progress?: unknown; error?: string | { code?: string; message?: string } };
+  const status = value.status === 'succeeded' ? 'completed' : value.status === 'processing' ? 'in_progress' : value.status;
+  if (value.id !== taskId || !['queued', 'in_progress', 'completed', 'failed'].includes(status as string)) throw new Error('H3 任务状态响应无效');
+  const error = value.error ? (typeof value.error === 'string' ? value.error : value.error.message) : undefined;
   return {
     id: taskId,
     status: status as H3VideoStatus,
     ...(typeof value.progress === 'number' && Number.isFinite(value.progress) && value.progress >= 0 && value.progress <= 100 ? { progress: value.progress } : {}),
-    ...(typeof value.video_url === 'string' ? { videoUrl: absolute(baseUrl, value.video_url) } : {}),
-    ...(value.error ? { error: typeof value.error === 'string' ? value.error : value.error.message } : {}),
+    ...(error ? { error } : {}),
   };
 }
 
+/** Always download through the gateway content route, never through a temporary media URL. */
 export async function downloadH3Video(baseUrl: string, apiKey: string, task: H3VideoTask, signal?: AbortSignal): Promise<ArrayBuffer> {
-  if (task.status !== 'succeeded') throw new Error('H3 Flash 任务尚未完成');
-  const contentUrl = task.videoUrl ? new URL(task.videoUrl, `${baseUrl.replace(/\/$/, '')}/`).toString() : apiUrl(baseUrl, `/v1/videos/${encodeURIComponent(task.id)}/content`);
-  const response = await h3Response(await fetch(contentUrl, { headers: { Authorization: `Bearer ${apiKey}` }, signal }), apiKey);
+  if (task.status !== 'completed') throw new Error('H3 任务尚未完成');
+  const response = await h3Response(await fetch(apiUrl(baseUrl, `/v1/videos/${encodeURIComponent(task.id)}/content`), { headers: { Authorization: `Bearer ${apiKey}` }, signal }), apiKey);
   return response.arrayBuffer();
 }
