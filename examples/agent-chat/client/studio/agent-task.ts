@@ -5,13 +5,15 @@ const detailLabels: Record<string, string> = {
   description: '描述',
   referenceAudio: '参考音频',
   assetName: '目标资产',
+  episodes: '计划集数',
 }
 
 export function studioAgentContent(task: Record<string, unknown>) {
   const prompt = typeof task.prompt === 'string' ? task.prompt.trim() : ''
   const details = Object.entries(detailLabels).flatMap(([key, label]) => {
     const value = task[key]
-    return typeof value === 'string' && value.trim() ? [`${label}：${value.trim()}`] : []
+    const text = typeof value === 'number' ? String(value) : value
+    return typeof text === 'string' && text.trim() ? [`${label}：${text.trim()}`] : []
   })
   return [prompt, details.join('\n')].filter(Boolean).join('\n\n')
 }

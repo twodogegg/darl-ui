@@ -71,7 +71,8 @@ export default function Home() {
     e.preventDefault()
     if (busy || reading) return
     const text = script.trim()
-    if (!text) return notify('请先上传原始素材')
+    if (!text) return notify('请先上传或粘贴原始素材')
+    if (text.length > 100000) return notify('原始素材内容不能超过 100000 字')
     if (!styleId) return notify('请选择视觉风格')
     if (planned === '') return notify('请填写计划集数')
     if (!Number.isInteger(Number(planned)) || planned < 1 || planned > 100) return notify('计划集数应为1—100的整数')
@@ -113,7 +114,7 @@ export default function Home() {
           <p className="br-overline">NEW PROJECT / 创作起点</p>
           <h2 className="br-hero-title">本入剧出，让故事开场。</h2>
           <p className="br-hero-desc">
-            上传小说或剧本等原始素材，填写创作要求，开始从故事到影像的创作。
+            上传或粘贴小说、剧本等原始素材，填写创作要求，开始从故事到影像的创作。
           </p>
           <form className="br-creator" onSubmit={create}>
             <div className="br-composer">
@@ -139,6 +140,21 @@ export default function Home() {
                   }}
                 />
               </label>
+              <label className="home-requirements-label" htmlFor="home-source-script">
+                原始素材内容 <span>（可直接粘贴或编辑，最多 100000 字）</span>
+              </label>
+              <textarea
+                id="home-source-script"
+                rows={5}
+                maxLength={100000}
+                value={script}
+                disabled={busy || reading}
+                placeholder="在这里直接粘贴小说、剧本或其他文字素材，也可上传文件后编辑内容…"
+                onChange={(e) => {
+                  setScript(e.target.value)
+                  setFileName('')
+                }}
+              />
               <label className="home-requirements-label" htmlFor="home-requirements">
                 创作要求 <span>（可选）</span>
               </label>

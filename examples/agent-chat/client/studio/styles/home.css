@@ -70,7 +70,7 @@ h1, h2, p { margin: 0; }
 .home-script-upload:focus-within { outline: 2px solid var(--br-focus); outline-offset: 3px; }
 .home-requirements-label { display: block; margin: 16px 0 8px; color: var(--br-text-primary); font-size: var(--br-text-caption); }
 .home-requirements-label span { color: var(--br-text-secondary); }
-.br-composer #home-requirements { padding: 8px 10px; border: 1px solid var(--br-theme-hairline-13); border-radius: var(--br-radius-xs); background: var(--br-input-bg); }
+.br-composer :is(#home-source-script, #home-requirements) { padding: 8px 10px; border: 1px solid var(--br-theme-hairline-13); border-radius: var(--br-radius-xs); background: var(--br-input-bg); }
 .home-duration-range { grid-column: span 2; min-width: 0; margin: 0; padding: 0; border: 0; }
 .home-duration-range legend { margin-bottom: 10px; padding: 0; color: var(--br-text-secondary); font-size: var(--br-text-caption); }
 .home-duration-range legend span { display: inline-block; margin-left: 8px; color: var(--br-accent); font-size: var(--br-text-micro); }

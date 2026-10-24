@@ -4,7 +4,7 @@ import { useProject, Workflow } from '../components/Shell'
 import { Button, Confirm, Field, Modal, Models, Processing } from '../components/ui'
 import { useStore, useAgentTask } from '../store'
 import { id } from '../data'
-import { episodeScenes, sceneLabel, scenesToScript, removeEpisode } from '../scenes'
+import { episodeScenes, sceneLabel, scenesToScript, removeEpisode, sourceScenes, unmatchedSentences } from '../scenes'
 import ProjectOutline from '../components/ProjectOutline'
 
 export function Outline() {
@@ -28,8 +28,52 @@ export default function Script() {
   const context = useProject()
   return (
     <Workflow key={context.projectId} context={context} projectLevel>
-      {context.project && <ScriptList context={context} />}
+      {context.project && (context.episodes.length ? <ScriptList context={context} /> : <ScriptImport context={context} />)}
     </Workflow>
+  )
+}
+
+// No episodes yet: build them from the submitted source instead of an empty page.
+function ScriptImport({ context }) {
+  const { project } = context
+  const navigate = useNavigate()
+  const [planned, setPlanned] = useState(String(project.planned || ''))
+  const [notes, setNotes] = useState(String(project.requirements || '').split('\n').filter(line => line.includes('集')).slice(0, 3).join('\n'))
+  const { busy, run, cancel } = useAgentTask()
+  const source = String(project.sourceScript || '').trim()
+  const parsed = sourceScenes(source)
+  const count = Number(planned)
+  const valid = Number.isInteger(count) && count >= 1 && count <= 100
+  return (
+    <>
+      <header className="workspace-toolbar">
+        <div>
+          <h2>剧本</h2>
+          <p className="muted">全项目暂无剧集 · 按原文建集并拆分场次后逐集撰写</p>
+        </div>
+      </header>
+      <div className="script-detail">
+        <div className="script-stage script-scenes">
+          <div className="row"><div><div className="script-body-title">按原文建集</div><p className="muted">{source ? `已提交原始素材 ${source.length} 字，原文自带 ${parsed.length} 个场次标题。` : '本项目还没有提交原始素材，请先回创作起点粘贴或上传。'}</p></div><Button onClick={() => navigate(`/source?projectId=${encodeURIComponent(project.id)}`)}>查看原始素材</Button></div>
+          <div className="script-scene-meta">
+            <Field label="计划集数"><input aria-label="计划集数" type="number" min={1} max={100} step={1} value={planned} onChange={(e) => setPlanned(e.target.value)} /></Field>
+            <Field label="原文场次（参考）"><input readOnly value={parsed.length ? parsed.map(scene => `${String(scene.number).padStart(2, '0')} ${scene.location}`).join(' / ') : '未识别到场次标题'} /></Field>
+          </div>
+          <p className="muted">确认后交给 Agent 按原文与项目大纲建立 {valid ? `${count} ` : ''}集、拆分场次并直接写入网站；写入完成后可在这里逐集核对。</p>
+          <Field label="分集要求（可选）"><textarea rows={4} maxLength={2000} value={notes} placeholder="例如：第 1 集完成超市重逢，第 4 集停在律所前台；每集 2–3 分钟。" onChange={(e) => setNotes(e.target.value)} /></Field>
+          <Models />
+          <Processing busy={busy} cancel={cancel} />
+        </div>
+      </div>
+      <footer className="workspace-footer">
+        <span className="muted">{source ? `原始素材 ${source.length} 字` : '原始素材缺失'}</span>
+        <div className="toolbar">
+          <Button primary disabled={busy || !source || !valid} onClick={() => run({ action: 'build-episodes', projectId: project.id, episodes: count, notes })}>
+            {busy ? '正在写入网站…' : '按原文建集并写入网站 ↗'}
+          </Button>
+        </div>
+      </footer>
+    </>
   )
 }
 
@@ -157,8 +201,15 @@ function ScriptList({ context }) {
                 </h3>
               </div>
               <div className="script-stage script-scenes">
-                <div className="row"><div><div className="script-body-title">剧本正文 <span className="muted">/ {scenes.length} 场</span></div><p className="muted">每场独立编写，分镜与视频片段沿用场次。</p></div><Button onClick={() => addScene()}>＋ 添加场次</Button></div>
+                <div className="row"><div><div className="script-body-title">剧本正文 <span className="muted">/ {scenes.length} 场</span></div><p className="muted">每场独立编写，分镜与视频片段沿用场次。{project.sourceScript && <span className="muted"> · 原文 {project.sourceScript.length} 字</span>}</p></div><Button onClick={() => addScene()}>＋ 添加场次</Button></div>
                 <nav className="scene-navigation" aria-label="本集场次">{scenes.map((scene, index) => <a key={scene.id} href={`#script-scene-${scene.id}`}>第{index + 1}场 · {scene.location || '新场次'}</a>)}</nav>
+                {project.sourceScript && scenes.some(scene => unmatchedSentences(scene.content, project.sourceScript).length) && <details className="script-source-diff">
+                  <summary>原文对照：{scenes.reduce((sum, scene) => sum + unmatchedSentences(scene.content, project.sourceScript).length, 0)} 句与原始素材不是逐字一致（润色、合并或原文缺失）</summary>
+                  {scenes.map((scene, index) => {
+                    const missing = unmatchedSentences(scene.content, project.sourceScript)
+                    return missing.length ? <div key={scene.id}><strong>第{index + 1}场</strong>{missing.map((sentence, i) => <p key={i}>{sentence}</p>)}</div> : null
+                  })}
+                </details>}
                 {scenes.map((scene, index) => (
                   <section className="script-scene-card" id={`script-scene-${scene.id}`} key={scene.id} aria-label={sceneLabel(scene, index)}>
                     <header className="script-scene-head"><span className="scene-number">{String(index + 1).padStart(2, '0')}</span><h4>第{index + 1}场</h4><span className="muted">{scene.content.trim().length} 字</span><div className="toolbar"><Button onClick={() => splitScene(scene)}>从光标拆分</Button><Button aria-label={`删除第${index + 1}场`} disabled={scenes.length === 1} onClick={() => {
