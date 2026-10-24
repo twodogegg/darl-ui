@@ -44,3 +44,5 @@
 .example-page:has(> .rn-studio) { width: 100%; max-width: none; padding: 0; }
 
 .example-header[hidden], [hidden] > .rn-studio { display: none; }
+.asset-drawer__dependency{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;padding:12px 0;border-bottom:1px solid var(--border)}
+@media(min-width:768px){.asset-drawer__dependency{grid-template-columns:auto minmax(0,1fr) minmax(0,1fr) auto;align-items:end}.asset-drawer__dependency p{grid-column:1/-1}}

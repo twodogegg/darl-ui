@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
+import { APICallError, RetryError } from 'ai';
 import { lines } from '../examples/agent-chat/stream';
 import { agentStepText, checkedText, publicProvider, safeError, validateProvider } from '../examples/agent-chat/server/models';
 import { createAgentError, failure } from '../examples/agent-chat/server/errors';
@@ -44,6 +45,24 @@ describe('agent chat provider boundary', () => {
 });
 
 describe('structured Agent errors', () => {
+  it('preserves provider errors through SDK retry wrappers without exposing credentials', () => {
+    const upstream = new APICallError({ message: '金币余额不足，请购买套餐充值金币: https://billing.example/charge private-provider-key', url: 'https://provider.example', requestBodyValues: {}, statusCode: 403 });
+    const retry = new RetryError({ message: '重试失败', reason: 'maxRetriesExceeded', errors: [upstream] });
+    for (const reason of [upstream, retry, new Error('生成失败', { cause: retry })]) {
+      const error = createAgentError('model', reason, { key: 'private-provider-key', requestId: 'req-balance' });
+      expect(error.message).toBe('金币余额不足，请购买套餐充值金币: https://billing.example/charge [已隐藏]');
+      expect(error).toMatchObject({ stage: 'model', code: 'MODEL_FAILED', requestId: 'req-balance' });
+    }
+  });
+
+  it('keeps ordinary model error details and falls back when no message exists', () => {
+    expect(createAgentError('model', new Error('模型不存在 sk-hidden-key'), {}).message).toBe('模型不存在 [已隐藏]');
+    expect(createAgentError('model', null, {}).message).toContain('模型请求失败');
+    const circular = new Error('模型服务不可用');
+    circular.cause = circular;
+    expect(createAgentError('model', circular, {}).message).toBe('模型服务不可用');
+  });
+
   it('keeps stage, retry guidance and tracing fields while hiding credentials', () => {
     const error = createAgentError('mcp-tool', new Error('request sk-secret-value failed'), { requestId: 'req-1', runId: 'run-1', parentRunId: 'run-0', key: 'sk-secret-value' });
     expect(error).toMatchObject({ code: 'MCP_TOOL_FAILED', stage: 'mcp-tool', requestId: 'req-1', runId: 'run-1', parentRunId: 'run-0', retryable: true });

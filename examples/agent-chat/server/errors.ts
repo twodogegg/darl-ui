@@ -1,4 +1,5 @@
 import type { AgentErrorInfo, AgentErrorStage } from '../../../src/index';
+import { APICallError, RetryError } from 'ai';
 import { redactMessage } from './failure-log';
 
 export class AgentFailure extends Error {
@@ -18,7 +19,7 @@ export class AgentFailure extends Error {
 }
 
 const suggestions: Record<AgentErrorStage, string> = {
-  model: '检查模型、提供方和网络设置后重试。',
+  model: '根据上方具体错误处理后重试。',
   'mcp-connection': '检查应用地址和连接状态后重试。',
   'mcp-tool': '检查应用权限和工具状态后重试。',
   runtime: '检查命令输出、工作区文件和所需依赖后继续。',
@@ -41,6 +42,14 @@ const messages: Record<AgentErrorStage, string> = {
   timeout: '请求超时，请稍后重试。',
 };
 
+function modelErrorMessage(reason: unknown, depth = 0): string {
+  if (depth > 5) return '';
+  if (RetryError.isInstance(reason)) return modelErrorMessage(reason.lastError, depth + 1) || reason.message;
+  if (APICallError.isInstance(reason)) return reason.message;
+  if (reason instanceof Error) return modelErrorMessage(reason.cause, depth + 1) || reason.message;
+  return typeof reason === 'string' ? reason.trim() : '';
+}
+
 export function createAgentError(stage: AgentErrorStage, reason: unknown, context: { requestId?: string; runId?: string; parentRunId?: string; key?: string; code?: string; retryable?: boolean; suggestion?: string; message?: string }): AgentErrorInfo {
   const aborted = reason instanceof Error && (reason.name === 'AbortError' || reason.name === 'TimeoutError');
   const timeout = reason instanceof Error && reason.name === 'TimeoutError';
@@ -53,12 +62,12 @@ export function createAgentError(stage: AgentErrorStage, reason: unknown, contex
   return {
     code,
     stage: resolvedStage,
-    message: context.message || custom?.message || safeValidationMessage || messages[resolvedStage],
+    message: redactMessage(context.message || custom?.message || safeValidationMessage || (resolvedStage === 'model' ? modelErrorMessage(reason) : '') || messages[resolvedStage], context.key),
     ...(context.requestId ? { requestId: context.requestId } : {}),
     ...(context.runId ? { runId: context.runId } : {}),
     ...(context.parentRunId ? { parentRunId: context.parentRunId } : {}),
     retryable: context.retryable ?? custom?.retryable ?? (resolvedStage !== 'validation' && resolvedStage !== 'tool-validation' && resolvedStage !== 'cancellation'),
-    suggestion: context.suggestion || custom?.suggestion || suggestions[resolvedStage],
+    suggestion: redactMessage(context.suggestion || custom?.suggestion || suggestions[resolvedStage], context.key),
   };
 }
 

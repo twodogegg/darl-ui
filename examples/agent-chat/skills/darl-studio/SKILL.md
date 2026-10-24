@@ -27,7 +27,7 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 剧本项目的 `projects.adaptation` 保存改编幅度（`忠实` / `抽核` / `借壳`）；项目 `outline` 另外包含 `props:[{id,name,purpose,involvement}]`，只记录确实影响剧情的关键叙事道具。
 
-视频转绘项目与剧本项目共用这些资源。`projects` 增加 `creationMode`（`script` / `video-redraw`）、`targetRegion`（`japan` / `western`）、`targetLanguage`（`ja` / `en`）、`sourceVideo`。`sourceVideo` 保存原视频 `fileId/url/name`、真实 `duration/width/height/fps/hasAudio`、`segments`（每项 `id/start/end/frames`）；每帧是 `fileId/time/url`。先上传 MP4，再保存项目引用，用转绘工具取得真实元数据，不能编造时长或抽帧结果。
+视频转绘项目与剧本项目共用这些资源。`projects.creationMode` 为 `script`（默认）或 `video-redraw`。`targetRegion`（`japan` / `western`）、`targetLanguage`（`ja` / `en`）、`sourceVideo` 仅属于视频转绘项目；剧本项目查询不返回这些字段，也不接受写入，不得据此推断改编地区或语言。转绘项目才使用默认 `japan / ja`，或显式选择 `western / en`。`sourceVideo` 保存原视频 `fileId/url/name`、真实 `duration/width/height/fps/hasAudio`、`segments`（每项 `id/start/end/frames`）；每帧是 `fileId/time/url`。先上传 MP4，再保存项目引用，用转绘工具取得真实元数据，不能编造时长或抽帧结果。
 
 `assets.source` 与 `shots.source` 保存原片 `fileId/start/end/frames`，可含原始 `name/description/dialogue/notes/confirmed`；镜头的 `source.segmentId` 指向原片候选镜头 ID，业务镜头 ID 按项目隔离，不与 segment ID 混用。目标设定继续使用现有资产/分镜字段。`shots.assetIds` 为本镜人物、场景、道具的稳定关联。原片与目标版本分别保留；资产必须有原片依据。完整字段和嵌套类型仍以 describe 为准。
 
@@ -89,6 +89,27 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 项目创建后返回实际编号，后续查询和编辑使用返回值。角色对白的 `assetId` 引用角色资产；分镜与片段引用真实剧集和场次。保存后用 `builtin_read_studio` 按 ID 查询结果；版本冲突时重读当前记录。
 
+### 美术资产与衍生形态
+
+角色、场景、道具共用 `assets`。`description` 是身份/用途/剧情说明，不参与生图。
+
+场景、道具的主形象完整生图提示词保存在 `prompt`，各衍生形态保存在 `variants[].prompt`，切换后页面显示并编辑该形态的提示词。生图必须填写当前形态的 prompt；留空会报错，不回退到 description、appearance、costume 或主形象 prompt。提示词不叠加其他形态设定，须写全材质、空间等一致性要求。
+
+角色页不展示常规“角色生图提示词”输入框。默认按可见的 appearance 与当前服饰（主形象 costume、衍生形态 description）拼装请求，排除人物剧情说明 description 和声音 voiceDescription；隐藏的已有 prompt 不覆盖这些可见设定。需要特殊指令时选“自定义”视图，使用用户明确填写的自定义提示词。修改角色默认形象时更新外貌与服饰字段，不能只改 prompt。
+
+
+更新 variants 时保留其他形态及原有 id、image、history，仅修改目标形态所需字段；保存后按 ID 回读并核对目标形态的 prompt。主形象与衍生图仍通过各自的 image、history 和生成目标 variantId 关联。
+
+### 融合资产与依赖图片
+
+当资产包含另一个已定义的人物或物体（旧照片、证件、合影、肖像画、带角色图像的物品等）时，在 `assets.dependencies` 建立关联，不能只在提示词中写姓名。每项为 `{assetId, variantId?, purpose}`：同项目真实资产 ID，选用主形象时省略 variantId，特定年龄/服装等形态使用真实 variantId，purpose 必填，说明参考图在目标资产中的用途。例如旧学生证照片引用 Chloe 的 19 岁形态，并说明“仅作为照片内人物的身份参考”。
+
+主形象和该资产所有衍生形态共用这些依赖。禁止自引用、循环、跨项目引用；被引用资产/形态删除前先解除关联。更新 dependencies 时保留未修改条目。图片不存在时可以保存关系，但不能生成；必须先生成依赖的具体形态并查询其真实 image，不能以成人主图替代缺失的年轻形态。
+
+生成融合资产必须在媒体工具的 `options.studioTarget` 传真实目标和最新版本；后台会校验依赖、自动加入当前图片和用途说明，并检查参考数量上限。不要将资产姓名当成参考图，也不要省略 studioTarget 绕过依赖检查。批量生成仅补齐缺失图片：已有主形象或衍生形态图片保持不变；进行中的任务不重复提交。先处理缺失的依赖图片，失败则跳过后续资产。需要重做已有图片时使用单项资产生成。图片默认画幅统一为 16:9，可明确指定其他画幅。
+
+生成结果的真实引用快照保存在主形象或衍生形态的 `imageDependencies[图片URL]`，由后台维护，不要手工改写。引用的选用图片变化后，页面提示重新生成；生成期间依赖变更时，结果保留历史但不自动替换当前图片。准备关联和生成后分别查询结果验证，提交任务不代表已出图。
+
 ## 图片与视频任务
 
 | Tool | 参数与返回 |
@@ -96,13 +117,17 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 | `builtin_generate_media` | `modelId`、`prompt`，可选 `requestId`、`options`；返回任务 `id`、`status` |
 | `builtin_get_media_task` | `taskId`；返回任务真实状态和结果 |
 
-`modelId` 与生成参数采用当轮 Tool schema。`options` 可含 `resolution`、`aspectRatio`、`duration`、`references`。参考编辑时将指定图片放入 `references`。
+`modelId` 与生成参数采用当轮 Tool schema。`options` 可含 `resolution`、`aspectRatio`、`duration`、`references`。参考编辑时将指定图片放入 `references`。H3 视频另支持 `referenceVideos`（视频 URL 数组）、`referenceAudios`（音频或音色试听 URL 数组），各最多 3 个且以模型能力为准；音频须搭配图片或视频。支持站内 `/api/files/` 与公网 HTTP(S) URL；已有可访问的 HTTPS/HTTP 素材直接传引用，本地素材由文件服务提供可访问 URL，无法直接访问时才上传到模型供应商。音色引用传真实音频地址，不传音色 ID；是否保持目标声音须试听真实生成结果。
+
+H3 视频模型支持 `minimax-h3-flash` 与 `minimax-h3-standard`；视频清晰度使用 `480P`、`768P`，Flash 另支持 `1080P`，不能继续提交旧值 `480` / `768`。本地参考素材通过新版 `/v1/h3/assets` 上传，宿主将返回的素材 ID 写入新协议，无需 Agent 手工上传或拼接上游字段。
+
+资产提取后按 describe 分别填写 description（身份/用途）、appearance（外貌/空间/材质）、costume（主服饰）、voiceDescription（有原声依据的声音）、prompt（可执行的资产图指令）；原片证据放 source。不要把一句描述塞进所有字段，或把剧情截图换脸当成角色一致性资产。详细步骤见 video-redraw 的 references/asset-production.md。
 
 自动关联生成结果使用 `options.studioTarget`，字段为 `resource`（`assets` 或 `clips`）、`id`、最新 `version`、`field`，形态另传 `variantId`。图片字段为资产 `image` 或片段 `image`、`storyboardImage`、`blockingImage`；视频字段为片段 `videos`。提交后用任务查询 Tool 获取结果。
 
 ## 视频转绘
 
-具体创作规则按需加载 `video-redraw`；此处只说明网站操作。发现当轮转绘查询/操作能力后调用，不按名称猜测旧定义。
+具体创作规则按需加载 `video-redraw`；开始/继续制作读其 references/production-control.md，资产提取与生图读 references/asset-production.md；此处只说明网站操作。发现当轮转绘查询/操作能力后调用，不按名称猜测旧定义。
 
 | Tool | 用法 |
 | --- | --- |
@@ -112,8 +137,8 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 | action | 参数与行为 |
 | --- | --- |
 | `prepare` | `requestId`、最新项目 `version`；检测切镜并抽帧，成功后保存原片真实元数据和 `segments` |
-| `analyze` | `requestId`、`version`、逻辑文本 `modelId`、主 `agentId`；使用已配置的视觉模型。`sourceLanguage` 为原语言两位代码或空字符串自动识别；`visualOnly=true` 明确跳过原声分析。可传 `start/end` 只检查相交镜头 |
-| `apply` | `jobId`，可选 `shotIds` 为草稿的 segment ID，留空应用全部；同批写入分镜、关联资产和场次。保护人工修改，项目设置或版本冲突时重新读取 |
+| `analyze` | `requestId`、`version`、逻辑文本 `modelId`、主 `agentId`；使用已配置的文本模型，直接发送参考图片，不按 vision 标记筛选。`sourceLanguage` 为原语言两位代码或空字符串自动识别；`visualOnly=true` 明确跳过原声分析。可传 `start/end` 只检查相交镜头 |
+| `apply` | `jobId`，可选 `shotIds` 为草稿的 segment ID，留空应用全部；同批写入分镜、关联资产和场次。新资产写入草稿 targetAppearance/targetCostume/targetVoiceDescription/targetPrompt 对应的现有字段；已有资产跳过保护，不自动补字段，可用编辑工具按最新版本补齐。保护人工修改，项目设置或版本冲突时重新读取 |
 | `cancel` | `jobId`；取消本项目运行中的转绘任务 |
 | `frame` | `start/end`；返回中间真实帧及 `source`，供手工补资产或镜头；返回截图本身不创建业务记录 |
 | `edit-shot` | `shotId`、`shotVersion`、`start/end`；更新原片切点与参考帧。另传 `split` 在指定原片时间拆分，已有片段引用时先调整关联 |
@@ -123,7 +148,7 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 提交后读取任务真实状态：`queued/running/completed/failed/cancelled/interrupted`；`draft`、`segments`、`transcript` 为已完成阶段。提交返回任务不代表完成。原样重试沿用 requestId；继续失败/取消/中断任务用新 requestId 和 `resumeJobId`，项目设置、模型和区间须匹配，已完成分析与转写可复用。项目内同时一个转绘任务，全站同时两个。
 
-首版原片仅 MP4、50 MB、120 秒、自动检测最多40镜头。无声视频跳过转写；有声视频默认用现有 Fish 配置获取真实时间戳，缺配置/调用失败如实报告。仅画面分析不会推断对白。视频生成沿用当前图片参考能力，尚不承诺连续动作逐帧还原；最终目标语音和口型需检查实际结果。
+视频转绘创建页合并选择地区/语言，项目创建后自动提交 prepare，先查询当前任务和segments再决定是否操作；原片页只读展示目标地区/语言。首版原片仅 MP4、50 MB、120 秒、自动检测最多40镜头。无声视频跳过转写；有声视频默认用现有 Fish 配置获取真实时间戳，缺配置/调用失败如实报告。仅画面分析不会推断对白。H3视频生成已接入图片、视频和音频参考；原片片段只有实际放入 referenceVideos 才参与生成，音色试听使用 referenceAudios。输入支持不等于连续动作逐帧还原或精确口型，需检查实际结果。
 
 `prepare` 已使用脚本一次解码批量抽帧；`analyze` 自动将每批最多4镜头/12帧拼成带帧号和时间的图，并传入真实镜头映射和相交转写，无需另传拼图参数或重复运行脚本。离线使用随 `video-redraw` 打包的抽帧脚本时，先加载该 Skill 并读取 `references/source-analysis.md`；本地 `sample-N` 分组不是网站真实镜头 ID。
 

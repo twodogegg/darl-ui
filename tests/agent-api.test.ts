@@ -216,6 +216,30 @@ describe('Agent configuration API', () => {
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
+  it('migrates persisted H3 default resolutions without changing the selected model, image settings or ratio', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'darl-default-media-migration-'));
+    const promptFile = join(directory, 'system.md');
+    await writeFile(promptFile, '默认提示词');
+    const storage = new LocalStorage(directory);
+    try {
+      for (const [modelId, resolution] of [['minimax-h3-flash', '480'], ['minimax-h3-standard', '768']]) {
+        const legacy = { image: { modelId: 'gpt-image-2.5', resolution: '2K', aspectRatio: '9:16' }, video: { modelId, resolution, aspectRatio: '16:9' } };
+        const expected = { ...legacy, video: { ...legacy.video, resolution: `${resolution}P` } };
+        storage.setConfig('defaultMediaModels', legacy);
+        await withApi(directory, promptFile, async request => {
+          const response = await request('default-models');
+          expect(response.status).toBe(200);
+          expect(await response.json()).toEqual(expected);
+          expect(dbJson(directory, 'defaultMediaModels')).toEqual(expected);
+          expect((await request('default-models', { selection: legacy })).status).toBe(400);
+        });
+        await withApi(directory, promptFile, async request => {
+          expect(await (await request('default-models')).json()).toEqual(expected);
+        });
+      }
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
   it('migrates legacy Skills and protects the default creator from state autosaves and edits', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'darl-skill-migration-'));
     const promptFile = join(directory, 'system.md');

@@ -82,6 +82,10 @@
 .script-text { width: 100%; min-height: 430px; flex: 1; padding: 0; border: 0; border-radius: 0; background: transparent; font-size: 14px; line-height: 2.2; color: var(--br-theme-ink-14); resize: vertical; }
 .script-text:focus-visible { outline-offset: 8px; }
 .script-editor-panel:not([hidden]) { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.script-source-diff { margin: 0 0 18px; padding: 12px 14px; border: 1px solid var(--br-theme-hairline-13); border-radius: var(--br-radius-xs); background: var(--br-theme-surface); font-size: 12px; color: var(--br-text-secondary); }
+.script-source-diff summary { cursor: pointer; color: var(--br-theme-ink-18); }
+.script-source-diff strong { display: block; margin: 12px 0 4px; color: var(--br-theme-ink-31); }
+.script-source-diff p { margin: 0 0 6px; line-height: 1.7; white-space: pre-wrap; }
 .workflow-project-scope, .outline-scope { padding: 5px 9px; border: 1px solid var(--br-theme-accent-wash-28); border-radius: 5px; color: var(--br-accent); font-size: 11px; white-space: nowrap; }
 .outline-heading { min-width: 0; }
 .outline-heading > span { color: var(--br-accent); font-size: 10px; letter-spacing: 2px; }

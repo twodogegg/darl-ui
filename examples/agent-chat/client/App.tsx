@@ -352,6 +352,12 @@ export function App() {
   };
   const showGuide = () => { setStudioVisible(false); setOpen(false); setSettings(false); setGuide(true); };
   const showPlaza = () => { setStudioVisible(false); setOpen(false); setGuide(false); setSettings(false); setProjectsVisible(false); setMediaJobsVisible(false); setPlazaVisible(true); };
+  const createSession = () => {
+    const session = newSession(agentId || 'default');
+    setSessions(current => [session, ...current]);
+    setActiveId(session.id);
+    setOpen(true);
+  };
   const renameSession = (sessionId: string, title: string) => {
     setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, title, updatedAt: new Date().toLocaleString() } : session));
   };
@@ -427,7 +433,7 @@ export function App() {
 
     </div>
     <AgentSidebar voice={fishVoice.voice} approvalMode={approvalMode} onApprovalModeChange={updateApprovalMode} approvalModePending={!approvalReady || approvalSaving} open={open} onOpenChange={setOpen} sessions={sessions} activeSessionId={activeId} onSessionChange={setActiveId} onSessionRename={renameSession} onSessionDelete={deleteSession}
-      onNewSession={showPlaza}
+      onNewSession={createSession}
       draft={drafts[activeId] ?? ''} onDraftChange={(value) => setDrafts(current => ({ ...current, [activeId]: value }))}
       onSend={async (request) => { await run(request); setDrafts(current => current[request.sessionId]?.trim() === request.content ? { ...current, [request.sessionId]: '' } : current); }} onStop={() => running.current?.abort()} isGenerating={generating} onRegenerate={regenerate}
       applications={applications} onToolConfirm={async (id, approved) => { await api(`tool-confirmations/${id}`, { approved }); }}
