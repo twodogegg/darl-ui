@@ -9,10 +9,11 @@ import { closestAllowedSize, allowedSizesFromError, geminiImageEndpoint, generat
 import type { MediaJob } from '../examples/agent-chat/server/media-job-store';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
-const job = (options: Record<string, unknown> = {}): MediaJob => ({
+const job = (options: Record<string, unknown> = {}, overrides: Partial<MediaJob> = {}): MediaJob => ({
   id: 'job-1', modelId: 'gpt-image-2', type: 'image', prompt: '雨夜街道', options,
   providerId: 'darl', upstreamModelId: 'gpt-image-2', baseUrl: 'https://api.example.test/v1',
   status: 'queued', attempts: 1, createdAt: '2026-10-19T00:00:00.000Z', updatedAt: '2026-10-19T00:00:00.000Z',
+  ...overrides,
 });
 
 function respond(body: unknown, init: { status?: number } = {}) {
@@ -221,6 +222,38 @@ describe('channel size rejection', () => {
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ size: '1024x1536' });
     expect(images[0]).toMatchObject({ kind: 'url' });
     expect(provider).toMatchObject({ requestedSize: '672x1008', usedSize: '1024x1536' });
+  });
+});
+
+describe('style prompt injection', () => {
+  const style = { id: 'style-1', name: '短剧感', description: '整体调性：当代短剧的影视质感。' };
+
+  it('appends the style to free-form image prompts', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respond({ data: [{ url: 'https://cdn.example.test/out.png' }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { generateImages } = await import('../examples/agent-chat/server/media-adapters');
+    await generateImages(job({}, { style }), 'key');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).prompt).toBe('雨夜街道\n\n视觉风格：短剧感。整体调性：当代短剧的影视质感。');
+  });
+
+  it('keeps the strict H3 video prompt verbatim so prompt optimization carries the style', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respond({ id: 'video_123' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { submitVideo } = await import('../examples/agent-chat/server/media-adapters');
+    const video = { type: 'video' as const, modelId: 'minimax-h3-flash', upstreamModelId: 'minimax-h3-flash', style };
+    await expect(submitVideo(job({ duration: 5, resolution: '480P', aspectRatio: '16:9' }, video), 'key')).resolves.toBe('video_123');
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.prompt).toBe('雨夜街道');
+    expect(body.prompt).not.toContain('视觉风格');
+  });
+
+  it('still appends the style for video models without h3 in their name', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respond({ id: 'video_123' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { submitVideo } = await import('../examples/agent-chat/server/media-adapters');
+    const video = { type: 'video' as const, modelId: 'kling-2', upstreamModelId: 'kling-2', style };
+    await submitVideo(job({ duration: 5, resolution: '480P', aspectRatio: '16:9' }, video), 'key');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).prompt).toBe('雨夜街道\n\n视觉风格：短剧感。整体调性：当代短剧的影视质感。');
   });
 });
 

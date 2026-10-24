@@ -2,9 +2,13 @@ import type { GenerateRequest, MediaGenerationMode, MediaModel, MediaReferences 
 
 export const GENERATION_COUNTS = [1, 2, 3, 4] as const;
 
+/** "h3" as a standalone token in a model identifier marks the H3 video family. */
+export function isH3ModelName(...values: (string | undefined)[]): boolean {
+  return values.some((value) => value && /(?:^|[^a-z0-9])h3(?:$|[^a-z0-9])/i.test(value));
+}
+
 export function isH3Model(model: MediaModel): boolean {
-  return model.type === 'video' && [model.id, model.logicalModelId, model.upstreamModelId, model.name, model.protocolKey]
-    .some((value) => value && /(?:^|[^a-z0-9])h3(?:$|[^a-z0-9])/i.test(value));
+  return model.type === 'video' && isH3ModelName(model.id, model.logicalModelId, model.upstreamModelId, model.name, model.protocolKey);
 }
 
 export function outputLimit(model: MediaModel): number {

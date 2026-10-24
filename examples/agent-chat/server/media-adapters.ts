@@ -1,5 +1,6 @@
 import type { MediaJob } from './media-job-store';
 import { createH3Video, downloadH3Video, getH3Video, uploadH3Asset, type H3Ratio, type H3Resolution } from './h3-flash';
+import { isH3ModelName } from '../../../src/components/media-workspace/model';
 
 /** A finished image is either inline bytes or a link. The link IS the result. */
 export type MediaImage =
@@ -10,9 +11,15 @@ export type ImageForm = 'b64_json' | 'url';
 
 function promptFor(job: MediaJob): string {
   const style = job.style;
-  if (!style) return job.prompt;
+  // 名称带 h3 的视频模型提示词格式严格，画风只能作为提示词优化的输入、由优化
+  // 结果织入正文；其余视频模型与图片提示词仍为自由格式，在此追加风格。
+  if (!style || isH3VideoJob(job)) return job.prompt;
   const description = style.description?.trim();
   return `${job.prompt}\n\n视觉风格：${style.name}${description ? `。${description}` : ''}`;
+}
+
+function isH3VideoJob(job: MediaJob): boolean {
+  return job.type === 'video' && isH3ModelName(job.modelId, job.upstreamModelId, job.protocolKey);
 }
 
 /** Recommended output sizes: aspect ratio × tier → WIDTHxHEIGHT. */
