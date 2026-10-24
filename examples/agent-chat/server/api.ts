@@ -277,7 +277,11 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     const upgraded = upgradeModelConfiguration(storedConfiguration);
     if (JSON.stringify(upgraded) !== JSON.stringify(storedConfiguration)) storage.setConfig('modelConfiguration', upgraded);
   }
-  if (!storage.getConfig<DefaultMediaSelection>('defaultMediaModels')) storage.setConfig('defaultMediaModels', defaultMediaSelection);
+  const storedMediaDefaults = storage.getConfig<DefaultMediaSelection>('defaultMediaModels');
+  if (!storedMediaDefaults) storage.setConfig('defaultMediaModels', defaultMediaSelection);
+  else if (['minimax-h3-flash', 'minimax-h3-standard'].includes(storedMediaDefaults.video?.modelId) && ['480', '768'].includes(String(storedMediaDefaults.video?.resolution))) {
+    storage.setConfig('defaultMediaModels', { ...storedMediaDefaults, video: { ...storedMediaDefaults.video, resolution: `${storedMediaDefaults.video.resolution}P` } });
+  }
   const voicePromptFile = join(promptFile, '..', 'voice.md');
   const readPromptFile = (file: string) => readFileSync(file, 'utf8').trim();
   const readPromptFileIfExists = (file: string) => { try { return readPromptFile(file); } catch { return ''; } };
