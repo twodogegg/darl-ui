@@ -182,6 +182,15 @@ export function mcpResultError(result: { content: unknown[]; structuredContent?:
   return safeError(new Error(mcpResultDetails(result) || 'MCP 工具调用失败'), key);
 }
 
+function formatH3ReferencePrompt(value: string) {
+  let text = value.replace(/```(?:text|markdown)?/gi, '').replace(/```/g, '').trim();
+  text = text.replace(/\s+(subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music)\s*:/gi, '\n\n$1:');
+  text = text.replace(/\s+-\s+(?=<(?:Subject|Picture|Video|Audio)\s+\d+>)/g, '\n- ');
+  text = text.replace(/\s+(?=\[Shot\s+\d+\])/g, '\n');
+  text = text.replace(/\n{3,}/g, '\n\n');
+  return text.trim();
+}
+
 async function readBody(request: IncomingMessage) {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -468,14 +477,14 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         }
         return send(200, await publicPrompts());
       }
-      if (path === '/api/prompt-optimization/settings' && request.method === 'GET') return send(200, optimization.models(modelConfiguration));
+      if (path === '/api/prompt-optimization/settings' && request.method === 'GET') return send(200, optimization.models(modelConfiguration, providers));
       if (path === '/api/prompt-optimization/settings' && request.method === 'POST') {
-        return send(200, optimization.saveModels(await readBody(request), modelConfiguration));
+        return send(200, optimization.saveModels(await readBody(request), modelConfiguration, providers));
       }
       if (path === '/api/prompt-optimization' && request.method === 'POST') {
         const body = await readBody(request);
         const context = optimization.context(body, modelConfiguration);
-        const selectedId = optimization.models(modelConfiguration)[body.optimization === 'h3' ? 'h3' : 'general'];
+        const selectedId = optimization.models(modelConfiguration, providers)[body.optimization === 'h3' ? 'h3' : 'general'];
         const split = selectedId.indexOf('/');
         const selected = split > 0 ? resolveTextModel(providers, modelConfiguration, selectedId.slice(0, split), decodeURIComponent(selectedId.slice(split + 1))) : undefined;
         if (!selected) throw new Error('请在设置 → 模型中配置提示词优化模型');
@@ -483,9 +492,11 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const instructions = optimization.prompts()[body.optimization === 'h3' ? 'h3Optimization' : 'optimization'];
         if (!instructions.trim()) throw new Error('请先配置优化提示词');
         let prompt = '';
-        for await (const delta of generate(selected.provider, selected.model, [{ role: 'user', content: JSON.stringify(context) }], instructions, undefined, signal, undefined, undefined, timeout.touch)) prompt += delta;
+        const messages = await optimization.messages(body, context);
+        for await (const delta of generate(selected.provider, selected.model, messages, instructions, undefined, signal, undefined, undefined, timeout.touch)) prompt += delta;
         if (!prompt.trim() || prompt.length > 16000) throw new Error('优化结果为空或超过 16000 字符，请调整优化提示词后重试');
-        return send(200, { prompt: prompt.trim() });
+        const formatted = body.optimization === 'h3' && context.mode === 'reference' ? formatH3ReferencePrompt(prompt) : prompt.trim();
+        return send(200, { prompt: formatted });
       }
       if (path === MCP_OAUTH_CALLBACK_PATH && request.method === 'GET') {
         const callback = new URL(request.url, 'http://localhost');

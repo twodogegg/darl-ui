@@ -7,7 +7,6 @@ export type ModelProviderStatus = 'connected' | 'error' | 'unknown';
 export interface AgentModelCapabilities {
   streaming?: boolean;
   tools?: boolean;
-  vision?: boolean;
   files?: boolean;
   audioInput?: boolean;
   audioOutput?: boolean;

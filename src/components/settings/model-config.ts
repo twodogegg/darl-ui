@@ -9,7 +9,6 @@ export type FirstLastFrameSupport = 'supported' | 'unverified' | 'unsupported';
 export interface TextCapabilities {
   reasoningEfforts: string[];
   defaultReasoningEffort: string;
-  vision?: boolean;
   tools?: boolean;
   contextWindow?: number;
 }
@@ -111,15 +110,15 @@ export const BUILTIN_PROTOCOLS: ProtocolAdapterDefinition[] = [
 export const BUILTIN_TEMPLATES: CapabilityTemplate[] = [
   {
     id: 'deepseek-thinking', name: 'DeepSeek Thinking', type: 'text',
-    capabilities: { reasoningEfforts: ['low', 'high', 'max'], defaultReasoningEffort: 'high', vision: true, tools: true, contextWindow: 1_000_000 },
+    capabilities: { reasoningEfforts: ['low', 'high', 'max'], defaultReasoningEffort: 'high', tools: true, contextWindow: 1_000_000 },
   },
   {
     id: 'gpt-reasoning', name: 'GPT Reasoning', type: 'text',
-    capabilities: { reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultReasoningEffort: 'medium', vision: true, tools: true, contextWindow: 1_000_000 },
+    capabilities: { reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultReasoningEffort: 'medium', tools: true, contextWindow: 1_000_000 },
   },
   {
     id: 'gemini-thinking', name: 'Gemini Thinking', type: 'text',
-    capabilities: { reasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium', vision: true, tools: true, contextWindow: 1_000_000 },
+    capabilities: { reasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium', tools: true, contextWindow: 1_000_000 },
   },
   {
     id: 'gpt-image-2', name: 'GPT Image 2', type: 'image',
@@ -290,7 +289,7 @@ export function toAgentModels(configuration: ModelConfiguration, providers: Mode
       reasoningEfforts: text?.reasoningEfforts.filter((effort) => effort !== 'none'),
       defaultReasoningEffort: text?.defaultReasoningEffort,
       capabilities: {
-        ...(text ? { vision: text.vision, tools: text.tools, contextWindow: text.contextWindow } : {}),
+        ...(text ? { tools: text.tools, contextWindow: text.contextWindow } : {}),
         ...(media ? mediaCapabilities(media) : {}),
       },
       providerName: provider?.name,
