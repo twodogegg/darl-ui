@@ -160,6 +160,14 @@
 .darl-agent-skill-conflict-actions .darl-button { min-width: 84px; }
 .darl-agent-manager-search svg { width: 14px; height: 14px; }
 .darl-agent-manager-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--darl-agent-text); font-size: 11px; }
+.darl-agent-skill-picker { left: 11px; right: auto; display: flex; flex-direction: column; overflow: hidden; }
+.darl-agent-skill-picker > .darl-agent-picker-head, .darl-agent-skill-picker > .darl-agent-picker-toolbar, .darl-agent-skill-picker > .darl-agent-manager-search, .darl-agent-skill-picker-filters { flex: none; }
+.darl-agent-skill-picker > .darl-agent-manager-search { margin: 0 0 8px; }
+.darl-agent-skill-picker > .darl-agent-picker-list { grid-template-columns: minmax(0, 1fr); min-height: 0; overflow-y: auto; }
+.darl-agent-skill-picker-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin-bottom: 8px; }
+.darl-agent-skill-picker-filters button { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 36px; padding: 6px 9px; border: 1px solid transparent; border-radius: 7px; background: var(--darl-agent-surface); color: var(--darl-agent-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.darl-agent-skill-picker-filters button[aria-pressed='true'] { border-color: var(--darl-agent-primary); color: var(--darl-agent-primary); background: color-mix(in srgb, var(--darl-agent-primary) 8%, var(--darl-agent-bg)); }
+.darl-agent-skill-picker-filters button span { font-size: 10px; font-variant-numeric: tabular-nums; }
 .darl-agent-manager-filters { display: flex; gap: 3px; padding: 0 12px 8px; overflow-x: auto; }
 .darl-agent-manager-filters button { padding: 5px 7px; border: 0; border-radius: 6px; background: transparent; color: var(--darl-agent-muted); font-size: 10px; white-space: nowrap; cursor: pointer; }
 .darl-agent-manager-filters button[aria-selected='true'] { background: var(--darl-agent-bg); color: var(--darl-agent-text); box-shadow: 0 1px 2px #0f172a12; }
