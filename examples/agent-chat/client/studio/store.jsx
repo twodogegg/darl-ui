@@ -129,7 +129,7 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
     if (applyStyle && !style) throw new Error('请先选择项目视觉风格')
     const requestId = crypto.randomUUID()
     const resolution = options.resolution || (selectedId === defaults[type]?.modelId ? defaults[type]?.resolution : model.defaults?.resolution) || model.capabilities?.resolutions?.[0]
-    const aspectRatio = options.aspectRatio || project?.ratio || defaults[type]?.aspectRatio || model.defaults?.aspectRatio
+    const aspectRatio = options.aspectRatio || (type === 'image' && target.resource === 'assets' ? '16:9' : project?.ratio) || defaults[type]?.aspectRatio || model.defaults?.aspectRatio
     if (references.length > (model.capabilities?.images || 0)) throw new Error(`当前模型最多支持 ${model.capabilities?.images || 0} 张参考图片`)
     const job = await studioApi('media-generation/jobs', {
       requestId, taskId: requestId, modelId: selectedId, prompt, ...(style ? { style: { id: style.id, name: style.name, description: style.description, category: style.category } } : {}),

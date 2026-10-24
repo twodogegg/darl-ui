@@ -29,6 +29,7 @@ import { RequestRecordStore, requestRecordsApi, requestRecordScope } from './req
 import { createPromptOptimization, type OptimizationPromptKey } from './prompt-optimization';
 import { RequestTimeout } from './request-timeout';
 import { VideoRedraw, REDRAW_TOOLS, handleRedrawRequest } from './video-redraw';
+import { VideoEditing, handleVideoEditingRequest } from './video-editing';
 
 /** Resolve the model selected in the current chat against an enabled text binding. */
 export function resolveTextModel(providers: StoredProvider[], configuration: ModelConfiguration, providerId: string, modelId: string) {
@@ -48,7 +49,7 @@ export function resolveTextModel(providers: StoredProvider[], configuration: Mod
       ...directory,
       id: modelId, name: configured.item.displayName, type: 'text' as const, providerId, enabled: true,
       reasoningEfforts: text?.reasoningEfforts.filter((effort) => effort !== 'none') ?? [],
-      capabilities: { ...directory?.capabilities, vision: text?.vision, tools: text?.tools, contextWindow: text?.contextWindow },
+      capabilities: { ...directory?.capabilities, tools: text?.tools, contextWindow: text?.contextWindow },
     },
   };
 }
@@ -74,7 +75,9 @@ export const MEDIA_TOOLS = [
       resolution: { type: 'string', enum: ['1K', '2K', '4K', '480P', '768P', '1080P'], description: '清晰度档位：图片为 1K/2K/4K，视频为 480P/768P/1080P（H3 Standard 不支持 1080P）。' },
       references: { type: 'array', maxItems: 16, items: { type: 'string' }, description: '必填场景：当用户提供了图片 URL 或要求改编已有图片（改风格、换背景、换配色、保持人物/物体一致性）时，必须把该 URL 放进这个数组。不填则视为纯文生图，原图会被忽略。支持站内 /api/files/ URL、公网 HTTP(S) URL 或 data: URL。图片编辑及视频图片参考可用，数量以模型能力为准，Gemini 最多 14 张。' },
       duration: { type: 'integer', minimum: 4, maximum: 15, description: '视频时长（秒），仅视频' },
-      studioTarget: { type: 'object', description: '可选：完成后由后台自动关联真实结果；先读取目标最新版本。', properties: { resource: { type: 'string', enum: ['assets','clips'] }, id: { type: 'string' }, version: { type: 'integer', minimum: 1 }, field: { type: 'string', enum: ['image','storyboardImage','blockingImage','videos'] }, variantId: { type: 'string' } }, required: ['resource','id','version','field'], additionalProperties: false },
+      referenceVideos: { type: 'array', maxItems: 3, items: { type: 'string' }, description: 'H3 视频参考，支持站内 /api/files/ URL 或公网 HTTP(S) URL，数量以模型能力为准。' },
+      referenceAudios: { type: 'array', maxItems: 3, items: { type: 'string' }, description: 'H3 音频或音色试听参考，支持站内 /api/files/ URL 或公网 HTTP(S) URL；须搭配图片或视频参考。' },
+      studioTarget: { type: 'object', description: '可选：完成后由后台自动关联真实结果；先读取目标最新版本。融合资产必须传此目标，后台检查 dependencies 并自动加入当前依赖图片与用途说明；依赖未出图会拒绝生成。', properties: { resource: { type: 'string', enum: ['assets','clips'] }, id: { type: 'string' }, version: { type: 'integer', minimum: 1 }, field: { type: 'string', enum: ['image','storyboardImage','blockingImage','videos'] }, variantId: { type: 'string' } }, required: ['resource','id','version','field'], additionalProperties: false },
     }, additionalProperties: false } },
   required: ['modelId','prompt'], additionalProperties: false } },
   { name: 'builtin_get_media_task', description: '按后台生成任务 ID 查询图片或视频的真实状态与结果（含结果 URL、供应商原始返回）。不会触发新的付费生成。', parameters: { type: 'object', properties: { taskId: { type: 'string', minLength: 36, maxLength: 36 } }, required: ['taskId'], additionalProperties: false } },
@@ -263,7 +266,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       const bindings = logical && enabledBindings(configuration, logical);
       if (!logical || !bindings?.length || bindings.length !== 1) throw new Error('请选择只有一个有效渠道绑定的文本模型');
       const selected = resolveTextModel(storage.getConfig<StoredProvider[]>('providers') || [], configuration, bindings[0].providerId, bindings[0].upstreamModelId);
-      if (!selected?.provider.apiKey || selected.model.capabilities?.vision !== true) throw new Error('拉片分析需要已配置密钥且支持图片输入的视觉模型');
+      if (!selected?.provider.apiKey) throw new Error('拉片分析需要已配置密钥的文本模型');
       return selected;
     },
     instructions: async agentId => {
@@ -278,7 +281,9 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     },
     transcribe: (bytes, language, signal) => transcribeVideoAudio(storage, env, bytes, language, signal, requestRecords),
   });
-  const mediaJobs = createMediaJobsApi(storage.path, () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), () => storage.getConfig<StoredProvider[]>('providers') || [], files, { target: (value, type) => studio.mediaTarget(value, type), completed: job => studio.attachMedia(job) }, requestRecords);
+  const videoEditing = new VideoEditing(files);
+  const publicBaseUrl = env.AGENT_CHAT_PUBLIC_BASE_URL || (env.AGENT_CHAT_PUBLIC_HOST ? `${String(env.AGENT_CHAT_PUBLIC_HOST).startsWith('http') ? env.AGENT_CHAT_PUBLIC_HOST : `https://${env.AGENT_CHAT_PUBLIC_HOST}`}` : undefined);
+  const mediaJobs = createMediaJobsApi(storage.path, () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), () => storage.getConfig<StoredProvider[]>('providers') || [], files, { target: (value, type) => studio.mediaTarget(value, type), prepare: (input, type) => studio.prepareMedia(input, type), completed: job => studio.attachMedia(job), publicBaseUrl }, requestRecords);
   if (!storage.getConfig<boolean>('requestRecordsInitialized')) {
     for (const job of mediaJobs.store.list()) {
       const provider = storage.getConfig<StoredProvider[]>('providers')?.find(item => item.id === job.providerId);
@@ -303,7 +308,11 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     const upgraded = upgradeModelConfiguration(storedConfiguration);
     if (JSON.stringify(upgraded) !== JSON.stringify(storedConfiguration)) storage.setConfig('modelConfiguration', upgraded);
   }
-  if (!storage.getConfig<DefaultMediaSelection>('defaultMediaModels')) storage.setConfig('defaultMediaModels', defaultMediaSelection);
+  const storedMediaDefaults = storage.getConfig<DefaultMediaSelection>('defaultMediaModels');
+  if (!storedMediaDefaults) storage.setConfig('defaultMediaModels', defaultMediaSelection);
+  else if (['minimax-h3-flash', 'minimax-h3-standard'].includes(storedMediaDefaults.video?.modelId) && ['480', '768'].includes(String(storedMediaDefaults.video?.resolution))) {
+    storage.setConfig('defaultMediaModels', { ...storedMediaDefaults, video: { ...storedMediaDefaults.video, resolution: `${storedMediaDefaults.video.resolution}P` } });
+  }
   const voicePromptFile = join(promptFile, '..', 'voice.md');
   const readPromptFile = (file: string) => readFileSync(file, 'utf8').trim();
   const readPromptFileIfExists = (file: string) => { try { return readPromptFile(file); } catch { return ''; } };
@@ -412,6 +421,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       return;
     }
     if (await handleWorkspaceProjectRequest(request, response, projectStore)) return;
+    if (await handleVideoEditingRequest(request, response, videoEditing)) return;
     if (await handleRedrawRequest(request, response, videoRedraw)) return;
     if (await handleStudioRequest(request, response, studio)) return;
     if (await mediaJobs.handle(request, response)) return;

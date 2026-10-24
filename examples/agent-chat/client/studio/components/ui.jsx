@@ -177,7 +177,7 @@ export function FileButton({
           for (const file of files) {
             try {
               const item = await readMedia(file, kind)
-              if (alive.current) onSelect(item)
+              if (alive.current) await onSelect(item)
             } catch (error) {
               if (alive.current) notify(error.message)
             }

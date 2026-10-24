@@ -13,16 +13,18 @@ export function videoDuration(seconds, model) {
   if (supported === undefined) throw new Error(`片段时长超过模型上限 ${choices.at(-1)} 秒，请调整分镜组合`)
   return supported
 }
-export const referenceKey = item => {
-  const url = typeof item === 'string' ? item : item?.url || ''
-  return item?.fileId || url.match(/\/api\/files\/([^/?]+)/)?.[1] || url.split('?')[0]
-}
+export { mediaReferenceKey as referenceKey, assetMentionCandidates } from '../../asset-mentions'
+import { mediaReferenceKey as referenceKey, mentionedAssets } from '../../asset-mentions'
 export function clipMediaReferences(clip, data) {
-  const assets = data.assets.filter(asset => clip.assetIds.includes(asset.id))
+  const episode = data.episodes?.find(episode => episode.id === clip.episodeId)
+  const projectAssets = episode ? data.assets.filter(asset => asset.projectId === episode.projectId) : data.assets
+  const mentions = mentionedAssets(clip.prompt, projectAssets)
+  const assets = projectAssets.filter(asset => (clip.assetIds || []).includes(asset.id) || mentions.some(mention => mention.assetId === asset.id))
   const frames = imageColumns.filter(column => clip[column.key]).map(column => ({ id: `${clip.id}-${column.key}`, name: column.label, kind: 'image', url: clip[column.key] }))
   const imageRefs = [
     ...frames,
-    ...assets.filter(asset => asset.image).map(asset => ({ id: asset.id, name: asset.name, kind: 'image', url: asset.image })),
+    ...assets.filter(asset => asset.image && (!mentions.some(mention => mention.assetId === asset.id && mention.variantId) || mentions.some(mention => mention.assetId === asset.id && !mention.variantId))).map(asset => ({ id: asset.id, name: asset.name, kind: 'image', url: asset.image })),
+    ...mentions.filter(mention => mention.image).map(mention => ({ id: mention.id, name: mention.variantName ? `${mention.name} · ${mention.variantName}` : mention.name, kind: 'image', url: mention.image, protocol: mention.protocol })),
   ]
   const seen = new Set(imageRefs.map(referenceKey))
   const additional = []
@@ -35,10 +37,18 @@ export function clipMediaReferences(clip, data) {
   const images = [...new Map([...imageRefs, ...additional.filter(ref => ref.kind === 'image')].map(ref => [referenceKey(ref), ref])).values()]
   return { assets, additional, images, frames: frames.filter(frame => !assets.some(asset => asset.image && referenceKey(asset.image) === referenceKey(frame))) }
 }
+export function videoImageReferences(clip, references, mode) {
+  if (mode === '分镜图') return clip?.image ? [{ id: `${clip.id}:storyboard`, name: '分镜图', kind: 'image', url: clip.image }] : []
+  return references?.images || []
+}
 export const formatDialogue = (line) => `${line.type === '旁白' ? '旁白' : line.speaker}｜${line.description || '描述未指定'}｜${line.text}`
 export function clipVoices(clip, data) {
+  const episode = data.episodes?.find(episode => episode.id === clip.episodeId)
+  const projectAssets = episode ? data.assets.filter(asset => asset.projectId === episode.projectId) : data.assets
+  const mentioned = mentionedAssets(clip.prompt, projectAssets)
   const characterIds = new Set([
     ...clip.assetIds,
+    ...mentioned.filter(asset => asset.type === '角色').map(asset => asset.assetId),
     ...data.shots.filter((shot) => clip.shotIds.includes(shot.id)).flatMap((shot) => shot.dialogue.map((line) => line.assetId)),
   ])
   const characters = data.assets.filter((asset) => characterIds.has(asset.id) && asset.type === '角色')
