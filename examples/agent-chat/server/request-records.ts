@@ -157,10 +157,13 @@ export class RequestRecordStore {
     const status = ({ completed: 'success', failed: 'error', queued: 'queued', running: 'running', cancelled: 'cancelled', uncertain: 'uncertain' } as const)[job.status];
     const old = this.get(job.id);
     const scope = requestRecordScope.getStore();
-    const references = Array.isArray(job.options.references) ? job.options.references.flatMap((ref): RequestRecordMedia[] => {
-      if (ref && typeof ref === 'object' && typeof ref.fileId === 'string') return [this.media(ref.fileId, 'image')];
-      return typeof ref === 'string' && /^(?:https?:\/\/|\/api\/files\/)/.test(ref) ? [{ type: 'image', name: '参考图', url: ref }] : [];
-    }) : [];
+    const references = (['references', 'referenceVideos', 'referenceAudios'] as const).flatMap(field => {
+      const type = field === 'references' ? 'image' : field === 'referenceVideos' ? 'video' : 'audio';
+      return Array.isArray(job.options[field]) ? job.options[field].flatMap((ref): RequestRecordMedia[] => {
+        if (ref && typeof ref === 'object' && typeof ref.fileId === 'string') return [this.media(ref.fileId, type)];
+        return typeof ref === 'string' && /^(?:https?:\/\/|\/api\/files\/)/.test(ref) ? [{ type, name: '参考素材', url: ref }] : [];
+      }) : [];
+    });
     this.put({ ...old, id: job.id, type: job.type, modelId: job.modelId, modelName: names.modelName || old?.modelName || job.modelId,
       providerId: job.providerId, providerName: names.providerName || old?.providerName || job.providerId, status, createdAt: job.createdAt,
       requestId: old?.requestId || scope?.requestId, sessionId: old?.sessionId || scope?.sessionId, runId: old?.runId || scope?.runId,

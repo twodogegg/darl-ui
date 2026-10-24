@@ -5,10 +5,29 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MediaJobStore } from '../examples/agent-chat/server/media-job-store';
 import { FileStore } from '../examples/agent-chat/server/file-storage';
+import { persistMediaReferencesInStore, resolveMediaReferencesInStore } from '../examples/agent-chat/server/media-references';
 
 const createStore = (path: string) => new MediaJobStore(path, new FileStore(path));
 
 describe('SQLite media generation queue',()=>{
+  it('persists audio and video references by file ID, checks their MIME types, and protects them from deletion', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'media-references-'));
+    try {
+      const path = join(dir, 'db.sqlite'), files = new FileStore(path), store = new MediaJobStore(path, files);
+      const audio = await files.put(Buffer.from('audio-reference'), 'audio/wav', 'voice.wav');
+      const video = await files.put(Buffer.from('video-reference'), 'video/mp4', 'motion.mp4');
+      const options = await persistMediaReferencesInStore(await resolveMediaReferencesInStore({ referenceAudios: [`/api/files/${audio.id}`], referenceVideos: [`/api/files/${video.id}`] }, files), files);
+      expect(options).toMatchObject({ referenceAudios: [{ fileId: audio.id, mimeType: 'audio/wav' }], referenceVideos: [{ fileId: video.id, mimeType: 'video/mp4' }] });
+      const job = store.create({ modelId: 'minimax-h3-flash', type: 'video', prompt: 'reference', providerId: 'darl', upstreamModelId: 'minimax-h3-flash', baseUrl: 'https://example.invalid/v1', options });
+      expect(files.references(audio.id)).toBe(true);
+      expect(files.references(video.id)).toBe(true);
+      await expect(files.removeUnreferenced(audio.id)).resolves.toBe(false);
+      await expect(resolveMediaReferencesInStore({ references: [`/api/files/${audio.id}`] }, files)).rejects.toThrow('必须是图片');
+      await expect(persistMediaReferencesInStore({ referenceAudios: [{ fileId: video.id }] }, files)).rejects.toThrow('必须是音频');
+      store.removeMany([job]);
+      expect(files.references(audio.id)).toBe(false);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
   it('persists queue and per-model limits, and recovers remote video without resubmission',()=>{
     const dir=mkdtempSync(join(tmpdir(),'media-queue-'));
     try{

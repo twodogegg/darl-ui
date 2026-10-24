@@ -13,13 +13,13 @@ afterEach(() => { vi.unstubAllGlobals(); });
 describe('unified H3 video contract', () => {
   it('builds the documented size and ratio fields', () => {
     expect(buildH3VideoRequest({ prompt: '海边日落', seconds: 4, size: '480P', ratio: '16:9' })).toEqual({
-      model: 'minimax-h3-flash', prompt: '海边日落', seconds: 4, size: '480P', ratio: '16:9',
+      model: 'minimax-h3-flash', prompt: '海边日落', seconds: 4, duration: 4, size: '480P', ratio: '16:9',
     });
   });
 
-  it('sends only seconds and never the deprecated duration field', () => {
-    expect(buildH3VideoRequest({ prompt: 'x' })).toMatchObject({ seconds: 5, size: '480P', ratio: '16:9' });
-    expect(buildH3VideoRequest({ prompt: 'x', seconds: 4 })).not.toHaveProperty('duration');
+  it('sends matching seconds and duration fields for gateway compatibility', () => {
+    expect(buildH3VideoRequest({ prompt: 'x' })).toMatchObject({ seconds: 5, duration: 5, size: '480P', ratio: '16:9' });
+    expect(buildH3VideoRequest({ prompt: 'x', seconds: 4 })).toMatchObject({ seconds: 4, duration: 4 });
   });
 
   it('uses the selected upstream model mapping', () => {

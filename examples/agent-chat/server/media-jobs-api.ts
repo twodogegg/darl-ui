@@ -55,7 +55,7 @@ function presentJob(job: import('./media-job-store').MediaJob, files: FileStore)
   });
   return resultFiles.length ? { ...safe, resultFiles } : safe;
 }
-export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration, providers:()=>StoredProvider[], files:FileStore, hooks: { target?: (value: unknown, type: string) => Record<string, unknown>; completed?: (job: import('./media-job-store').MediaJob) => void } = {}, records?: RequestRecordStore){
+export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration, providers:()=>StoredProvider[], files:FileStore, hooks: { target?: (value: unknown, type: string) => Record<string, unknown>; prepare?: (input: { prompt: string; options: Record<string, unknown> }, type: string) => { prompt: string; options: Record<string, unknown> }; completed?: (job: import('./media-job-store').MediaJob) => void; publicBaseUrl?: string } = {}, records?: RequestRecordStore){
   const store=new MediaJobStore(dbPath, files, (job) => {
     const provider = providers().find(item => item.id === job.providerId);
     records?.syncMedia(job, { modelName: config().models.find(item => item.id === job.modelId)?.displayName, providerName: provider?.name, secret: provider?.apiKey });
@@ -65,7 +65,7 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
   const runner=new MediaJobRunner(store,(job)=>{
     const provider=providers().find(p=>p.id===job.providerId);
     return provider&&provider.apiKey?{apiKey:provider.apiKey,baseUrl:provider.baseUrl}:undefined;
-  }, (job, message, secret) => logFailure({ appId: 'builtin:media', appName: '媒体生成', toolName: job.modelId, stage: 'mcp-tool', code: job.status === 'uncertain' ? 'MEDIA_TASK_UNCERTAIN' : 'MEDIA_TASK_FAILED', message, secret }), hooks.completed);
+  }, (job, message, secret) => logFailure({ appId: 'builtin:media', appName: '媒体生成', toolName: job.modelId, stage: 'mcp-tool', code: job.status === 'uncertain' ? 'MEDIA_TASK_UNCERTAIN' : 'MEDIA_TASK_FAILED', message, secret }), hooks.completed, hooks.publicBaseUrl);
   runner.start();
   const submit = async (input: Record<string, unknown>) => {
         if(typeof input.taskId!=='string'||!input.taskId.trim()||input.taskId.length>120)throw new Error('任务 ID 无效');
@@ -86,6 +86,15 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         if(rawOptions.references!==undefined&&!Array.isArray(rawOptions.references))throw new Error('参考素材必须是数组');
         const referenceCount=Array.isArray(rawOptions.references)?rawOptions.references.length:0;
         const effective=effectiveCapabilities(config(),model,binding);
+        for (const [field, limit, label] of [
+          ['referenceVideos', effective && 'maxReferenceVideos' in effective ? effective.maxReferenceVideos : 0, '视频'],
+          ['referenceAudios', effective && 'maxReferenceAudios' in effective ? effective.maxReferenceAudios : 0, '音频'],
+        ] as const) {
+          if (rawOptions[field] === undefined) continue;
+          if (!Array.isArray(rawOptions[field])) throw new Error(`参考${label}必须是数组`);
+          if (rawOptions[field].length > (limit || 0)) throw new Error(`参考${label}最多 ${limit || 0} 个`);
+        }
+        if (Array.isArray(rawOptions.referenceAudios) && rawOptions.referenceAudios.length && !referenceCount && !(Array.isArray(rawOptions.referenceVideos) && rawOptions.referenceVideos.length)) throw new Error('参考音频需要搭配参考图片或视频');
         const maxReferences=effective&&'maxReferenceImages' in effective?effective.maxReferenceImages:0;
         if(referenceCount>maxReferences)throw new Error(`参考图片最多 ${maxReferences} 张`);
         // Large data URLs stay out of the job row; adapters read the saved files.
@@ -104,13 +113,18 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         if (previous) { if (previous.options.studioFingerprint !== fingerprint) throw new Error('生成请求编号已用于其他内容'); return previous; }
         const target = rawOptions.studioTarget !== undefined ? hooks.target?.(rawOptions.studioTarget, type) : undefined;
         if (rawOptions.studioTarget !== undefined && !target) throw new Error('生成目标不可用');
-        const options=await persistMediaReferencesInStore(await resolveMediaReferencesInStore(rawOptions, files), files);
+        const prepared = hooks.prepare?.({ prompt: input.prompt, options: { ...rawOptions, ...(target ? { studioTarget: target } : {}) } }, type) || { prompt: input.prompt, options: rawOptions };
+        if (typeof prepared.prompt !== 'string' || prepared.prompt.length > 16000) throw new Error('加入依赖说明后的提示词超过16000字');
+        if (Array.isArray(prepared.options.references) && prepared.options.references.length > maxReferences) throw new Error(`包含依赖图片后，参考图片最多 ${maxReferences} 张`);
+        if (typeof prepared.options.aspectRatio === 'string' && capabilities?.aspectRatios && !capabilities.aspectRatios.includes(prepared.options.aspectRatio)) throw new Error('模型不支持默认画幅，请明确选择支持的画幅');
+        const options=await persistMediaReferencesInStore(await resolveMediaReferencesInStore(prepared.options, files), files);
+        if (target && JSON.stringify(hooks.target?.(rawOptions.studioTarget, type)) !== JSON.stringify(target)) throw new Error('生成目标或依赖图片已变化，请重试');
         if (target) options.studioTarget = target;
         if (requestId) { options.studioRequestId = requestId; options.studioFingerprint = fingerprint; }
         const raced = existing();
         if (raced) { if (raced.options.studioFingerprint !== fingerprint) throw new Error('生成请求编号已用于其他内容'); return raced; }
         const style = parseStyle(input.style);
-        const job=store.create({taskId:input.taskId.trim(),...(typeof input.batchId==='string'?{batchId:input.batchId.trim()}:{}),modelId:model.id,type,prompt:input.prompt.trim(),...(style ? { style } : {}),providerId:provider.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey,baseUrl:provider.baseUrl,options});
+        const job=store.create({taskId:input.taskId.trim(),...(typeof input.batchId==='string'?{batchId:input.batchId.trim()}:{}),modelId:model.id,type,prompt:prepared.prompt.trim(),...(style ? { style } : {}),providerId:provider.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey,baseUrl:provider.baseUrl,options});
 
         void runner.tick();
         return job;

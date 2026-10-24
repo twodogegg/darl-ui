@@ -102,7 +102,7 @@ export const MAX_GEMINI_REFERENCE_IMAGES = 14;
 /** Either a remote link the channel can fetch itself, or inline bytes it cannot. */
 export type ImageReference = { url: string } | { name: string; mimeType: string; data: Buffer };
 
-const DATA_URL = /^data:(image\/[\w.+-]+);base64,(.+)$/is;
+const DATA_URL = /^data:((?:image|audio|video)\/[\w.+-]+);base64,(.+)$/is;
 
 function sniffMime(data: Buffer) {
   const ext = sniffImage(data);
@@ -114,9 +114,10 @@ function sniffMime(data: Buffer) {
  * Remote links pass through so the channel fetches them; stored files are read
  * as bytes for multipart/inline upload.
  */
-type LocalMediaReader = (url: string) => Promise<{ bytes: Buffer; mime: string } | undefined> | { bytes: Buffer; mime: string } | undefined;
+type LocalMediaReader = (url: string) => Promise<{ bytes: Buffer; mime: string; url?: string } | undefined> | { bytes: Buffer; mime: string; url?: string } | undefined;
 
-export async function normalizeImageReferences(value: unknown, max = MAX_REFERENCE_IMAGES, localMedia?: LocalMediaReader): Promise<ImageReference[] | undefined> {
+async function normalizeMediaReferences(value: unknown, max: number, localMedia: LocalMediaReader | undefined, kind: 'image' | 'audio' | 'video'): Promise<ImageReference[] | undefined> {
+  const label = { image: '图片', audio: '音频', video: '视频' }[kind];
   if (value === undefined || value === null) return undefined;
   const rows = Array.isArray(value) ? value : [value];
   type Source = { kind: 'value'; value: string } | { kind: 'file-id'; id: string };
@@ -128,20 +129,26 @@ export async function normalizeImageReferences(value: unknown, max = MAX_REFEREN
     return typeof item.url === 'string' ? [{ kind: 'value', value: item.url }] : [];
   });
   if (!picked.length) return undefined;
-  if (picked.length > max) throw new Error(`参考图片最多 ${max} 张`);
+  if (picked.length > max) throw new Error(`参考${label}最多 ${max} ${kind === 'image' ? '张' : '个'}`);
   return Promise.all(picked.map(async (source, index) => {
     if (source.kind === 'file-id') {
       const saved = await localMedia?.(`/api/files/${source.id}`);
+      if (saved && !saved.mime.startsWith(`${kind}/`)) throw new Error(`参考素材必须是${label}`);
       if (saved) return { name: `reference-${index + 1}.${saved.mime.split('/')[1].replace('jpeg', 'jpg')}`, mimeType: saved.mime, data: saved.bytes };
-      throw new Error(`参考图片 ${index + 1} 不存在或尚未完成`);
+      throw new Error(`参考${label} ${index + 1} 不存在或尚未完成`);
     }
     const inline = DATA_URL.exec(source.value);
     if (!inline) return { url: source.value };
+    if (!inline[1].startsWith(`${kind}/`)) throw new Error(`参考素材必须是${label}`);
     const data = Buffer.from(inline[2], 'base64');
-    if (!data.length) throw new Error(`参考图片 ${index + 1} 为空`);
-    const mimeType = sniffMime(data) || inline[1].toLowerCase();
+    if (!data.length) throw new Error(`参考${label} ${index + 1} 为空`);
+    const mimeType = (kind === 'image' ? sniffMime(data) : undefined) || inline[1].toLowerCase();
     return { name: `reference-${index + 1}.${mimeType.split('/')[1].replace('jpeg', 'jpg')}`, mimeType, data };
   }));
+}
+
+export function normalizeImageReferences(value: unknown, max = MAX_REFERENCE_IMAGES, localMedia?: LocalMediaReader) {
+  return normalizeMediaReferences(value, max, localMedia, 'image');
 }
 
 function requestOptions(options: Record<string, unknown>) {
@@ -412,6 +419,7 @@ async function videoAssetIds(job: MediaJob, key: string, rows: unknown[], localM
     const fileId = row && typeof row === 'object' ? (row as { fileId?: unknown }).fileId : undefined;
     const saved = typeof fileId === 'string' ? await localMedia?.(`/api/files/${fileId}`) : undefined;
     if (!saved) throw new Error(`第 ${index + 1} 个参考素材不存在或尚未完成`);
+    if (saved.url) { ids.push(saved.url); continue; }
     const uploaded = await uploadH3Asset(job.baseUrl, key, new Blob([new Uint8Array(saved.bytes)], { type: saved.mime }), `reference-${index + 1}`, AbortSignal.timeout(120000));
     ids.push(uploaded.id);
   }
@@ -429,6 +437,8 @@ function videoReferenceGroups(job: MediaJob) {
     groups.videos = refs.videos || [];
     groups.audios = refs.audios || [];
   }
+  if (Array.isArray(job.options.referenceVideos)) groups.videos = job.options.referenceVideos;
+  if (Array.isArray(job.options.referenceAudios)) groups.audios = job.options.referenceAudios;
   return groups;
 }
 

@@ -11,7 +11,7 @@ export class MediaJobRunner {
   private active = new Set<string>();
   private timer: ReturnType<typeof setInterval> | undefined;
   private busy = false;
-  constructor(readonly store: MediaJobStore, private credentials: CredentialsResolver, private onFailure: FailureReporter = () => {}, private onCompleted: (job: MediaJob) => void = () => {}) {}
+  constructor(readonly store: MediaJobStore, private credentials: CredentialsResolver, private onFailure: FailureReporter = () => {}, private onCompleted: (job: MediaJob) => void = () => {}, private publicBaseUrl?: string) {}
 
   start() {
     this.store.recover();
@@ -138,6 +138,6 @@ export class MediaJobRunner {
   }
   private async fileMedia(id:string) {
     const result = await this.store.files.getBytes(id);
-    return result ? {bytes:result.bytes,mime:result.file.mimeType} : undefined;
+    return result ? { bytes: result.bytes, mime: result.file.mimeType, ...(this.publicBaseUrl ? { url: `${this.publicBaseUrl.replace(/\/$/, '')}/api/files/${encodeURIComponent(id)}` } : {}) } : undefined;
   }
 }

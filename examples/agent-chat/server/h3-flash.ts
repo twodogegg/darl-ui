@@ -35,6 +35,8 @@ export interface H3VideoRequest {
   model: string;
   prompt: string;
   seconds: number;
+  /** Compatibility field required by some New API gateway deployments. */
+  duration: number;
   size: H3Resolution;
   ratio: H3Ratio;
   images?: string[];
@@ -91,7 +93,10 @@ export function buildH3VideoRequest(options: H3VideoOptions): H3VideoRequest {
   if (ratio === 'adaptive' && !frames && !options.referenceImages?.length && !options.referenceVideos?.length) {
     throw new Error('adaptive 画幅需要提供图片或视频参考素材');
   }
-  const request: H3VideoRequest = { model, prompt, seconds, size, ratio };
+  // The published contract calls `seconds` canonical, but the gateway's tier
+  // expression still reads `duration` on some deployments. Send both with the
+  // same integer value so either path receives a valid duration.
+  const request: H3VideoRequest = { model, prompt, seconds, duration: seconds, size, ratio };
   if (!frames && options.referenceImages?.length) request.images = [...options.referenceImages];
   const metadata: NonNullable<H3VideoRequest['metadata']> = {};
   if (options.firstFrameImage) metadata.first_frame_image = options.firstFrameImage;
