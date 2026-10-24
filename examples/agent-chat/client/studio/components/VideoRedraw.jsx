@@ -4,6 +4,8 @@ import { studioApi, useStore } from '../store'
 import { Button, Field, Modal, DirectorSelect } from './ui'
 import { Workflow, useProject } from './Shell'
 import { studioDefaults } from '../../../studio-schema'
+import { StyleSelector } from '@darl/ui'
+import { createWorkspaceStyle, styleOptionsFromCatalog } from '../../workspace-styles'
 
 const regions = { japan: '日本', western: '欧美' }
 const languages = { ja: '日语', en: '英语' }
@@ -41,52 +43,65 @@ function useRedraw(projectId) {
 
 export function CreateRedraw() {
   const { update, reload, notify } = useStore(), navigate = useNavigate()
-  const [file, setFile] = useState(null), [title, setTitle] = useState(''), [region, setRegion] = useState('japan'), [language, setLanguage] = useState('ja')
+  const [file, setFile] = useState(null), [title, setTitle] = useState(''), [region, setRegion] = useState('japan')
   const [ratio, setRatio] = useState('16:9'), [style, setStyle] = useState('4'), [styles, setStyles] = useState([]), [notes, setNotes] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('')
-  const submitted = useRef(false)
+  const submitted = useRef(false), preparation = useRef(null)
+  const [styleOpen, setStyleOpen] = useState(false)
   useEffect(() => {
     const controller = new AbortController()
-    studioApi('workspace/styles', undefined, controller.signal).then(value => setStyles([...value.data.official_items, ...value.data.items])).catch(reason => { if (!controller.signal.aborted) setError(reason.message) })
+    studioApi('workspace/styles', undefined, controller.signal).then(value => setStyles(styleOptionsFromCatalog(value.data))).catch(reason => { if (!controller.signal.aborted) setError(reason.message) })
     return () => controller.abort()
   }, [])
   async function create(event) {
     event.preventDefault()
     if (submitted.current) return
+    if (!styles.some(item => item.id === style)) return setError('请选择视觉风格')
     if (!file || !/\.mp4$/i.test(file.name) || file.size > 50 * 1024 * 1024) return setError('请选择不超过 50 MB 的 MP4')
     submitted.current = true; setBusy(true); setError('')
     let projectId
     try {
-      const form = new FormData(); form.set('file', file)
-      const uploaded = await fetch('/api/files', { method: 'POST', body: form })
-      const source = await uploaded.json()
-      if (!uploaded.ok) throw new Error(source.error || '上传失败')
-      const result = await studioApi('workspace/projects', { name: title.trim() || file.name.replace(/\.mp4$/i, ''), description: notes, aspect_ratio: ratio, style_catalog_id: Number(style) })
-      projectId = String(result.data.project_id)
-      await reload()
-      const saved = await update(draft => {
-        Object.assign(draft.projects.find(project => project.id === projectId), { creationMode: 'video-redraw', targetRegion: region, targetLanguage: language, requirements: notes, sourceVideo: { fileId: source.fileId, url: `/api/files/${source.fileId}`, name: file.name } })
-        draft.episodes.push({ ...studioDefaults.episodes, id: crypto.randomUUID(), projectId, title: '原片转绘', scenes: [] })
-      })
-      if (!saved) throw new Error('项目创建后设置未保存，请重新加载核对')
-      navigate(`/source?projectId=${encodeURIComponent(projectId)}`)
-      notify('原片已保存，可以开始切镜与抽帧')
-    } catch (reason) { setError(reason.message + (projectId ? '。项目已创建，可在项目列表继续。' : '')) }
+      if (!preparation.current) {
+        const form = new FormData(); form.set('file', file)
+        const uploaded = await fetch('/api/files', { method: 'POST', body: form })
+        const source = await uploaded.json()
+        if (!uploaded.ok) throw new Error(source.error || '上传失败')
+        const result = await studioApi('workspace/projects', { name: title.trim() || file.name.replace(/\.mp4$/i, ''), description: notes, aspect_ratio: ratio, style_catalog_id: Number(style) })
+        projectId = String(result.data.project_id)
+        await reload()
+        const saved = await update(draft => {
+          Object.assign(draft.projects.find(project => project.id === projectId), { creationMode: 'video-redraw', targetRegion: region, targetLanguage: region === 'japan' ? 'ja' : 'en', requirements: notes, sourceVideo: { fileId: source.fileId, url: `/api/files/${source.fileId}`, name: file.name } })
+          draft.episodes.push({ ...studioDefaults.episodes, id: crypto.randomUUID(), projectId, title: '原片转绘', scenes: [] })
+        })
+        if (!saved) throw new Error('项目创建后设置未保存，请重新加载核对')
+        const current = await studioApi('studio/query', { resource: 'projects', ids: [projectId] })
+        preparation.current = { projectId, action: 'prepare', requestId: crypto.randomUUID(), version: current.items[0]._version }
+      }
+      await studioApi('video-redraw/action', preparation.current)
+      navigate(`/source?projectId=${encodeURIComponent(preparation.current.projectId)}`)
+      notify('原片已保存，正在自动切镜与抽帧')
+    } catch (reason) { setError(reason.message + (preparation.current ? '。项目已保存，请重试启动切镜与抽帧。' : projectId ? '。项目已创建，可在项目列表继续。' : '')) }
     finally { submitted.current = false; setBusy(false) }
   }
-  return <form className="redraw-create" onSubmit={create}>
+  return <>
+    <StyleSelector styles={styles} open={styleOpen} onOpenChange={setStyleOpen} value={style} onChange={item => setStyle(item?.id || '')} onCreate={async input => {
+      await createWorkspaceStyle(input)
+      const catalog = await studioApi('workspace/styles')
+      setStyles(styleOptionsFromCatalog(catalog.data))
+    }} />
+    <form className="redraw-create" onSubmit={create}>
     <div className="redraw-heading"><span>VIDEO REDRAW</span><h2>从一段视频，走向新的观众。</h2><p>沿用原片人物、场景和道具，制作目标地区与语言版本。</p></div>
-    <Field label="原始视频"><input aria-label="上传原始视频" type="file" accept="video/mp4,.mp4" disabled={busy} onChange={event => setFile(event.target.files[0] || null)} /><small>MP4 · 最长 120 秒 · 最大 50 MB · 最多 40 个候选镜头</small></Field>
+    <Field label="原始视频"><input aria-label="上传原始视频" type="file" accept="video/mp4,.mp4" disabled={busy || !!preparation.current} onChange={event => setFile(event.target.files[0] || null)} /><small>MP4 · 最长 120 秒 · 最大 50 MB · 最多 40 个候选镜头</small></Field>
     <div className="redraw-fields">
-      <Field label="项目名称"><input aria-label="转绘项目名称" maxLength={80} value={title} onChange={event => setTitle(event.target.value)} placeholder={file?.name || '可使用视频文件名'} /></Field>
-      <Field label="目标地区"><select aria-label="目标地区" value={region} onChange={event => { setRegion(event.target.value); setLanguage(event.target.value === 'japan' ? 'ja' : 'en') }}>{Object.entries(regions).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></Field>
-      <Field label="目标语言"><select aria-label="目标语言" value={language} onChange={event => setLanguage(event.target.value)}>{Object.entries(languages).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></Field>
-      <Field label="目标画幅"><select aria-label="转绘画幅" value={ratio} onChange={event => setRatio(event.target.value)}><option value="16:9">16:9 横版</option><option value="9:16">9:16 竖版</option></select></Field>
-      <Field label="目标视觉风格"><select aria-label="转绘视觉风格" value={style} onChange={event => setStyle(event.target.value)}>{styles.map(style => <option key={style.id} value={style.id}>{style.name}</option>)}</select></Field>
+      <Field label="项目名称"><input aria-label="转绘项目名称" disabled={busy || !!preparation.current} maxLength={80} value={title} onChange={event => setTitle(event.target.value)} placeholder={file?.name || '可使用视频文件名'} /></Field>
+      <Field label="目标地区与语言"><select aria-label="目标地区与语言" disabled={busy || !!preparation.current} value={region} onChange={event => setRegion(event.target.value)}><option value="japan">日本 · 日语</option><option value="western">欧美 · 英语</option></select></Field>
+      <Field label="目标画幅"><select aria-label="转绘画幅" disabled={busy || !!preparation.current} value={ratio} onChange={event => setRatio(event.target.value)}><option value="16:9">16:9 横版</option><option value="9:16">9:16 竖版</option></select></Field>
+      <Field label="目标视觉风格"><Button aria-label="转绘视觉风格" disabled={busy || !!preparation.current} onClick={() => setStyleOpen(true)}>{styles.find(item => item.id === style)?.name || '选择视觉风格'}</Button></Field>
     </div>
-    <Field label="改编要求"><textarea aria-label="转绘改编要求" rows={3} value={notes} maxLength={10000} onChange={event => setNotes(event.target.value)} placeholder="例如：人物采用日本当地形象，保留原片餐厅布局、职业与递物动作。" /></Field>
+    <Field label="改编要求"><textarea aria-label="转绘改编要求" disabled={busy || !!preparation.current} rows={3} value={notes} maxLength={10000} onChange={event => setNotes(event.target.value)} placeholder="例如：人物采用日本当地形象，保留原片餐厅布局、职业与递物动作。" /></Field>
     {error && <p role="alert">{error}</p>}
-    <Button type="submit" primary disabled={busy || !file}>{busy ? '正在上传并保存…' : '创建视频转绘项目'}</Button>
-  </form>
+    <Button type="submit" primary disabled={busy || !file}>{busy ? '正在创建并启动切镜…' : preparation.current ? '重试启动切镜与抽帧' : '创建视频转绘项目'}</Button>
+    </form>
+  </>
 }
 
 export function SourcePlayer({ source, start, end }) {
@@ -98,11 +113,11 @@ export function SourcePlayer({ source, start, end }) {
 }
 
 export function RedrawSource({ context }) {
-  const { project, projectId, link } = context, { models, agents, agentSelection, currentAgentId, patch, notify, reload } = useStore()
+  const { project, projectId, link } = context, { models, agents, agentSelection, currentAgentId, notify, reload } = useStore()
   const { jobs, action, busy, running, error } = useRedraw(projectId)
   const [modelId, setModel] = useState(''), [language, setLanguage] = useState(''), [visualOnly, setVisual] = useState(false)
   const [start, setStart] = useState(''), [end, setEnd] = useState(''), [selected, setSelected] = useState(null), [preview, setPreview] = useState(null), [addAsset, setAddAsset] = useState(false)
-  const availableModels = models.filter(model => model.type === 'text' && model.enabled !== false && model.capabilities?.vision === true)
+  const availableModels = models.filter(model => model.type === 'text' && model.enabled !== false)
   const chosenModel = availableModels.find(model => model.id === modelId) || availableModels[0]
   const chosenAgent = agents.find(agent => agent.id === (agentSelection || currentAgentId) && agent.enabled !== false)
   const source = project.sourceVideo || {}, latest = jobs.find(job => job.kind === 'analyze' && job.draft.shots.length)
@@ -115,12 +130,7 @@ export function RedrawSource({ context }) {
     <div className="redraw-source-layout">
       <section><SourcePlayer source={source} start={preview?.start} end={preview?.end} />
         <p>{source.name || '原始视频'} {source.duration && `· ${source.duration.toFixed(2)} 秒 · ${source.width}×${source.height} · ${source.hasAudio ? '有音轨' : '无音轨'}`}</p>
-        <div className="redraw-fields">
-          <Field label="目标地区"><select aria-label="项目目标地区" disabled={running || busy} value={project.targetRegion} onChange={event => patch('projects', projectId, { targetRegion: event.target.value, targetLanguage: event.target.value === 'japan' ? 'ja' : 'en' })}>{Object.entries(regions).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></Field>
-          <Field label="目标语言"><select aria-label="项目目标语言" disabled={running || busy} value={project.targetLanguage} onChange={event => patch('projects', projectId, { targetLanguage: event.target.value })}>{Object.entries(languages).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></Field>
-        </div>
-        <p className="muted">更改地区或语言后需重新分析并核对目标版本，已有图片和人工修改保留。</p>
-        <Button disabled={busy || running || !!source.segments?.length} onClick={() => perform('prepare')}>检测切镜与抽帧</Button>
+        <Field label="目标地区与语言"><p>{regions[project.targetRegion]} · {languages[project.targetLanguage]}</p></Field>
         <details><summary>原片镜头 {source.segments?.length || 0} 个</summary><div className="redraw-frame-grid">{source.segments?.map(segment => <button key={segment.id} onClick={() => setPreview(segment)}><img src={`${segment.frames[1]?.url}?width=320`} alt="" /><span>{sourceTime(segment.start)} – {sourceTime(segment.end)}</span></button>)}</div></details>
       </section>
       <section className="redraw-analysis">

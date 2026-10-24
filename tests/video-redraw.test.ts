@@ -139,7 +139,7 @@ it('isolates shot IDs when two regional projects share the same prepared source 
   ]);
   const seed = (id: string) => {
     const state = studio.snapshot(), project = state.projects.find(item => item.id === id)!;
-    const draft = { assets: [{ key: 'scene', type: '场景', name: '原色卡', description: '实际视频色卡', targetName: '目标色卡', targetDescription: '色卡', evidenceSegmentId: source.segments[0].id, frameIndex: 0 }],
+    const draft = { assets: [{ key: 'scene', type: '场景', name: '原色卡', description: '实际视频色卡', targetName: '目标色卡', targetDescription: '色卡', targetAppearance: '红蓝两种实际颜色', targetCostume: '', targetVoiceDescription: '', targetPrompt: '单独呈现色卡，不加人物', evidenceSegmentId: source.segments[0].id, frameIndex: 0 }],
       shots: source.segments.map(segment => ({ segmentId: segment.id, sceneKey: 'scene', assetKeys: ['scene'], targetDialogue: [], description: '实际编码的色卡', dialogue: '', scale: '全景', camera: '固定', transition: '硬切', effects: '', targetDescription: '保留色卡', notes: '' })) };
     const job = { id: `analysis-${id}`, projectId: id, projectVersion: project._version, kind: 'analyze', status: 'completed', phase: '完成', input: {}, fingerprint: '', createdAt: new Date().toISOString(),
       segments: source.segments, draft, versions: Object.fromEntries(state.episodes.map(item => [`episodes:${item.id}`, item._version])) };
@@ -147,6 +147,7 @@ it('isolates shot IDs when two regional projects share the same prepared source 
     return job.id;
   };
   await service.edit({ projectId: firstProject, action: 'apply', jobId: seed(firstProject) });
+  expect(studio.snapshot().assets.find(asset => asset.projectId === firstProject)).toMatchObject({ appearance: '红蓝两种实际颜色', costume: '', voiceDescription: '', prompt: '单独呈现色卡，不加人物' });
   const before = studio.snapshot().shots.filter(shot => shot.episodeId === 'episode');
   await service.edit({ projectId: secondProject, action: 'apply', jobId: seed(secondProject) });
   const after = studio.snapshot();

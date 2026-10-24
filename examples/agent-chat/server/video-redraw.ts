@@ -11,7 +11,7 @@ import type { TimedTranscript } from './voice';
 import { REDRAW_LIMITS, analysisFrameSheet, composeVideo, extractFrame, prepareVideo, videoCommand, withVideoFiles, type SourceSegment } from './video-processing';
 import { isLocalOrLanAddress } from './local-access';
 
-type DraftAsset = { key: string; type: string; name: string; description: string; targetName: string; targetDescription: string; evidenceSegmentId: string; frameIndex: number };
+type DraftAsset = { key: string; type: string; name: string; description: string; targetName: string; targetDescription: string; targetAppearance?: string; targetCostume?: string; targetVoiceDescription?: string; targetPrompt?: string; evidenceSegmentId: string; frameIndex: number };
 type DraftShot = { segmentId: string; sceneKey: string; description: string; dialogue: string; scale: string; camera: string; transition: string; effects: string; assetKeys: string[]; targetDescription: string; targetDuration?: number; targetDialogue: Array<{ assetKey: string; text: string; description: string }>; notes: string };
 export type RedrawDraft = { assets: DraftAsset[]; shots: DraftShot[] };
 type Job = { id: string; projectId: string; sourceFileId?: string; kind: 'prepare' | 'analyze' | 'export'; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; phase: string; createdAt: string; error?: string; input: Record<string, unknown>; fingerprint: string;
@@ -36,6 +36,7 @@ export function validateRedrawDraft(value: unknown, segments: SourceSegment[], e
     if (!asset || typeof asset.key !== 'string' || !/^[\w:.-]{1,160}$/.test(asset.key) || newKeys.has(asset.key) || !['角色', '场景', '道具'].includes(asset.type)) throw new Error('资产 key、类型或重复主体无效');
     if (keys.has(asset.key) && keys.get(asset.key) !== asset.type) throw new Error('已有资产类型不能改变');
     for (const field of ['name', 'description', 'targetName', 'targetDescription'] as const) text(asset[field], field);
+    for (const field of ['targetAppearance', 'targetCostume', 'targetVoiceDescription', 'targetPrompt'] as const) if (asset[field] !== undefined) text(asset[field], field);
     if (!asset.name.trim() || !asset.targetName.trim() || !Number.isInteger(asset.frameIndex) || asset.frameIndex < 0 || !segments.find(segment => segment.id === asset.evidenceSegmentId)?.frames[asset.frameIndex]) throw new Error('资产名称或来源证据无效');
     newKeys.add(asset.key); keys.set(asset.key, asset.type);
   }
@@ -226,6 +227,7 @@ export class VideoRedraw {
       if (prior) continue; // Supplement analysis reuses accepted assets without overwriting their target settings.
       const segment = job.segments.find(segment => segment.id === asset.evidenceSegmentId)!;
       changes.push({ resource: 'assets', id, op: 'create', values: { projectId: project.id, episodeIds: [episode.id], type: asset.type, name: asset.targetName, description: asset.targetDescription,
+        appearance: asset.targetAppearance || '', costume: asset.targetCostume || '', voiceDescription: asset.targetVoiceDescription || '', prompt: asset.targetPrompt || '',
         source: { fileId: (project.sourceVideo as Record<string, unknown>).fileId, start: segment.start, end: segment.end, frames: [segment.frames[asset.frameIndex]], name: asset.name, description: asset.description, confirmed: false } } });
     }
     const scenes = structuredClone(episode.scenes) as Array<Record<string, unknown>>;
