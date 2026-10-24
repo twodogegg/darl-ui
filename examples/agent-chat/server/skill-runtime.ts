@@ -79,7 +79,7 @@ export class SkillRuntime {
     await mkdir(root, { recursive: true, mode: 0o700 });
     const target = resolve(root, input);
     const local = relative(root, target);
-    if (isAbsolute(local) || local === '..' || local.startsWith(`..${sep}`)) throw new Error('文件路径超出工作区');
+    if (isAbsolute(local) || local === '..' || local.startsWith(`..${sep}`)) throw new Error(`文件路径超出工作区：仅允许 ${root} 内的路径。请使用加载 Skill 后返回的 directory 或工作区相对路径；网站数据请通过对应业务工具查询和编辑。`);
     // Reject symlink traversal, including links created by a command or an imported package.
     let current = root;
     if (await realpath(root) !== resolve(root)) throw new Error('工作区不能经过符号链接');

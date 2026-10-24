@@ -1,6 +1,6 @@
 /** Existing RN web fields. Version is transport metadata, not an editable field. */
 export const studioFields = {
-  projects: 'title summary cover ratio style_catalog_id generationMode planned durationMin durationMax duration requirements outline sourceScript updated creationMode targetRegion targetLanguage sourceVideo',
+  projects: 'title summary cover ratio style_catalog_id generationMode adaptation planned durationMin durationMax duration requirements outline sourceScript updated creationMode targetRegion targetLanguage sourceVideo',
   episodes: 'projectId number title cover script scenes duration stage',
   assets: 'projectId episodeIds name type role alias description appearance costume voiceDescription image prompt variants history voiceId references source',
   shots: 'episodeId sceneId description scale camera transition dialogue effects duration source assetIds',
@@ -44,7 +44,7 @@ export function studioPositions(before: Array<{ id: string; _position?: number }
   return positions;
 }
 export const studioDefaults: Partial<Record<StudioResource, Record<string, unknown>>> = {
-  projects: { cover: '', generationMode: '故事版', planned: null, durationMin: 2, durationMax: 5, duration: 120, requirements: '', outline: { core: '', story: '', keep: '', remove: '', merge: '', risks: '', episodes: '', roles: [], scenes: [] }, sourceScript: '', creationMode: 'script', targetRegion: 'japan', targetLanguage: 'ja', sourceVideo: {} },
+  projects: { cover: '', generationMode: '故事版', adaptation: '抽核', planned: null, durationMin: 2, durationMax: 5, duration: 120, requirements: '', outline: { core: '', story: '', keep: '', remove: '', merge: '', risks: '', episodes: '', roles: [], scenes: [], props: [] }, sourceScript: '', creationMode: 'script', targetRegion: 'japan', targetLanguage: 'ja', sourceVideo: {} },
   episodes: { number: 1, title: '新剧集', cover: '', script: '', scenes: [], duration: 120, stage: 1 },
   assets: { episodeIds: [], name: '', type: '角色', role: '', alias: '', description: '', appearance: '', costume: '', voiceDescription: '', image: '', prompt: '', variants: [], history: [], voiceId: '', references: [] },
   shots: { description: '', scale: '中景', camera: '固定', transition: '硬切', dialogue: [], effects: '', duration: 3 },
@@ -83,6 +83,14 @@ const dialogueSchema = {
   required: ['type', 'text'],
   allOf: [{ if: { properties: { type: { const: '角色' } } }, then: { required: ['assetId'], properties: { assetId: { minLength: 1 } } } }],
 };
+const sceneSchema = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    id: { type: 'string', minLength: 1 }, location: { type: 'string' }, setting: { type: 'string', enum: ['内', '外', '内外'] }, time: { type: 'string' },
+    suggestedDuration: { type: ['number', 'string', 'null'], description: '本场预计秒数，可留空。' },
+    content: { type: 'string', description: '页面显示和编辑的完整场次正文。按剧情顺序交错保存动作、人物名（表演提示）和每句台词，保留 Markdown 格式。场次没有独立 dialogue 字段；不可把对白从正文拆走。' },
+  }, required: ['id', 'location', 'setting', 'time', 'content'],
+};
 /** Share the field contract between resource discovery and the model's edit schema. */
 export function studioValueSchema(resource: StudioResource): Record<string, unknown> {
   return { type: 'object', additionalProperties: false, properties: Object.fromEntries(studioFields[resource].split(' ').map(key => {
@@ -91,12 +99,15 @@ export function studioValueSchema(resource: StudioResource): Record<string, unkn
     if (arrayFields.has(key)) schema = { type: 'array' };
     if (objectFields.has(key)) schema = key === 'source' ? sourceSchema : key === 'sourceVideo' ? videoSourceSchema : { type: 'object' };
     if (key === 'creationMode') schema = { type: 'string', enum: ['script', 'video-redraw'] };
+    if (key === 'adaptation') schema = { type: 'string', enum: ['忠实', '抽核', '借壳'] };
     if (key === 'targetRegion') schema = { type: 'string', enum: ['japan', 'western'] };
     if (key === 'targetLanguage') schema = { type: 'string', enum: ['ja', 'en'] };
     if (key === 'assetIds') schema = { type: 'array', items: { type: 'string' }, uniqueItems: true };
     if (key === 'favorite') schema = { type: 'boolean' };
     if (key === 'projectId' || key === 'episodeId' || key === 'sceneId') schema = { type: 'string', minLength: 1, description: '关联记录的真实 ID；同批新建记录可用该记录的 ID。' };
     if (key === 'dialogue') schema = { type: 'array', items: dialogueSchema };
+    if (resource === 'episodes' && key === 'scenes') schema = { type: 'array', items: sceneSchema, description: '剧本页按此数组显示场次。每场 content 包含完整动作与对白；修改剧本时同步维护 scenes 与 script，保留已有场次 ID。' };
+    if (resource === 'episodes' && key === 'script') schema.description = '整集完整文学剧本。仅修改 script 不会更新已有 scenes 的页面正文；须同时更新对应 scenes.content。';
     return [key, schema];
   })) };
 }
@@ -123,6 +134,14 @@ export function validateStudioValues(resource: StudioResource, values: unknown):
     if (objectFields.has(key) && (!value || typeof value !== 'object' || Array.isArray(value))) throw new Error(`${key} 必须是对象`);
     if (!idFields.has(key) && !arrayFields.has(key) && !numericFields.has(key) && !objectFields.has(key) && key !== 'favorite' && typeof value !== 'string') throw new Error(`${key} 必须是文本`);
     if (key === 'favorite' && typeof value !== 'boolean') throw new Error('收藏状态无效');
+    if (resource === 'episodes' && key === 'scenes' && Array.isArray(value)) {
+      value.forEach((scene, index) => {
+        if (!scene || typeof scene !== 'object' || Array.isArray(scene)) throw new Error(`episodes.scenes[${index}] 必须是场次对象`);
+        for (const field of Object.keys(scene)) if (!Object.hasOwn(sceneSchema.properties, field)) {
+          throw new Error(`episodes.scenes[${index}].${field} 不受支持；场次正文和对白须按发生顺序一起写入 content，不要另建 dialogue 字段。`);
+        }
+      });
+    }
   }
   return values as Record<string, unknown>;
 }

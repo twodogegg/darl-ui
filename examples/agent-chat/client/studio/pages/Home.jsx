@@ -30,6 +30,7 @@ export default function Home() {
   const [reading, setReading] = useState(false)
   const [ratio, setRatio] = useState('9:16')
   const [generationMode, setGenerationMode] = useState('故事版')
+  const [adaptation, setAdaptation] = useState('抽核')
   const [planned, setPlanned] = useState('')
   const [durationMin, setDurationMin] = useState(2)
   const [durationMax, setDurationMax] = useState(5)
@@ -72,7 +73,8 @@ export default function Home() {
     const text = script.trim()
     if (!text) return notify('请先上传原始素材')
     if (!styleId) return notify('请选择视觉风格')
-    if (planned !== '' && (!Number.isInteger(Number(planned)) || planned < 1 || planned > 100)) return notify('计划集数应为1—100的整数')
+    if (planned === '') return notify('请填写计划集数')
+    if (!Number.isInteger(Number(planned)) || planned < 1 || planned > 100) return notify('计划集数应为1—100的整数')
     if (![durationMin, durationMax].every(value => Number.isInteger(Number(value)) && value >= 1 && value <= 60) || Number(durationMin) > Number(durationMax)) return notify('请填写有效的单集时长范围')
     setBusy(true)
     let projectId
@@ -82,7 +84,7 @@ export default function Home() {
       if (images[0]?.fileId) await studioApi(`workspace/projects/${projectId}/covers/files/${images[0].fileId}/select`, {})
       await reload()
       await update(draft => {
-        Object.assign(draft.projects.find(item => item.id === projectId), { sourceScript: text, requirements: requirements.trim(), generationMode, planned: planned === '' ? null : Number(planned), durationMin: Number(durationMin), durationMax: Number(durationMax), duration: Number(durationMin)*60, outline: makeOutline({ summary: text.slice(0,2000) }) })
+        Object.assign(draft.projects.find(item => item.id === projectId), { sourceScript: text, requirements: requirements.trim(), generationMode, adaptation, planned: Number(planned), durationMin: Number(durationMin), durationMax: Number(durationMax), duration: Number(durationMin)*60, outline: makeOutline({ summary: text.slice(0,2000) }) })
       })
       navigate(`/outline?projectId=${projectId}`)
       await requestAgent({ action: 'outline', projectId, draftOnly: true })
@@ -192,7 +194,7 @@ export default function Home() {
               <IconSettings size={16} /> 项目设置
             </p>
             <p className="br-setting-hint">
-              选择视觉风格，按需设置创作导演、生成模式、画幅、集数和时长。
+              选择视觉风格，按需设置创作导演、生成模式、改编幅度、画幅、集数和时长。
             </p>
             <div className="br-settings">
               <div className="br-field">
@@ -200,6 +202,14 @@ export default function Home() {
                 <select id="home-generation-mode" value={generationMode} onChange={(e) => setGenerationMode(e.target.value)}>
                   <option>故事版</option>
                   <option>全能参考</option>
+                </select>
+              </div>
+              <div className="br-field">
+                <label htmlFor="home-adaptation">改编幅度</label>
+                <select id="home-adaptation" value={adaptation} onChange={(e) => setAdaptation(e.target.value)}>
+                  <option value="忠实">忠实</option>
+                  <option value="抽核">抽核</option>
+                  <option value="借壳">借壳</option>
                 </select>
               </div>
               <div className="br-field"><DirectorSelect label="剧本导演" /></div>
@@ -224,7 +234,8 @@ export default function Home() {
                   min="1"
                   max="100"
                   step="1"
-                  placeholder="不填则 Agent 填写"
+                  required
+                  placeholder="例如 12"
                   value={planned}
                   onChange={(e) => setPlanned(e.target.value)}
                 />

@@ -1,6 +1,6 @@
 import promptCatalog from '../prompts/studio-prompt-catalog.json';
 import redrawPrompts from '../prompts/video-redraw.json';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { emptyStudioData, studioChangeSchema, studioDefaults, studioFields, studioRequiredOnCreate, studioResource, studioValueSchema, validateStudioValues, type StudioChange, type StudioData, type StudioRecord, type StudioResource } from '../studio-schema';
 import { ProjectStore } from './project-store';
@@ -13,14 +13,16 @@ const recordId = (value: unknown) => {
   return value;
 };
 const finitePositive = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value > 0;
-
 /** Shared business service for UI and Agent. One batch is one SQLite transaction. */
 export class StudioStore {
   private get db() { return this.projects.db; }
   constructor(readonly projects: ProjectStore) {
     this.db.exec(`CREATE TABLE IF NOT EXISTS studio_records (resource TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, position INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(resource,id));
       CREATE TABLE IF NOT EXISTS studio_versions (resource TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,PRIMARY KEY(resource,id));
-      CREATE TABLE IF NOT EXISTS studio_batches (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, result TEXT NOT NULL, inverse TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
+      CREATE TABLE IF NOT EXISTS studio_batches (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, result TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
+    // Remove obsolete rollback snapshots while preserving request fingerprints/results for safe retries.
+    const batchColumns = this.db.prepare('PRAGMA table_info(studio_batches)').all() as Array<{ name: string }>;
+    for (const column of ['inverse', 'entry_source']) if (batchColumns.some(item => item.name === column)) this.db.exec(`ALTER TABLE studio_batches DROP COLUMN ${column}`);
     const insert = this.db.prepare("INSERT OR IGNORE INTO studio_records(resource,id,data,version,position) VALUES('prompts',?,?,1,?)");
     const current = this.db.prepare("SELECT data,version FROM studio_records WHERE resource='prompts' AND id=?");
     const update = this.db.prepare("UPDATE studio_records SET data=?,version=? WHERE resource='prompts' AND id=?");
@@ -52,7 +54,7 @@ export class StudioStore {
   query(input: Record<string, unknown>) {
     if (input.resource === 'styles') return { resource: 'styles', ...this.projects.styles() };
     const resource = studioResource(input.resource);
-    if (input.describe === true) return { resource, fields: ['id', '_version', '_position', ...studioFields[resource].split(' ')], defaults: studioDefaults[resource] || {}, requiredOnCreate: studioRequiredOnCreate[resource] || [], valuesSchema: studioValueSchema(resource), versionField: '_version', operations: ['create', 'update', 'delete'], batchSemantics: 'atomic', maxBatch: 500, structures: { scenes: ['id', 'location', 'setting:内/外/内外', 'time', 'suggestedDuration:秒或空字符串', 'content'], dialogue: ['id', 'type:角色/旁白', 'assetId:角色类型必填，须引用当前项目的真实角色资产；旁白可省略', 'speaker', 'description', 'text'], outline: ['core', 'story', 'keep', 'remove', 'merge', 'risks', 'episodes', 'roles:[{id,name,position,relationships,arc}]', 'scenes:[{id,name,purpose}]'], variants: ['id', 'name', 'description', 'image', 'history:图片URL数组'] } };
+    if (input.describe === true) return { resource, fields: ['id', '_version', '_position', ...studioFields[resource].split(' ')], defaults: studioDefaults[resource] || {}, requiredOnCreate: studioRequiredOnCreate[resource] || [], valuesSchema: studioValueSchema(resource), versionField: '_version', operations: ['create', 'update', 'delete'], batchSemantics: 'atomic', maxBatch: 500, structures: { scenes: ['id', 'location', 'setting:内/外/内外', 'time', 'suggestedDuration:秒或空字符串', 'content:完整场次正文，动作、人物名和台词按发生顺序交错，保留Markdown；场次不支持独立dialogue字段'], dialogue: ['id', 'type:角色/旁白', 'assetId:角色类型必填，须引用当前项目的真实角色资产；旁白可省略', 'speaker', 'description', 'text'], outline: ['core', 'story', 'keep', 'remove', 'merge', 'risks', 'episodes', 'roles:[{id,name,position,relationships,arc}]', 'scenes:[{id,name,purpose}]', 'props:[{id,name,purpose,involvement}]'], variants: ['id', 'name', 'description', 'image', 'history:图片URL数组'] } };
     const data = this.snapshot();
     let items = data[resource];
     if (input.projectId !== undefined) {
@@ -79,7 +81,7 @@ export class StudioStore {
     const page = items.slice(offset, offset + limit).map(item => input.fields ? Object.fromEntries(['id', '_version', ...input.fields as string[]].map(key => [key, item[key]])) : item);
     return { resource, items: page, total: items.length, nextCursor: offset + limit < items.length ? String(offset + limit) : null };
   }
-  apply(requestId: string, changes: StudioChange[], restore = false) {
+  apply(requestId: string, changes: StudioChange[]) {
     recordId(requestId);
     if (!Array.isArray(changes) || !changes.length || changes.length > 500) throw new Error('每批需要 1–500 项修改');
     const fingerprint = createHash('sha256').update(JSON.stringify(changes)).digest('hex');
@@ -91,7 +93,7 @@ export class StudioStore {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const original = this.snapshot(), data = structuredClone(original);
-      const inverse: StudioChange[] = [], changed: Array<{ resource: StudioResource; id: string; version: number; op: string }> = [];
+      const changed: Array<{ resource: StudioResource; id: string; version: number; op: string }> = [];
       const seen = new Set<string>(), aliases = new Map<string,string>();
       for (const change of changes) {
         const resource = studioResource(change.resource); let id = recordId(change.id); const key = `${resource}:${id}`;
@@ -109,11 +111,8 @@ export class StudioStore {
             if (values[field] === undefined || values[field] === '') throw failure('tool-validation', 'STUDIO_FIELD_REQUIRED', `${resource}[${id}].${field} 必填；创建前请读取该资源的 describe 与关联记录。`, false);
           }
           if (resource === 'projects' && change.op === 'create') {
-            if (restore && this.db.prepare("SELECT id FROM workspace_projects WHERE id=? AND status='archived'").get(Number(id))) this.db.prepare("UPDATE workspace_projects SET status='active' WHERE id=?").run(Number(id));
-            else {
-              const created = this.projects.create(ProjectStore.validate({ name: values.title, description: values.summary, aspect_ratio: values.ratio, style_catalog_id: values.style_catalog_id }));
-              aliases.set(id, String(created.project_id)); id = String(created.project_id);
-            }
+            const created = this.projects.create(ProjectStore.validate({ name: values.title, description: values.summary, aspect_ratio: values.ratio, style_catalog_id: values.style_catalog_id }));
+            aliases.set(id, String(created.project_id)); id = String(created.project_id);
           }
           const after = { ...structuredClone(studioDefaults[resource] || {}), ...before, ...values, id, _version: before?._version || 0, _position: change.position ?? before?._position ?? collection.reduce((max, item) => Math.max(max, item._position ?? 0), -1) + 1 } as StudioRecord;
           if (before) collection[collection.indexOf(before)] = after; else collection.push(after);
@@ -132,9 +131,7 @@ export class StudioStore {
           this.db.prepare('DELETE FROM studio_records WHERE resource=? AND id=?').run(resource, before.id);
           if (resource === 'projects') this.projects.archive(Number(before.id));
           this.db.prepare('INSERT INTO studio_versions(resource,id,version) VALUES(?,?,?) ON CONFLICT(resource,id) DO UPDATE SET version=excluded.version').run(resource,before.id,before._version+1);
-          const { id, _version, _position, ...values } = before;
-          inverse.unshift({ resource, id, op: 'create', values, position: _position });
-          changed.push({ resource, id, version: _version + 1, op: 'delete' });
+          changed.push({ resource, id: before.id, version: before._version + 1, op: 'delete' });
         }
         for (const after of data[resource]) {
           const before = old.get(after.id);
@@ -150,24 +147,14 @@ export class StudioStore {
           const { id, _version, _position, ...values } = after;
           this.db.prepare('INSERT INTO studio_records(resource,id,data,version,position) VALUES(?,?,?,?,?) ON CONFLICT(resource,id) DO UPDATE SET data=excluded.data,version=excluded.version,position=excluded.position').run(resource, id, JSON.stringify(values), _version, _position || 0);
           this.db.prepare('INSERT INTO studio_versions(resource,id,version) VALUES(?,?,?) ON CONFLICT(resource,id) DO UPDATE SET version=excluded.version').run(resource,id,_version);
-          if (before) {
-            const { id: _, _version: __, _position: position, ...values } = before;
-            inverse.unshift({ resource, id, op: 'update', version: _version, position, values });
-          } else inverse.unshift({ resource, id, op: 'delete', version: _version });
           changed.push({ resource, id, version: _version, op: before ? 'update' : 'create' });
         }
       }
       const result = { requestId, changed };
-      this.db.prepare('INSERT INTO studio_batches(id,fingerprint,result,inverse) VALUES(?,?,?,?)').run(requestId, fingerprint, JSON.stringify(result), JSON.stringify(inverse));
+      this.db.prepare('INSERT INTO studio_batches(id,fingerprint,result) VALUES(?,?,?)').run(requestId, fingerprint, JSON.stringify(result));
       this.db.exec('COMMIT');
       return result;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
-  }
-  undo(batchId: string, requestId: string = randomUUID()) {
-    const batch = this.db.prepare('SELECT inverse FROM studio_batches WHERE id=?').get(recordId(batchId)) as { inverse: string } | undefined;
-    if (!batch) throw new Error('修改记录不存在');
-    const changes = JSON.parse(batch.inverse) as StudioChange[];
-    return this.apply(requestId, changes, true);
   }
   mediaTarget(value: unknown, type: string): Record<string, unknown> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('生成目标无效');
@@ -245,6 +232,7 @@ export class StudioStore {
           }
         }
         if (item.planned !== null && (!Number.isInteger(item.planned) || Number(item.planned) < 1 || Number(item.planned) > 100)) throw new Error('计划集数应为1–100或留空');
+        if (!['忠实', '抽核', '借壳'].includes(String(item.adaptation))) throw new Error('改编幅度无效');
         if (![item.durationMin,item.durationMax].every(value => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 60) || Number(item.durationMin) > Number(item.durationMax)) throw new Error('单集时长范围无效');
       }
       if (['films','history'].includes(resource) && item.episodeId && required('episodes',item.episodeId, `${path}.episodeId`).projectId !== item.projectId) throw new Error('关联剧集不属于当前项目');
@@ -320,7 +308,7 @@ export class StudioStore {
 
 export const STUDIO_TOOLS = [
   { name: 'builtin_read_studio', title: '查询短剧创作数据', description: '按项目/剧集/场次批量读取大纲、剧本场次、资产、分镜、片段。先用 describe=true 获取该资源现有字段、默认值与编辑规则。返回真实 ID、_version、total 和 nextCursor；分页未读完不代表全部内容。', risk: 'read' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { resource: { type: 'string', enum: [...Object.keys(studioFields), 'styles'] }, describe: { type: 'boolean' }, projectId: { type: 'string' }, episodeId: { type: 'string' }, sceneId: { type: 'string' }, ids: { type: 'array', items: { type: 'string' }, maxItems: 500 }, fields: { type: 'array', items: { type: 'string' } }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500 } }, required: ['resource'], additionalProperties: false } },
-  { name: 'builtin_edit_studio', title: '批量修改短剧内容', description: '按读取到的字段白名单提交一组原子编辑，最多500项。修改/删除传最新 _version 作为 version；values 只含改变字段。资源字段、类型、创建必填项与默认值先通过查询工具 describe 获取。角色对白必须引用当前项目真实角色资产；可把新资产与分镜放同批创建。创建项目的 id 为临时标识，返回实际编号；同批新剧集可用临时 projectId 关联。position 可调整记录排序。requestId 为唯一请求标识，重试沿用。关联变化放同批，失败整批回滚。undoBatchId 可撤销一组编辑，发生版本冲突则停止。生成任务用已有媒体工具。', risk: 'write' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { requestId: { type: 'string' }, undoBatchId: { type: 'string' }, changes: { type: 'array', minItems: 1, maxItems: 500, items: studioChangeSchema } }, required: ['requestId'], additionalProperties: false } },
+  { name: 'builtin_edit_studio', title: '批量修改短剧内容', description: '按读取到的字段白名单提交一组原子编辑，最多500项。修改/删除传最新 _version 作为 version；values 只含改变字段。资源字段、类型、创建必填项与默认值先通过查询工具 describe 获取。分镜角色对白必须引用当前项目真实角色资产；可把新资产与分镜放同批创建。剧本页显示 episodes.scenes[].content，须包含完整动作与台词并同步 script，不支持 scenes[].dialogue。创建项目的 id 为临时标识，返回实际编号；同批新剧集可用临时 projectId 关联。position 可调整记录排序。requestId 为唯一请求标识，重试沿用。关联变化放同批，失败整批回滚。生成任务用已有媒体工具。', risk: 'write' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { requestId: { type: 'string' }, changes: { type: 'array', minItems: 1, maxItems: 500, items: studioChangeSchema } }, required: ['requestId', 'changes'], additionalProperties: false } },
 ] as const;
 
 export async function handleStudioRequest(req: IncomingMessage, res: ServerResponse, store: StudioStore): Promise<boolean> {
@@ -334,7 +322,10 @@ export async function handleStudioRequest(req: IncomingMessage, res: ServerRespo
     for await (const part of req) { text += part.toString(); if (Buffer.byteLength(text) > 16 * 1024 * 1024) throw new Error('请求超过16MB'); }
     const body = text ? JSON.parse(text) : {};
     if (path === '/api/studio/query' && req.method === 'POST') send(200, store.query(body));
-    else if (path === '/api/studio/changes' && req.method === 'POST') send(200, body.undoBatchId ? store.undo(body.undoBatchId, body.requestId) : store.apply(body.requestId, body.changes));
+    else if (path === '/api/studio/changes' && req.method === 'POST') {
+      if (Object.keys(body).some(key => !['requestId', 'changes'].includes(key))) throw new Error('修改请求仅支持 requestId 和 changes');
+      send(200, store.apply(body.requestId, body.changes));
+    }
     else send(404, { error: '工作台接口不存在' });
   } catch (error) { send(error instanceof StudioConflict ? 409 : 422, { error: error instanceof Error ? error.message : '操作失败', atomic: true }); }
   return true;

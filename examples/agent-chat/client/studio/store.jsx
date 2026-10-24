@@ -24,7 +24,6 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
   const [pending, setPending] = useState(0)
   const [agentSelection, setAgentSelection] = useState('')
   const [modelSelections, setModelSelections] = useState({})
-  const [lastBatch, setLastBatch] = useState('')
   const getModel = (type, modelId) => models.find(model => model.type === type && model.enabled !== false && model.id === (modelId || modelSelections[type] || (type === 'text' ? currentTextModelId : mediaDefaults[type]?.modelId)))
   const state = useRef(data), queue = useRef(Promise.resolve()), failed = useRef(false), count = useRef(0), timer = useRef(), mounted = useRef(true)
   const announce = useCallback(message => { if (!mounted.current) return; clearTimeout(timer.current); setToast(message); timer.current = setTimeout(() => setToast(''), 4000) }, [])
@@ -77,8 +76,7 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
     const requestId = crypto.randomUUID()
     const task = queue.current.then(async () => {
       if (failed.current) return false
-      const saved = await studioApi('studio/changes', { requestId, changes })
-      if (mounted.current) setLastBatch(saved.requestId)
+      await studioApi('studio/changes', { requestId, changes })
       return true
     }).catch(async reason => {
       failed.current = true
@@ -143,7 +141,7 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
   }
   return <Store.Provider value={{ data, update, patch, notify, log, reload, requestAgent, agents, models, getModel, currentAgentId, mediaJobs, mediaDefaults, onNavigate, cancelAgent: onAgentCancel, generateMedia, agentSelection, setAgentSelection, modelSelections, setModelSelections }}>
     {error && <div className="studio-error" role="alert">{error}<button onClick={async () => { failed.current = false; setError(''); await reload() }}>重新加载</button></div>}
-    <div className="studio-save-status" role="status">{loading ? '正在读取工作台…' : pending ? `正在保存 ${pending} 批修改…` : error ? '保存失败' : '已同步'}{lastBatch && !pending && <button onClick={async () => { try { await studioApi('studio/changes', { requestId: crypto.randomUUID(), undoBatchId: lastBatch }); setLastBatch(''); await reload(); announce('已撤销上次修改') } catch (reason) { setError(reason.message) } }}>撤销上次修改</button>}</div>
+    <div className="studio-save-status" role="status">{loading ? '正在读取工作台…' : pending ? `正在保存 ${pending} 批修改…` : error ? '保存失败' : '已同步'}</div>
     {!loading && children}
     {toast && <div className="demo-toast" role="status">{toast}</div>}
   </Store.Provider>

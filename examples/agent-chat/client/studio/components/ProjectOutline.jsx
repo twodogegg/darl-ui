@@ -20,13 +20,25 @@ const sceneColumns = [
   { key: 'name', label: '场景名称', type: 'text', width: '23%' },
   { key: 'purpose', label: '剧情用途', width: '66%' },
 ]
+const propColumns = [
+  { key: 'name', label: '道具', type: 'text', width: '23%' },
+  { key: 'purpose', label: '剧情功能', width: '34%' },
+  { key: 'involvement', label: '涉及人物 / 事件', width: '32%' },
+]
+const outlineValue = (project) => ({ ...makeOutline(project), ...(project.outline || {}) })
 
 export default function ProjectOutline({ project, onWrite }) {
   const { patch, notify, requestAgent } = useStore()
-  const [outline, setOutline] = useState(() => ({ ...makeOutline(project), ...project.outline }))
-  const base = useRef({ version: project._version, outline: JSON.stringify(project.outline) })
-  useEffect(() => { if (JSON.stringify(outline) === base.current.outline) { setOutline(project.outline); base.current = { version: project._version, outline: JSON.stringify(project.outline) } } }, [project._version])
-  const dirty = JSON.stringify(outline) !== JSON.stringify(project.outline)
+  const [outline, setOutline] = useState(() => outlineValue(project))
+  const base = useRef({ version: project._version, outline: JSON.stringify(outlineValue(project)) })
+  useEffect(() => {
+    const next = outlineValue(project)
+    if (JSON.stringify(outline) === base.current.outline) {
+      setOutline(next)
+      base.current = { version: project._version, outline: JSON.stringify(next) }
+    }
+  }, [project._version])
+  const dirty = JSON.stringify(outline) !== JSON.stringify(outlineValue(project))
   function edit(key, value) {
     setOutline((current) => ({ ...current, [key]: value }))
   }
@@ -64,6 +76,7 @@ export default function ProjectOutline({ project, onWrite }) {
       <div className="project-outline">
         <p className="outline-meta">
           <span>计划 {project.planned ? `${project.planned} 集` : '集数待定（由 Agent 填写）'}</span>
+          <span>改编幅度 {project.adaptation || '抽核'}</span>
           <span>单集时长 {project.durationMin && project.durationMax
             ? `${project.durationMin}–${project.durationMax} 分钟`
             : `${project.duration} 秒`}</span>
@@ -98,6 +111,14 @@ export default function ProjectOutline({ project, onWrite }) {
           columns={sceneColumns}
           rows={outline.scenes || []}
           onChange={(rows) => edit('scenes', rows)}
+        />
+        <OutlineTable
+          title="关键叙事道具表"
+          itemLabel="道具"
+          prefix="P"
+          columns={propColumns}
+          rows={outline.props || []}
+          onChange={(rows) => edit('props', rows)}
         />
         <section aria-label="分集走向">
           {textField('episodes', '分集走向', '在同一份项目大纲中列出各集的主要事件、转折与集末悬念，明确它们如何共同走向结局', 7)}

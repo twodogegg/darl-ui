@@ -25,6 +25,8 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 | 创作提示词设置 | `prompts` | 各创作环节的全站规则 |
 | 视觉风格 | `styles` | 只读风格目录 |
 
+剧本项目的 `projects.adaptation` 保存改编幅度（`忠实` / `抽核` / `借壳`）；项目 `outline` 另外包含 `props:[{id,name,purpose,involvement}]`，只记录确实影响剧情的关键叙事道具。
+
 视频转绘项目与剧本项目共用这些资源。`projects` 增加 `creationMode`（`script` / `video-redraw`）、`targetRegion`（`japan` / `western`）、`targetLanguage`（`ja` / `en`）、`sourceVideo`。`sourceVideo` 保存原视频 `fileId/url/name`、真实 `duration/width/height/fps/hasAudio`、`segments`（每项 `id/start/end/frames`）；每帧是 `fileId/time/url`。先上传 MP4，再保存项目引用，用转绘工具取得真实元数据，不能编造时长或抽帧结果。
 
 `assets.source` 与 `shots.source` 保存原片 `fileId/start/end/frames`，可含原始 `name/description/dialogue/notes/confirmed`；镜头的 `source.segmentId` 指向原片候选镜头 ID，业务镜头 ID 按项目隔离，不与 segment ID 混用。目标设定继续使用现有资产/分镜字段。`shots.assetIds` 为本镜人物、场景、道具的稳定关联。原片与目标版本分别保留；资产必须有原片依据。完整字段和嵌套类型仍以 describe 为准。
@@ -49,6 +51,14 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 | `limit`、`cursor` | 每页 1–500 条，使用结果的 `nextCursor` 读取下一页 |
 
 结果含真实 `id`、`_version`、`total`、`nextCursor`。全站资源不附带项目/剧集筛选。`prompts` 用 `name` 定位，`mode=default` 取 `defaultText`，`mode=replace` 取 `text`。
+
+### 剧本与场次写入
+
+剧本页显示 `episodes.scenes[].content`，不是直接显示整集 `script`。每场为 `{id,location,setting,time,suggestedDuration?,content}`；`content` 必须保留按剧情顺序交错的动作、人物名（表演提示）和完整台词，可保存 Markdown 段落与加粗。不要把台词从正文抽到 `scenes[].dialogue`：该字段不受支持，结构化 `dialogue` 属于分镜 `shots`。
+
+修改文学剧本时同步保存整集 `script` 与对应场次 `content`，保留已有场次 ID、动作对白顺序和用户未要求改动的内容。只更新 `script`、只导出文件或只在聊天输出不算写入页面。保存后回读目标场次 `content`，核对人物台词与关键动作确实存在，再报告完成。
+
+日常创作和修订通过业务工具完成，不需要读取网站源码、猜测源码路径或直接修改数据库。Skill 格式要求与站内字段分工不同：创作 Skill 决定正文写法，本 Skill 负责将正文完整写入网站。
 
 ### 创建、修改、删除与排序
 
@@ -78,12 +88,6 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 | `position` | 可选，调整记录排序 |
 
 项目创建后返回实际编号，后续查询和编辑使用返回值。角色对白的 `assetId` 引用角色资产；分镜与片段引用真实剧集和场次。保存后用 `builtin_read_studio` 按 ID 查询结果；版本冲突时重读当前记录。
-
-撤销调用同一 Tool：
-
-```json
-{"requestId":"unique-undo-id","undoBatchId":"原批次requestId"}
-```
 
 ## 图片与视频任务
 

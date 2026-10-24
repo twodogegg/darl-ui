@@ -31,6 +31,47 @@ afterEach(() => rmSync(directory, { recursive: true, force: true }));
 const shots = (count = 40): StudioChange[] => Array.from({ length: count }, (_, index) => ({ resource: 'shots', op: 'create', id: `shot-${index}`, position: index, values: { episodeId: 'episode-1', sceneId: 'scene-1', description: `动作 ${index}`, duration: 3 } }));
 
 describe('shared short drama business service', () => {
+  it('drops obsolete batch snapshots without losing records or safe retries', () => {
+    const changes = shots(1);
+    const saved = store.apply('persistent-request', changes);
+    const db = store.projects.db;
+    db.exec("ALTER TABLE studio_batches ADD COLUMN inverse TEXT NOT NULL DEFAULT '[]'; ALTER TABLE studio_batches ADD COLUMN entry_source TEXT NOT NULL DEFAULT 'ui'");
+    const reopened = new StudioStore(store.projects);
+    const columns = db.prepare('PRAGMA table_info(studio_batches)').all().map(item => item.name);
+    expect(columns).not.toContain('inverse');
+    expect(columns).not.toContain('entry_source');
+    expect(reopened.snapshot().shots).toHaveLength(1);
+    expect(reopened.apply('persistent-request', changes)).toEqual(saved);
+    expect(reopened.snapshot().shots).toHaveLength(1);
+  });
+  it('keeps screenplay dialogue in the visible scene body and rejects unsupported scene fields', () => {
+    const schema = new AjvJsonSchemaValidator().getValidator(STUDIO_TOOLS[1].parameters);
+    const content = 'Chloe 嘴唇微动。\n\n**May（平静）**\nWe are not biological siblings.\n\nChloe 抱紧画册。';
+    const scene = { id: 'scene-1', location: '草坪', setting: '外', time: '日', content, suggestedDuration: 52 };
+    const change: StudioChange = { resource: 'episodes', op: 'update', id: 'episode-1', version: 1, values: { scenes: [scene], script: content } };
+    expect(schema({ requestId: 'script-body', changes: [change] }).valid).toBe(true);
+    const invalid = { ...change, values: { scenes: [{ ...scene, dialogue: [{ speaker: 'May', text: '不可见的台词' }] }] } };
+    expect(schema({ requestId: 'hidden-dialogue', changes: [invalid] }).valid).toBe(false);
+    expect(() => store.apply('hidden-dialogue', [invalid])).toThrow('episodes.scenes[0].dialogue 不受支持');
+    expect(store.snapshot().episodes[0]._version).toBe(1);
+    store.apply('script-body', [change]);
+    expect(new StudioStore(store.projects).snapshot().episodes[0]).toMatchObject({ script: content, scenes: [{ content }] });
+    expect(store.query({ resource: 'episodes', describe: true })).toMatchObject({ valuesSchema: { properties: { scenes: { items: { properties: { content: { description: expect.stringContaining('不可把对白从正文拆走') } } } } } } });
+  });
+  it('keeps adaptation settings and outline prop rows in the shared studio schema', () => {
+    expect(store.snapshot().projects[0]).toMatchObject({ adaptation: '抽核', outline: { props: [] } });
+    expect(store.query({ resource: 'projects', describe: true })).toMatchObject({
+      fields: expect.arrayContaining(['adaptation']),
+      defaults: { adaptation: '抽核', outline: { props: [] } },
+      valuesSchema: { properties: { adaptation: { enum: ['忠实', '抽核', '借壳'] } } },
+      structures: { outline: expect.arrayContaining(['props:[{id,name,purpose,involvement}]']) },
+    });
+    store.apply('outline-prop', [{ resource: 'projects', id: projectId, op: 'update', version: 1, values: {
+      adaptation: '忠实',
+      outline: { core: '', story: '', keep: '', remove: '', merge: '', risks: '', episodes: '', roles: [], scenes: [], props: [{ id: 'P01', name: '旧皮夹', purpose: '触发重逢并承载暗号', involvement: 'Chloe / Ethan' }] },
+    } }]);
+    expect(store.snapshot().projects[0]).toMatchObject({ adaptation: '忠实', outline: { props: [{ id: 'P01', name: '旧皮夹' }] } });
+  });
   it('keeps agent tasks human-readable and lets tools read project context', () => {
     expect(studioAgentContent({ action: 'outline', projectId: '6', modelPreferences: { text: 'model' }, prompt: '生成项目大纲' })).toBe('生成项目大纲');
     expect(studioAgentContent({ action: 'rewrite-script', projectId: '6', notes: '加强冲突', prompt: '改写剧本' })).toBe('改写剧本\n\n补充要求：加强冲突');
@@ -82,7 +123,8 @@ describe('shared short drama business service', () => {
     expect(check([{ resource: 'shots', op: 'delete', id: 'shot', version: 1 }]).valid).toBe(true);
     expect(check([{ resource: 'shots', op: 'update', id: 'shot', values: { duration: 4 } }]).valid).toBe(false);
     expect(check([{ resource: 'shots', op: 'update', id: 'shot', version: 1, values: { projectId } }]).valid).toBe(false);
-    expect(validate({ requestId: 'undo', undoBatchId: 'prior' }).valid).toBe(true);
+    expect(validate({ requestId: 'obsolete-operation', undoBatchId: 'prior' }).valid).toBe(false);
+    expect(validate({ requestId: 'missing-changes' }).valid).toBe(false);
   });
 
   it('locates missing references and saves character assets with their shots in one atomic batch', () => {
@@ -160,14 +202,7 @@ describe('shared short drama business service', () => {
     store.apply('delete-shot', [{ resource: 'shots', op: 'delete', id: 'shot-0', version: 2 }]);
     expect(store.snapshot().clips[0]).toMatchObject({ shotIds: ['shot-1'], duration: 3 });
   });
-  it('undoes a batch only while its saved records still match', () => {
-    store.apply('shots', shots(2));
-    store.apply('edit', [{ resource: 'shots', op: 'update', id: 'shot-0', version: 1, values: { description: '新动作' } }]);
-    store.undo('edit', 'undo-edit');
-    expect(store.snapshot().shots[0].description).toBe('动作 0');
-    expect(() => store.undo('edit', 'undo-twice')).toThrow('已发生变化');
-  });
-  it('creates projects through the same batch service and restores archived records without reusing old versions', () => {
+  it('creates and archives projects through the same batch service', () => {
     const result = store.apply('new-project', [{ resource: 'projects', op: 'create', id: 'new-project', values: { title: '第二个项目', summary: '', ratio: '16:9', style_catalog_id: 4 } }]);
     const id = result.changed.find(item => item.resource === 'projects')!.id;
     expect(id).not.toBe('new-project');
@@ -175,9 +210,7 @@ describe('shared short drama business service', () => {
     const version = store.snapshot().projects.find(item => item.id === id)!._version;
     store.apply('archive-project', [{ resource: 'projects', op: 'delete', id, version }]);
     expect(store.projects.get(Number(id))).toBeNull();
-    store.undo('archive-project', 'restore-project');
-    expect(store.projects.get(Number(id))?.name).toBe('第二个项目');
-    expect(store.snapshot().projects.find(item => item.id === id)!._version).toBeGreaterThan(version);
+    expect(store.snapshot().projects.some(item => item.id === id)).toBe(false);
   });
   it('removes an episode and its owned records atomically while preserving shared assets', () => {
     store.apply('episode-content', [
@@ -204,9 +237,6 @@ describe('shared short drama business service', () => {
     expect(result.clips).toEqual([]);
     expect(result.films).toEqual([]);
     expect(result.assets[0].episodeIds).toEqual(['episode-2']);
-    store.undo('delete-episode', 'restore-episode');
-    expect(store.snapshot().clips[0].assetIds).toEqual(['shared-asset']);
-    expect(store.snapshot().assets[0].episodeIds).toEqual(['episode-1', 'episode-2']);
   });
   it('includes appearance and selected costume, while image edits use only the requested source and change', () => {
     const asset = { type: '角色', description: '插画师', appearance: '短发，圆脸', costume: '米色风衣', prompt: '', image: '/api/files/main', variants: [{ id: 'rain', description: '黄色雨衣' }] };
