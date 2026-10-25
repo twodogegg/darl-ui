@@ -3,7 +3,7 @@ import { VoiceOutputParser, voiceOutputFormat } from './voice-output';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { AgentExecutionEvent, AgentSession, AgentToolCall } from '../../../src/index';
+import type { AgentExecutionEvent, AgentToolCall } from '../../../src/index';
 import { defaultModelConfiguration, effectiveCapabilities, enabledBindings, upgradeModelConfiguration, validateModelConfiguration, type ModelConfiguration } from '../../../src/components/settings/model-config';
 import { auth } from '@modelcontextprotocol/sdk/client/auth.js';
 import { applicationCatalog, connectApplication, conversationApplications, createMcpOAuthProvider, loadApplications, saveApplications, MCP_OAUTH_CALLBACK_PATH, McpConnectionManager, toolRisk, ToolConfirmations } from './mcp';
@@ -12,6 +12,7 @@ import { generate, generateWithToolLoop, listModels, publicProvider, runToolLoop
 import { AgentFailure, commandResultError, createAgentError, failure } from './errors';
 import { compactContextMessages, contextCharBudget, normalizeContextPolicy, selectedContext } from './context';
 import { LocalStorage, validateClientState, type ClientState } from './storage';
+import { ChatSessionConflict, ChatSessionStore } from './chat-sessions';
 import { SubAgentThreadLocks, continueSubAgentConversation } from './subagent-conversations';
 import { handleWorkspaceProjectRequest } from './projects';
 import { ProjectStore } from './project-store';
@@ -249,6 +250,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const requestRecords = new RequestRecordStore(storage, files, () => [env.AGENT_CHAT_API_KEY || '', env.FISH_API_KEY || '', ...((storage.getConfig<StoredProvider[]>('providers') || []).map(provider => provider.apiKey)), storage.getConfig<{ apiKey?: string }>('voiceConfiguration')?.apiKey || '']);
   const voiceApi = createVoiceApi(storage, env, requestRecords);
   const skillLibrary = new SkillLibrary(storage);
+  const chatSessions = new ChatSessionStore(storage);
   const runtime = new SkillRuntime(directory, files, skillLibrary);
   const storageSettings = new StorageSettings(storage, files, fileConfig);
   const projectStore = new ProjectStore(storage.path, files);
@@ -439,10 +441,32 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         skillLibrary.delete(decodeURIComponent(path.slice('/api/skills/'.length)));
         return send(200, skillLibrary.list());
       }
-      if (path === '/api/state' && request.method === 'GET') return send(200, { ...storage.getConfig<ClientState>('clientState') || { sessions: [] }, skills: skillLibrary.list() });
+      if (path === '/api/sessions' && request.method === 'GET') return send(200, chatSessions.list());
+      if (path.startsWith('/api/sessions/')) {
+        const id = decodeURIComponent(path.slice('/api/sessions/'.length));
+        if (request.method === 'GET') {
+          const saved = chatSessions.get(id);
+          return saved ? send(200, saved) : send(404, { error: '对话不存在或已删除' });
+        }
+        try {
+          const body = await readBody(request);
+          if (request.method === 'PUT') {
+            if (body.session?.id !== id) throw new Error('聊天记录 ID 不一致');
+            return send(200, chatSessions.save(body.session, body.version));
+          }
+          if (request.method === 'PATCH') return send(200, chatSessions.rename(id, body.title, body.version));
+          if (request.method === 'DELETE') { chatSessions.delete(id, body.version); return send(200, { deleted: true }); }
+        } catch (error) {
+          if (error instanceof ChatSessionConflict) return send(409, { error: error.message });
+          throw error;
+        }
+      }
+      if (path === '/api/state' && request.method === 'GET') return send(200, { sessions: chatSessions.list().map(item => chatSessions.get(item.id)!.session), activeId: storage.getConfig<string>('chatActiveId') || storage.getConfig<ClientState>('clientState')?.activeId, skills: skillLibrary.list() });
       if (path === '/api/state' && request.method === 'POST') {
         const state = validateClientState({ ...await readBody(request), skills: [] });
-        storage.setConfig('clientState', state);
+        try { chatSessions.importLegacy(state.sessions); }
+        catch (error) { if (error instanceof ChatSessionConflict) return send(409, { error: error.message }); throw error; }
+        if (state.activeId) storage.setConfig('chatActiveId', state.activeId);
         return send(200, state);
       }
       if (path === '/api/media-tasks' && request.method === 'GET') return send(200, storage.getMediaTasks<unknown>());
@@ -707,7 +731,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const sessionId = typeof body.sessionId === 'string' && body.sessionId.trim() ? body.sessionId.trim().slice(0, 200) : crypto.randomUUID();
         const userId = typeof request.headers['x-darl-user-id'] === 'string' && request.headers['x-darl-user-id'].trim() ? request.headers['x-darl-user-id'].trim().slice(0, 200) : 'local';
         mcpScopeKey = `${userId}:${sessionId}`;
-        const savedSession = (storage.getConfig<ClientState>('clientState')?.sessions as AgentSession[] | undefined)?.find(session => session?.id === sessionId);
+        const savedSession = chatSessions.get(sessionId)?.session;
         const boundAgentId = typeof savedSession?.agentId === 'string' ? savedSession.agentId : undefined;
         if (boundAgentId && body.agentId !== undefined && body.agentId !== boundAgentId) return send(409, { error: '此对话的 Agent 已固定，请从 Agent 广场开启新对话' });
         const requestedAgentId = boundAgentId || body.agentId;
@@ -1162,5 +1186,5 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     }
   };
   const scopedMiddleware = (request: IncomingMessage, response: ServerResponse, next: () => void) => requestRecordScope.run({ store: requestRecords, requestId: crypto.randomUUID() }, () => middleware(request, response, next));
-  return Object.assign(scopedMiddleware, { dispose: () => { mediaJobs.runner.stop(); requestRecords.close(); return runtime.dispose(); } });
+  return Object.assign(scopedMiddleware, { dispose: () => { mediaJobs.runner.stop(); requestRecords.close(); chatSessions.close(); return runtime.dispose(); } });
 }

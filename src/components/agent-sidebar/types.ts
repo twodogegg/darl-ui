@@ -211,6 +211,8 @@ export interface AgentSession {
   agentId?: string;
   title: string;
   updatedAt?: string;
+  /** Lightweight history preview supplied by hosts that load messages on selection. */
+  messagePreview?: string;
   /** Number of saved messages when a host supplies only session metadata. */
   messageCount?: number;
   messages: AgentMessage[];
