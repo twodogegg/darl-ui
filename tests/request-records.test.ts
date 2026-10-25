@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { LocalStorage } from '../examples/agent-chat/server/storage';
@@ -39,7 +40,7 @@ describe('persistent request records', () => {
   });
 
   it('persists sanitized detail, associations and playable file URLs, keeping snapshots out of the list', async () => {
-    const file = await files.put(Buffer.from('reference file'), 'text/plain', 'reference.txt');
+    const file = await files.put(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jU1sAAAAASUVORK5CYII=', 'base64'), 'image/png', 'reference.png');
     const record = requestRecordScope.run({ store, requestId: 'request-123', sessionId: 'session-456', runId: 'run-789' }, () => begin('image', { parameters: { Authorization: 'Bearer secret', nested: { apiKey: 'private-provider-value' }, binary: new Uint8Array([1,2]), prompt: 'private-provider-value test' }, references: [store.media(file.id, 'image')], results: [store.media(file.id, 'image')] }));
     const persisted = store.get(record.id)!;
     expect(persisted).toMatchObject({ requestId: 'request-123', sessionId: 'session-456', runId: 'run-789' });
@@ -48,7 +49,7 @@ describe('persistent request records', () => {
     expect(store.list({ page: 1, pageSize: 20 }).items[0].parameters).toBeUndefined();
     const listed = store.list({ page: 1, pageSize: 20 }).items[0];
     expect(listed.results).toBeUndefined();
-    expect(listed.thumbnail).toMatchObject({ type: 'image', url: `/api/files/${file.id}`, thumbnailUrl: `/api/files/${file.id}?width=320` });
+    expect(listed.thumbnail).toMatchObject({ type: 'image', url: `/api/files/${file.id}`, thumbnailUrl: `/api/files/${file.id}?width=160` });
     files.forget(file.id);
     expect(store.present(persisted).results?.[0]).toMatchObject({ unavailable: true });
     expect(store.present(persisted).results?.[0].url).toBeUndefined();
@@ -83,6 +84,30 @@ describe('persistent request records', () => {
     expect(store.get(video.id)?.status).toBe('running');
     expect(requestFailureStatus(new DOMException('', 'TimeoutError'))).toBe('timeout');
     expect(requestFailureStatus(new DOMException('', 'AbortError'))).toBe('cancelled');
+  });
+
+  it('cleans historical request signatures on startup while preserving other fields', () => {
+    const record = begin('image');
+    const historical = { ...record, status: 'success', response: { parts: [{ text: '生成完成', thoughtSignature: 'unused-signature', thought_signature: 'legacy-signature' }] } };
+    const database = new DatabaseSync(storage.path);
+    try {
+      database.prepare('UPDATE request_records SET status=?, data=? WHERE id=?').run('success', JSON.stringify(historical), record.id);
+      store.close();
+      store = new RequestRecordStore(storage, files);
+      const expected = { ...historical, response: { parts: [{ text: '生成完成' }] } };
+      expect(store.get(record.id)).toEqual(expected);
+      expect(JSON.parse(database.prepare('SELECT data FROM request_records WHERE id=?').get(record.id)!.data as string)).toEqual(expected);
+    } finally { database.close(); }
+  });
+
+  it('does not persist nested Gemini signatures in request responses', () => {
+    const record = begin('image', { response: { candidates: [{ content: { parts: [
+      { text: '生成完成', thoughtSignature: 'unused-signature' },
+      { thought_signature: 'unused-legacy-signature' },
+    ] } }], usageMetadata: { totalTokenCount: 42 } } });
+    expect(store.get(record.id)?.response).toEqual({ candidates: [{ content: { parts: [
+      { text: '生成完成' }, {},
+    ] } }], usageMetadata: { totalTokenCount: 42 } });
   });
 
   it('strips nested credentials, signed URL tokens, inline media and hidden reasoning while bounding snapshots', () => {

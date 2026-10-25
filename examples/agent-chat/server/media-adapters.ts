@@ -295,7 +295,7 @@ export function geminiImageEndpoint(baseUrl: string, model: string) {
   return new URL(`${root}/v1beta/models/${encodeURIComponent(model)}:generateContent`, base.origin).toString();
 }
 
-/** Keep the Gemini payload for diagnostics, eliding inline image bytes. */
+/** Keep diagnostics without inline image bytes or unused multi-turn signatures. */
 export function geminiResponseRecord(value: unknown) {
   const result = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const candidates = Array.isArray(result.candidates) ? result.candidates : [];
@@ -313,11 +313,12 @@ export function geminiResponseRecord(value: unknown) {
           ...content,
           parts: parts.map((part) => {
             if (!part || typeof part !== 'object') return part;
-            const inline = (part as { inlineData?: unknown }).inlineData;
+            const { thoughtSignature: _, thought_signature: __, ...safePart } = part as Record<string, unknown>;
+            const inline = safePart.inlineData;
             const data = inline && typeof inline === 'object' ? (inline as { data?: unknown }).data : undefined;
-            if (typeof data === 'string') return { ...part, inlineData: { ...(inline as object), data: `<base64 ${data.length} 字符，已保存为文件>` } };
-            const partText = (part as { text?: unknown }).text;
-            return typeof partText === 'string' ? { ...part, text: partText.replace(DATA_IMAGE, '<base64 图片，已保存为文件>') } : part;
+            if (typeof data === 'string') return { ...safePart, inlineData: { ...(inline as object), data: `<base64 ${data.length} 字符，已保存为文件>` } };
+            const partText = safePart.text;
+            return typeof partText === 'string' ? { ...safePart, text: partText.replace(DATA_IMAGE, '<base64 图片，已保存为文件>') } : safePart;
           }),
         },
       };

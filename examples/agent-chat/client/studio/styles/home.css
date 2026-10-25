@@ -59,6 +59,7 @@ h1, h2, p { margin: 0; }
 /* ---------- 参数设置 ---------- */
 .br-settings { margin-top: 12px; padding-top: 13px; border-top: 1px solid var(--br-theme-hairline-10); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .br-field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.br-field--wide { grid-column: 1 / -1; }
 .br-field > label { color: var(--br-theme-ink-38); font-size: 10px; }
 .br-field select, .br-field input { width: 100%; min-width: 0; height: 35px; padding: 0 10px; border: 1px solid var(--br-theme-hairline-13); border-radius: var(--br-radius-xs); background: var(--br-input-bg); color: var(--br-theme-ink-54); font: 400 var(--br-text-caption) var(--br-font-sans); }
 .br-field select:focus, .br-field input:focus { border-color: var(--br-accent); }

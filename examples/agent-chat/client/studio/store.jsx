@@ -4,6 +4,7 @@ import promptCatalog from '../../prompts/studio-prompt-catalog.json'
 import redrawPrompts from '../../prompts/video-redraw.json'
 import { emptyStudioData, studioFields, studioPositions } from '../../studio-schema'
 import { styleOptionsFromCatalog } from '../workspace-styles'
+import { startPolling } from '../polling'
 
 const Store = import.meta.hot?.data.studioContext || createContext(null)
 if (import.meta.hot) import.meta.hot.data.studioContext = Store
@@ -27,22 +28,35 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
   const getModel = (type, modelId) => models.find(model => model.type === type && model.enabled !== false && model.id === (modelId || modelSelections[type] || (type === 'text' ? currentTextModelId : mediaDefaults[type]?.modelId)))
   const state = useRef(data), queue = useRef(Promise.resolve()), failed = useRef(false), count = useRef(0), timer = useRef(), mounted = useRef(true)
   const announce = useCallback(message => { if (!mounted.current) return; clearTimeout(timer.current); setToast(message); timer.current = setTimeout(() => setToast(''), 4000) }, [])
-  const reload = useCallback(async () => {
-    const [next, jobs] = await Promise.all([studioApi('studio/state'), studioApi('media-generation/jobs')])
-    if (mounted.current) setMediaJobs(jobs)
-    if (mounted.current && count.current === 0) { state.current = next; setData(next); setLoading(false) }
-    return next
+  const reloading = useRef(null)
+  const reloadSignal = useRef()
+  const reload = useCallback((signal) => {
+    if (reloading.current && !reloadSignal.current?.aborted) return reloading.current
+    reloadSignal.current = signal
+    const request = Promise.allSettled([
+      studioApi('studio/state', undefined, signal).then(next => {
+        if (!signal?.aborted && mounted.current && count.current === 0) { state.current = next; setData(next); setLoading(false) }
+        return next
+      }),
+      studioApi('media-generation/jobs', undefined, signal).then(jobs => { if (!signal?.aborted && mounted.current) setMediaJobs(jobs) }),
+    ]).then(([next, jobs]) => {
+      if (next.status === 'rejected') throw next.reason
+      if (jobs.status === 'rejected' && !signal?.aborted && mounted.current) setError(jobs.reason.message)
+      else if (!signal?.aborted && mounted.current && !failed.current) setError('')
+      return next.value
+    }).finally(() => { if (reloading.current === request) reloading.current = null })
+    reloading.current = request
+    return request
   }, [])
   useEffect(() => {
     mounted.current = true
-    reload().catch(reason => { setError(reason.message); setLoading(false) })
     const refreshDefaults = () => studioApi('default-models').then(value => { if (mounted.current) setMediaDefaults(value) }).catch(reason => announce(reason.message))
     refreshDefaults()
-    const refresh = () => { if (!count.current) reload().catch(reason => setError(reason.message)) }
-    const interval = setInterval(refresh, 3000)
+    const refresh = () => { if (!count.current) reload().catch(reason => { if (reason.name !== 'AbortError') setError(reason.message) }) }
+    const stop = startPolling(async signal => { if (!count.current) await reload(signal) }, 3000, reason => { setError(reason.message); setLoading(false) })
     window.addEventListener('studio-changed', refresh)
     window.addEventListener('studio-defaults-changed', refreshDefaults)
-    return () => { mounted.current = false; clearInterval(interval); clearTimeout(timer.current); window.removeEventListener('studio-changed', refresh); window.removeEventListener('studio-defaults-changed', refreshDefaults) }
+    return () => { mounted.current = false; stop(); clearTimeout(timer.current); window.removeEventListener('studio-changed', refresh); window.removeEventListener('studio-defaults-changed', refreshDefaults) }
   }, [reload])
   const notify = useCallback(message => {
     if (!count.current) return announce(message)

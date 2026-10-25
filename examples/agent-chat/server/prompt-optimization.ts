@@ -47,7 +47,7 @@ export function createPromptOptimization(storage: LocalStorage, files: FileStore
     const reference = (value: unknown, label: string) => {
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('参考素材参数无效');
       const item = value as Record<string, unknown>;
-      const file = typeof item.fileId === 'string' ? files.get(item.fileId) : undefined;
+      const file = typeof item.fileId === 'string' ? files.get(item.fileId) : files.fromUrl(item.url);
       if (item.fileId && !file) throw new Error('参考素材文件不存在');
       return { label, ...(file ? { fileId: file.id, name: file.name, mimeType: file.mimeType, size: file.size } : {
         ...(typeof item.name === 'string' ? { name: item.name } : {}),
@@ -78,7 +78,7 @@ export function createPromptOptimization(storage: LocalStorage, files: FileStore
     if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
     const item = value as Record<string, unknown>;
     if (typeof item.fileId === 'string') return item.fileId;
-    if (typeof item.url === 'string') return item.url.match(/^\/api\/files\/([^/?#]+)/)?.[1];
+    if (typeof item.url === 'string') return files.fromUrl(item.url)?.id || item.url.match(/^\/api\/files\/([^/?#]+)/)?.[1];
     return undefined;
   };
   const messages = async (body: Record<string, unknown>, value: ReturnType<typeof context>): Promise<ChatMessage[]> => {
@@ -90,7 +90,7 @@ export function createPromptOptimization(storage: LocalStorage, files: FileStore
     const images: ChatImage[] = [];
     for (const item of Array.isArray(raw) ? raw : []) {
       const id = imageId(item);
-      if (!id) continue;
+      if (!id) throw new Error('H3 提示词优化参考图片不可读取，请重新上传或选择图片');
       const stored = await files.getBytes(id);
       if (!stored) throw new Error('H3 提示词优化参考图片不存在');
       if (!/^image\/(?:png|jpe?g|webp|gif)$/i.test(stored.file.mimeType)) throw new Error('H3 提示词优化只支持 PNG、JPEG、WebP 或 GIF 参考图');

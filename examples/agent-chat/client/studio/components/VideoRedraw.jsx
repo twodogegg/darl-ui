@@ -1,6 +1,8 @@
+import { imageUrl } from '../../image-url'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { studioApi, useStore } from '../store'
+import { startPolling } from '../../polling'
 import { Button, Field, Modal, DirectorSelect } from './ui'
 import { Workflow, useProject } from './Shell'
 import { studioDefaults } from '../../../studio-schema'
@@ -21,11 +23,7 @@ function useRedraw(projectId) {
     if (!signal?.aborted) setJobs(value.jobs)
   }
   useEffect(() => {
-    const controller = new AbortController()
-    const run = () => refresh(controller.signal).catch(reason => { if (!controller.signal.aborted) setError(reason.message) })
-    run()
-    const timer = setInterval(run, 2500)
-    return () => { controller.abort(); clearInterval(timer) }
+    return startPolling(refresh, 2500, reason => setError(reason.message))
   }, [projectId])
   async function action(action, options = {}) {
     if (busy) return
@@ -131,7 +129,7 @@ export function RedrawSource({ context }) {
       <section><SourcePlayer source={source} start={preview?.start} end={preview?.end} />
         <p>{source.name || '原始视频'} {source.duration && `· ${source.duration.toFixed(2)} 秒 · ${source.width}×${source.height} · ${source.hasAudio ? '有音轨' : '无音轨'}`}</p>
         <Field label="目标地区与语言"><p>{regions[project.targetRegion]} · {languages[project.targetLanguage]}</p></Field>
-        <details><summary>原片镜头 {source.segments?.length || 0} 个</summary><div className="redraw-frame-grid">{source.segments?.map(segment => <button key={segment.id} onClick={() => setPreview(segment)}><img src={`${segment.frames[1]?.url}?width=320`} alt="" /><span>{sourceTime(segment.start)} – {sourceTime(segment.end)}</span></button>)}</div></details>
+        <details><summary>原片镜头 {source.segments?.length || 0} 个</summary><div className="redraw-frame-grid">{source.segments?.map(segment => <button key={segment.id} onClick={() => setPreview(segment)}><img loading="lazy" src={imageUrl(segment.frames[1]?.url, 320)} alt="" /><span>{sourceTime(segment.start)} – {sourceTime(segment.end)}</span></button>)}</div></details>
       </section>
       <section className="redraw-analysis">
         <h3>拉片与目标改编</h3><DirectorSelect label="转绘导演" disabled={running || busy} />
@@ -152,7 +150,7 @@ export function RedrawSource({ context }) {
       <p>应用前核对原片与目标描述；应用后可在分镜表、资产页编辑。再次分析不会自动覆盖已保存内容。</p>
       {draftShots.map(shot => { const segment = latest.segments.find(segment => segment.id === shot.segmentId); return <article key={shot.segmentId}>
         <label><input type="checkbox" checked={selectedIds.includes(shot.segmentId)} onChange={event => setSelected({ jobId: latest.id, ids: event.target.checked ? [...selectedIds, shot.segmentId] : selectedIds.filter(id => id !== shot.segmentId) })} />{sourceTime(segment.start)} – {sourceTime(segment.end)} {latest.applied?.includes(shot.segmentId) && '已应用'}</label>
-        <button className="redraw-thumb" onClick={() => setPreview(segment)}><img src={`${segment.frames[1]?.url}?width=320`} alt="回看原镜头" /></button>
+        <button className="redraw-thumb" onClick={() => setPreview(segment)}><img loading="lazy" src={imageUrl(segment.frames[1]?.url, 320)} alt="回看原镜头" /></button>
         <div><strong>原片</strong><p>{shot.description}</p><p>{shot.dialogue || '未识别对白'}</p></div><div><strong>目标 · {regions[project.targetRegion]} / {languages[project.targetLanguage]}</strong><p>{shot.targetDescription}</p>{shot.targetDialogue.map((line, index) => <p key={index}>{line.text}</p>)}</div>
         {shot.notes && <p role="note">待核对：{shot.notes}</p>}
       </article> })}
@@ -192,7 +190,7 @@ export function SupplementAsset({ context, onClose }) {
 export function SourceEvidence({ source }) {
   if (!source) return null
   return <section className="redraw-evidence"><strong>原始参考 · {source.name || ''} {sourceTime(source.start)} – {sourceTime(source.end)}</strong>
-    <div>{source.frames?.map(frame => <img key={frame.fileId} src={`${frame.url}?width=320`} alt={`原片 ${sourceTime(frame.time)}`} />)}</div>
+    <div>{source.frames?.map(frame => <img loading="lazy" key={frame.fileId} src={imageUrl(frame.url, 320)} alt={`原片 ${sourceTime(frame.time)}`} />)}</div>
     <p>{source.description}</p>{source.dialogue && <p>原对白：{source.dialogue}</p>}{source.notes && <p>待核对：{source.notes}</p>}
   </section>
 }

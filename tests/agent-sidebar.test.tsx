@@ -535,6 +535,30 @@ describe('AgentSidebar', () => {
     await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('const value = `<Picture 1>`;'));
   });
 
+  it('displays and searches metadata previews without loading message bodies', () => {
+    const onSessionChange = vi.fn();
+    render(<AgentSidebar open onOpenChange={() => {}} sessions={[{ id: 'lazy', title: '历史对话', messagePreview: '仅目录中的简短预览', messages: [] }]} onSessionChange={onSessionChange} />);
+    fireEvent.click(screen.getByRole('button', { name: '查看历史记录' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索对话' }), { target: { value: '简短预览' } });
+    expect(screen.getByText('历史对话')).toBeInTheDocument();
+    expect(screen.getByText('仅目录中的简短预览')).toBeInTheDocument();
+    expect(onSessionChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /历史对话 仅目录/ }));
+    expect(onSessionChange).toHaveBeenCalledWith('lazy');
+  });
+
+  it('hides empty drafts while retaining saved metadata and sent attachment messages', () => {
+    render(<AgentSidebar open hideEmptySessions onOpenChange={() => {}} sessions={[
+      { id: 'draft', title: '没有发送的草稿', messages: [] },
+      { id: 'metadata', title: '尚未加载的真实历史', messageCount: 2, messages: [] },
+      { id: 'sent', title: '已发送附件', messages: [{ id: 'file', role: 'user', content: '', attachments: ['附件.txt'] }] },
+    ]} />);
+    fireEvent.click(screen.getByRole('button', { name: '查看历史记录' }));
+    expect(screen.queryByText('没有发送的草稿')).not.toBeInTheDocument();
+    expect(screen.getByText('尚未加载的真实历史')).toBeInTheDocument();
+    expect(screen.getByText('已发送附件')).toBeInTheDocument();
+  });
+
   it('支持打开历史记录和创建新对话', () => {
     const onNewSession = vi.fn();
     const onSessionChange = vi.fn();

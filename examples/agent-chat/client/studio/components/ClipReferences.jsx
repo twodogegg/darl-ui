@@ -1,3 +1,4 @@
+import { imageUrl } from '../../image-url'
 import { useState } from 'react'
 import { ReferencePicker, MediaPreview } from './ui'
 import { useStore } from '../store'
@@ -38,7 +39,7 @@ export default function ClipReferences({ clip, projectId }) {
                   disabled={!a.image}
                   onClick={() => setPreview({ name: a.name, url: a.image })}
                 >
-                  {a.image && <img className="sb-asset-chip__thumb" src={a.image} alt="" />}
+                  {a.image && <img loading="lazy" className="sb-asset-chip__thumb" src={imageUrl(a.image, 160)} alt="" />}
                   <span className="sb-asset-chip__name">{a.name}{!a.image && '（未生成图片）'}</span>
                 </button>
                 <button
@@ -59,7 +60,7 @@ export default function ClipReferences({ clip, projectId }) {
           </button>
         </div>
       ))}
-      {frames.length > 0 && <div className="sb-ref-row-wrap"><span className="sb-asset-label">分镜参考图</span>{frames.map(frame => <button className="sb-asset-chip" key={frame.id} onClick={() => setPreview(frame)}><img className="sb-asset-chip__thumb" src={frame.url} alt="" /><span>{frame.name}</span></button>)}</div>}
+      {frames.length > 0 && <div className="sb-ref-row-wrap"><span className="sb-asset-label">分镜参考图</span>{frames.map(frame => <button className="sb-asset-chip" key={frame.id} onClick={() => setPreview(frame)}><img loading="lazy" className="sb-asset-chip__thumb" src={imageUrl(frame.url, 160)} alt="" /><span>{frame.name}</span></button>)}</div>}
       <fieldset className="clip-voices">
         <legend>音色引用</legend>
         {voices.map((voice) => <div className="clip-voice-row" key={voice.id}>
@@ -75,7 +76,7 @@ export default function ClipReferences({ clip, projectId }) {
           <span className="sb-asset-chip" key={r.id}>
             <button className="sb-chip-open" onClick={() => setPreview(r)}>
               {r.kind === 'image' && (
-                <img className="sb-asset-chip__thumb" src={r.url} alt="" />
+                <img loading="lazy" className="sb-asset-chip__thumb" src={imageUrl(r.url, 160)} alt="" />
               )}
               <span className="sb-asset-chip__name">{r.name}</span>
             </button>

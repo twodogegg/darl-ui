@@ -61,7 +61,7 @@ export function readMedia(file, kind = 'image') {
           resolve({
           id: crypto.randomUUID(),
           name: file.name,
-          url: `/api/files/${saved.fileId}`,
+          url: saved.url || `/api/files/${saved.fileId}`,
           fileId: saved.fileId,
           kind,
         })

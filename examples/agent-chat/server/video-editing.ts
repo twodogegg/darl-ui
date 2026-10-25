@@ -16,14 +16,7 @@ const readBody = async (request: IncomingMessage) => {
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
 };
 
-const fileIdFromUrl = (value: unknown) => {
-  if (typeof value !== 'string') throw new Error('视频来源无效');
-  const match = value.match(/^\/api\/files\/([a-f0-9-]+)(?:\?.*)?$/);
-  if (!match) throw new Error('只能剪辑已保存到文件服务的视频');
-  return match[1];
-};
-
-function selectionsFromInput(value: unknown): Selection[] {
+function selectionsFromInput(value: unknown, files: FileStore): Selection[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > 80) throw new Error('请选择 1–80 个视频片段');
   return value.map((item, index) => {
     if (!item || typeof item !== 'object') throw new Error(`第 ${index + 1} 个视频片段无效`);
@@ -31,7 +24,9 @@ function selectionsFromInput(value: unknown): Selection[] {
     const start = Number(source.start ?? 0);
     const end = source.end === undefined || source.end === null || source.end === '' ? undefined : Number(source.end);
     if (!Number.isFinite(start) || start < 0 || (end !== undefined && (!Number.isFinite(end) || end <= start))) throw new Error(`第 ${index + 1} 个视频的裁剪区间无效`);
-    return { fileId: fileIdFromUrl(source.url), start, ...(end === undefined ? {} : { end }) };
+    const file = files.fromUrl(source.url);
+    if (!file || file.mimeType !== 'video/mp4') throw new Error('只能剪辑已保存到文件服务的视频');
+    return { fileId: file.id, start, ...(end === undefined ? {} : { end }) };
   });
 }
 
@@ -40,7 +35,7 @@ export class VideoEditing {
 
   async compose(input: Record<string, unknown>, signal: AbortSignal) {
     const ratio = typeof input.ratio === 'string' && /^\d+:\d+$/.test(input.ratio) ? input.ratio : '16:9';
-    return composeVideo(this.files, selectionsFromInput(input.selections), ratio, signal);
+    return composeVideo(this.files, selectionsFromInput(input.selections, this.files), ratio, signal);
   }
 }
 

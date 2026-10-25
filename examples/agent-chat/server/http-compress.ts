@@ -51,7 +51,8 @@ export function gzipApiResponses() {
       const type = String(headers['Content-Type'] ?? headers['content-type'] ?? response.getHeader('content-type') ?? '');
       const encoding = headers['Content-Encoding'] ?? headers['content-encoding'] ?? response.getHeader('content-encoding');
       const length = Number(headers['Content-Length'] ?? headers['content-length'] ?? response.getHeader('content-length') ?? 0);
-      compress = !headFlushed && COMPRESSIBLE.test(type) && !STREAMING.test(type) && !encoding && (length === 0 || length >= MIN_SIZE);
+      const status = Number(headArgs?.[0] ?? response.statusCode);
+      compress = !headFlushed && status !== 204 && status !== 304 && COMPRESSIBLE.test(type) && !STREAMING.test(type) && !encoding && (length === 0 || length >= MIN_SIZE);
       return compress;
     };
 

@@ -50,7 +50,7 @@ export async function withVideoFiles<T>(files: FileStore, fileIds: string[], fn:
 export async function extractFrame(files: FileStore, path: string, root: string, time: number, signal: AbortSignal): Promise<SourceFrame> {
   const [frame] = await extractVideoFrames(path, root, [time], signal);
   const file = await files.put(await readFile(frame.path), 'image/jpeg', `原片参考-${frame.time.toFixed(3)}.jpg`);
-  return { fileId: file.id, time: frame.time, url: `/api/files/${file.id}` };
+  return { fileId: file.id, time: frame.time, url: files.originalUrl(file)! };
 }
 
 /** Sheets are request-local; original frame file IDs remain the source evidence. */
@@ -86,12 +86,12 @@ export async function prepareVideo(files: FileStore, fileId: string, signal: Abo
       const start = points[index], end = points[index + 1], frames: SourceFrame[] = [];
       for (const frame of extracted.slice(index * 3, index * 3 + 3)) {
         const file = await files.put(await readFile(frame.path), 'image/jpeg', `原片参考-${frame.time.toFixed(3)}.jpg`);
-        frames.push({ fileId: file.id, time: frame.time, url: `/api/files/${file.id}` });
+        frames.push({ fileId: file.id, time: frame.time, url: files.originalUrl(file)! });
       }
       const segment = { id: crypto.randomUUID(), start, end, frames };
       segments.push(segment); onSegment(segment);
     }
-    return { ...info, fileId, url: `/api/files/${fileId}`, segments };
+    return { ...info, fileId, url: files.originalUrl(fileId)!, segments };
   });
 }
 
@@ -116,6 +116,6 @@ export async function composeVideo(files: FileStore, selections: Array<{ fileId:
     await videoCommand('ffmpeg', ['-y', '-f', 'concat', '-safe', '1', '-i', join(root, 'parts.txt'), '-c', 'copy', '-movflags', '+faststart', output], signal);
     const info = await probeVideo(output, signal);
     const file = await files.put(await readFile(output), 'video/mp4', '视频转绘成片.mp4');
-    return { fileId: file.id, url: `/api/files/${file.id}`, ...info };
+    return { fileId: file.id, url: files.originalUrl(file)!, ...info };
   });
 }

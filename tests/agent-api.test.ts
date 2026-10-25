@@ -16,7 +16,7 @@ async function withApi(directory: string, promptFile: string, test: (request: (p
   const port = (server.address() as AddressInfo).port;
   try {
     await test((path, body, method = body ? 'POST' : 'GET') => new Promise<Response>((resolve, reject) => {
-      const req = httpRequest(`http://127.0.0.1:${port}/api/${path}`, { method, headers: { Host: '127.0.0.1:5197', ...(body ? { 'Content-Type': 'application/json' } : {}) } }, (res) => {
+      const req = httpRequest(`http://127.0.0.1:${port}/api/${path}`, { method, headers: { Host: '127.0.0.1:5197', ...(body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(JSON.stringify(body)) } : {}) } }, (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
         res.on('error', reject);
@@ -25,7 +25,7 @@ async function withApi(directory: string, promptFile: string, test: (request: (p
       req.on('error', reject);
       req.end(body ? JSON.stringify(body) : undefined);
     }));
-  } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
+  } finally { await new Promise<void>((resolve) => server.close(() => resolve())); await middleware.dispose(); }
 }
 function dbJson<T>(directory: string, key: string): T {
   const database = new DatabaseSync(join(directory, 'data.sqlite'));
@@ -35,6 +35,83 @@ function dbJson<T>(directory: string, key: string): T {
 }
 
 describe('Agent configuration API', () => {
+  it('never creates empty conversations or replaces sent messages with an empty snapshot', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'darl-chat-empty-'));
+    const promptFile = join(directory, 'system.md');
+    await writeFile(promptFile, '默认提示词');
+    try {
+      await withApi(directory, promptFile, async request => {
+        const draft = { id: 'draft', title: '新对话', messages: [] };
+        expect((await request('sessions/draft', { session: draft, version: 0 }, 'PUT')).status).toBe(400);
+        expect((await request('state', { sessions: [draft], skills: [] })).status).toBe(200);
+        expect(await (await request('sessions')).json()).toEqual([]);
+        const sent = { ...draft, messages: [{ id: 'user', role: 'user', content: '实际发送的消息' }] };
+        expect((await request('sessions/draft', { session: sent, version: 0 }, 'PUT')).status).toBe(200);
+        expect((await (await request('sessions')).json())[0]).toMatchObject({ messageCount: 1, messages: [] });
+        expect((await request('sessions/draft', { session: draft, version: 1 }, 'PUT')).status).toBe(400);
+        expect((await (await request('sessions/draft')).json()).session.messages).toEqual(sent.messages);
+      });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
+  it('migrates history, lists only metadata and preserves messages across restarts and stale snapshots', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'darl-chat-history-'));
+    const promptFile = join(directory, 'system.md');
+    await writeFile(promptFile, '默认提示词');
+    const session = { id: 'history', agentId: 'default', title: '历史会话', messages: [{ id: 'user', role: 'user', content: '需要保留的原始消息' }, { id: 'answer', role: 'assistant', content: '历史回复正文'.repeat(200) }] };
+    const storage = new LocalStorage(directory);
+    storage.setConfig('clientState', { sessions: [session], skills: [], activeId: session.id });
+    try {
+      await withApi(directory, promptFile, async request => {
+        const catalog = await (await request('sessions')).json();
+        expect(catalog).toEqual([expect.objectContaining({ id: session.id, messages: [], version: 1 })]);
+        expect(catalog[0].messagePreview).toHaveLength(160);
+        expect(JSON.stringify(catalog)).not.toContain(session.messages[0].content);
+        expect(await (await request('sessions/history')).json()).toEqual({ session, version: 1 });
+        // A failed hydration in an old tab must not delete any saved conversation.
+        expect((await request('state', { sessions: [], skills: [] })).ok).toBe(true);
+        expect((await request('state', { sessions: [{ ...session, messages: [] }], skills: [] })).status).toBe(200);
+        const other = { id: 'other', title: '另一条对话', messages: [{ id: 'other-user', role: 'user', content: '第二条消息' }] };
+        expect((await request('sessions/other', { session: other, version: 0 }, 'PUT')).ok).toBe(true);
+        expect((await (await request('sessions')).json())).toHaveLength(2);
+      });
+      await withApi(directory, promptFile, async request => {
+        expect(await (await request('sessions/history')).json()).toEqual({ session, version: 1 });
+        expect(await (await request('sessions')).json()).toHaveLength(2);
+        expect(dbJson<{ sessions: unknown[] }>(directory, 'clientState').sessions).toEqual([session]);
+      });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
+  it('rejects stale saves and deletes, renames without losing messages and never resurrects deleted history', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'darl-chat-versions-'));
+    const promptFile = join(directory, 'system.md');
+    await writeFile(promptFile, '默认提示词');
+    const session = { id: 'one', title: '会话', messages: [{ id: 'message', role: 'user', content: '服务重启后也保留' }] };
+    new LocalStorage(directory).setConfig('clientState', { sessions: [session], skills: [] });
+    try {
+      await withApi(directory, promptFile, async request => {
+        expect((await request('sessions/one', { session, version: 0 }, 'PUT')).status).toBe(409);
+        expect((await request('sessions/one', { session: { ...session, title: '更新' }, version: 1 }, 'PUT')).status).toBe(200);
+        expect((await request('sessions/one', { session, version: 1 }, 'PUT')).status).toBe(409);
+        expect((await request('sessions/one', { version: 1 }, 'DELETE')).status).toBe(409);
+        expect((await request('sessions/one', { title: '改名', version: 2 }, 'PATCH')).status).toBe(200);
+        expect(await (await request('sessions/one')).json()).toEqual({ session: expect.objectContaining({ title: '改名', messages: session.messages }), version: 3 });
+        expect((await request('sessions/one', { session: { ...session, messages: null }, version: 3 }, 'PUT')).status).toBe(400);
+        expect((await request('sessions/wrong', { session, version: 3 }, 'PUT')).status).toBe(400);
+        expect((await request('sessions/one', { version: 3 }, 'DELETE')).status).toBe(200);
+        expect((await request('sessions/one', { session, version: 0 }, 'PUT')).status).toBe(409);
+        expect((await request('sessions/one')).status).toBe(404);
+      });
+      await withApi(directory, promptFile, async request => {
+        expect(await (await request('sessions')).json()).toEqual([]);
+        expect((await request('sessions/one')).status).toBe(404);
+        await request('state', { sessions: [session], skills: [] });
+        expect(await (await request('sessions')).json()).toEqual([]);
+      });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
   it('exposes the actual runtime schemas alongside media tools', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'darl-runtime-tools-'));
     const promptFile = join(directory, 'system.md');
@@ -78,7 +155,7 @@ describe('Agent configuration API', () => {
     await writeFile(promptFile, '默认提示词');
     try {
       await withApi(directory, promptFile, async request => {
-        const sessions = [{ id: 'one', agentId: 'art', title: '会话', messages: [] }];
+        const sessions = [{ id: 'one', agentId: 'art', title: '会话', messages: [{ id: 'user-1', role: 'user', content: '你好' }] }];
         expect((await request('state', { sessions, skills: [], activeId: 'one' })).ok).toBe(true);
         expect((await (await request('state')).json()).sessions).toEqual(sessions);
         const denied = await request('chat', { sessionId: 'one', agentId: 'writer', messages: [{ role: 'user', content: '你好' }] });
@@ -272,7 +349,7 @@ describe('Agent configuration API', () => {
     await writeFile(promptFile, '默认提示词');
     try {
       await withApi(directory, promptFile, async (request) => {
-        const state = { sessions: [{ id: 's1', title: '小说', messages: [] }], activeId: 's1', skills: [] };
+        const state = { sessions: [{ id: 's1', title: '小说', messages: [{ id: 'user-1', role: 'user', content: '小说创作' }] }], activeId: 's1', skills: [] };
         const skill = { id: 'skill-1', name: '编剧', description: '按场次写作', instructions: '按场次输出', version: '1.0' };
         expect((await request('skills', { skill })).ok).toBe(true);
         expect((await request('state', state)).status).toBe(200);

@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { MediaJobStore } from '../examples/agent-chat/server/media-job-store';
 import { FileStore } from '../examples/agent-chat/server/file-storage';
 import { persistMediaReferencesInStore, resolveMediaReferencesInStore } from '../examples/agent-chat/server/media-references';
@@ -10,6 +11,27 @@ import { persistMediaReferencesInStore, resolveMediaReferencesInStore } from '..
 const createStore = (path: string) => new MediaJobStore(path, new FileStore(path));
 
 describe('SQLite media generation queue',()=>{
+  it('cleans historical signatures on startup without changing job state or result files', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'media-signatures-'));
+    try {
+      const path = join(dir, 'db.sqlite'), store = createStore(path);
+      const job = store.create({ modelId: 'gemini-3-pro-image-preview', type: 'image', prompt: 'A', providerId: 'darl', upstreamModelId: 'gemini-3-pro-image-preview', baseUrl: 'https://example.invalid', options: {} });
+      job.status = 'completed'; job.resultFileIds = ['saved-image'];
+      const original = { ...job, providerResponse: { candidates: [{ content: { parts: [
+        { text: '生成完成', thoughtSignature: 'unused-signature' },
+        { thought_signature: 'unused-legacy-signature' },
+      ] } }] } };
+      const database = new DatabaseSync(path);
+      try {
+        database.prepare('UPDATE media_generation_jobs SET data=? WHERE id=?').run(JSON.stringify(original), job.id);
+        const expected = { ...job, providerResponse: { candidates: [{ content: { parts: [{ text: '生成完成' }, {}] } }] } };
+        expect(createStore(path).get(job.id)).toEqual(expected);
+        expect(JSON.parse(database.prepare('SELECT data FROM media_generation_jobs WHERE id=?').get(job.id)!.data as string)).toEqual(expected);
+        expect(createStore(path).get(job.id)).toEqual(expected);
+      } finally { database.close(); }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it('persists audio and video references by file ID, checks their MIME types, and protects them from deletion', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'media-references-'));
     try {

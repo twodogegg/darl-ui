@@ -1,3 +1,4 @@
+import { sendRevalidatedJson } from './http-cache';
 import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { dirname, join } from 'node:path';
@@ -37,8 +38,9 @@ async function body(req:IncomingMessage, limit=100_000) {
   return JSON.parse(data) as Record<string,unknown>;
 }
 /** Resolve stored result files to original/thumbnail URLs without leaking provider credentials. */
-function presentJob(job: import('./media-job-store').MediaJob, files: FileStore) {
-  const { baseUrl: _, ...safe } = job;
+function presentJob(job: import('./media-job-store').MediaJob, files: FileStore, summary = false) {
+  const { baseUrl: _, providerResponse, ...fields } = job;
+  const safe = summary ? fields : { ...fields, ...(providerResponse ? { providerResponse } : {}) };
   const resultFiles = (job.resultFileIds || []).flatMap((id) => {
     const file = files.get(id);
     if (!file) return [];
@@ -136,7 +138,7 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
     const method=req.method||'GET';
     try{
       if(path==='/api/media-generation/jobs' && method==='GET'){
-        reply(res,200,store.list().map((job)=>presentJob(job,files)));return true;
+        sendRevalidatedJson(req,res,store.list().map((job)=>presentJob(job,files,true)));return true;
       }
       if(path==='/api/media-generation/limits' && method==='GET'){reply(res,200,store.limits());return true;}
       if(path==='/api/media-generation/limits' && method==='POST'){

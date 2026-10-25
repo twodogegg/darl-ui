@@ -1,3 +1,4 @@
+import { startPolling } from './polling';
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { MediaWorkspace, toMediaModels, type GenerateRequest, type MediaInput, type MediaModel, type MediaStyleOption, type MediaTask, type MediaWorkspaceProps, type ModelConfiguration, type StyleCreateRequest } from '@darl/ui';
@@ -7,13 +8,13 @@ import { optimizeMediaPrompt } from './prompt-optimization';
 import { createWorkspaceStyle, styleOptionsFromCatalog, type StyleCatalog } from './workspace-styles';
 import type { UploadContext } from '../../../src/components/file-uploader/types';
 
-async function request<T>(path: string, body?: unknown, method?: string): Promise<T> {
+async function request<T>(path: string, body?: unknown, method?: string, signal?: AbortSignal): Promise<T> {
   const init: RequestInit = body instanceof FormData
     ? { method: method || 'POST', body }
     : body
       ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
       : method ? { method } : {};
-  const response = await fetch(`/api/${path}`, init);
+  const response = await fetch(`/api/${path}`, { ...init, signal });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : data.error?.message || `请求失败：HTTP ${response.status}`);
   return data as T;
@@ -85,14 +86,15 @@ export function MediaGenerationPage({ onBack, initialTaskId, renderReferencePick
 
   useEffect(() => {
     let alive = true;
-    const bootstrap = async () => {
+    let initialized = false;
+    const bootstrap = async (signal: AbortSignal) => {
       try {
         const [configuration, jobs, styleCatalog] = await Promise.all([
-          request<ModelConfiguration>('model-config'),
-          request<MediaJob[]>('media-generation/jobs'),
-          request<{ data: StyleCatalog }>('workspace/styles'),
+          request<ModelConfiguration>('model-config', undefined, undefined, signal),
+          request<MediaJob[]>('media-generation/jobs', undefined, undefined, signal),
+          request<{ data: StyleCatalog }>('workspace/styles', undefined, undefined, signal),
         ]);
-        if (!alive) return;
+        if (!alive || signal.aborted) return;
         setModels(supportedModels(configuration));
         setStyles(styleOptionsFromCatalog(styleCatalog.data || {}));
         const loaded = jobsToTasks(standaloneMediaJobs(jobs));
@@ -101,16 +103,17 @@ export function MediaGenerationPage({ onBack, initialTaskId, renderReferencePick
         setActiveTaskId(loaded.find(task => task.id === initialTaskId)?.id || loaded[0]?.id || draft.id);
         if (initialTaskId && !loaded.some(task => task.id === initialTaskId)) setError(jobs.some(job => (job.taskId || job.id) === initialTaskId && job.options.studioTarget) ? '该任务属于剧本项目，请在对应项目的生成历史中查看' : '关联媒体任务已删除');
       } catch (reason) {
-        if (alive) setError(reason instanceof Error ? reason.message : '无法读取模型或任务');
+        if (alive && !signal.aborted) setError(reason instanceof Error ? reason.message : '无法读取模型或任务');
       } finally {
-        if (alive) setLoading(false);
+        if (alive && !signal.aborted) { setLoading(false); initialized = true; }
       }
     };
-    void bootstrap();
-    const timer = setInterval(() => {
-      request<MediaJob[]>('media-generation/jobs').then((jobs) => { if (alive) mergeJobs(jobs); }).catch(() => {});
-    }, 2500);
-    return () => { alive = false; clearInterval(timer); };
+    const stop = startPolling(async signal => {
+      if (!initialized) return bootstrap(signal);
+      const jobs = await request<MediaJob[]>('media-generation/jobs', undefined, undefined, signal);
+      if (alive && !signal.aborted) mergeJobs(jobs);
+    }, 2500, reason => { if (alive) setError(reason.message); });
+    return () => { alive = false; stop(); };
   }, [mergeJobs, initialTaskId]);
 
   const createTask = () => {

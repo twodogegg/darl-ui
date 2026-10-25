@@ -37,6 +37,13 @@ describe('提示词优化上下文与配置', () => {
       const h3Body = { ...input, optimization: 'h3', modelId: 'minimax-h3-flash', mode: 'reference', references: { images: [{ fileId: file.id }] } };
       const h3Messages = await api.messages(h3Body, api.context(h3Body, configuration));
       expect(h3Messages).toMatchObject([{ role: 'user', content: [{ type: 'text' }, { type: 'image', fileId: file.id, mimeType: 'image/png' }] }]);
+      const urlBody = { ...h3Body, references: { images: [{ url: files.originalUrl(file) }, { url: files.thumbnailUrl(file, 160) }] } };
+      const urlContext = api.context(urlBody, configuration);
+      expect(urlContext.references.images).toMatchObject([{ fileId: file.id, label: '<Picture 1>' }, { fileId: file.id, label: '<Picture 2>' }]);
+      const urlMessages = await api.messages(urlBody, urlContext);
+      expect(urlMessages).toMatchObject([{ content: [{ type: 'text' }, { type: 'image', fileId: file.id, data: (await files.getBytes(file.id))!.bytes.toString('base64') }, { type: 'image', fileId: file.id }] }]);
+      const unreadableBody = { ...h3Body, references: { images: [...urlBody.references.images, { url: '/unreadable-reference.png' }] } };
+      await expect(api.messages(unreadableBody, api.context(unreadableBody, configuration))).rejects.toThrow('参考图片不可读取');
       api.saveModels(defaults, configuration, providers);
       expect(createPromptOptimization(new LocalStorage(directory), files).models(configuration, providers)).toEqual(defaults);
       storage.setConfig('optimization', '自定义规则');

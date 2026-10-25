@@ -1,3 +1,4 @@
+import { imageUrl } from '../../image-url'
 import { useState } from 'react'
 import { useStore, useAgentTask } from '../store'
 import { id, types } from '../data'
@@ -241,7 +242,7 @@ export default function Assets() {
                   className="library-image"
                   onClick={() => setPreview({ name: a.name, url: a.image })}
                 >
-                  {a.image ? <img src={a.image} alt={a.name} /> : <span className="studio-cover-empty">暂无图片</span>}
+                  {a.image ? <img loading="lazy" src={imageUrl(a.image, 320)} alt={a.name} /> : <span className="studio-cover-empty">暂无图片</span>}
                 </button>
                 <div className="library-card-body">
                   <h3>{a.name}</h3>
@@ -337,9 +338,9 @@ export default function Assets() {
             }
           >
             <div className="form-stack">
-              <img
+              <img loading="lazy"
                 className="edit-library-image"
-                src={editing.image}
+                src={imageUrl(editing.image, 1024)}
                 alt="素材预览"
               />
               <FileButton

@@ -1,3 +1,4 @@
+import { sendRevalidatedJson } from './http-cache';
 import { randomUUID, createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -191,7 +192,7 @@ export class VideoRedraw {
         const inputs = selections.map(selection => {
           const clip = state.clips.find(clip => clip.id === selection.clipId), episode = state.episodes.find(episode => episode.id === clip?.episodeId);
           if (!clip || episode?.projectId !== project.id || typeof clip.currentVideo !== 'string') throw new Error('所选片段不属于项目或尚未选用视频');
-          const fileId = clip.currentVideo.match(/^\/api\/files\/([\w-]+)$/)?.[1];
+          const fileId = this.files.fromUrl(clip.currentVideo)?.id;
           if (!fileId) throw new Error('请先将生成结果保存到文件服务并选用');
           return { fileId, start: selection.start ?? 0, ...(selection.end === undefined ? {} : { end: selection.end }) };
         });
@@ -338,7 +339,7 @@ export async function handleRedrawRequest(req: IncomingMessage, res: ServerRespo
   const send = (code: number, value: unknown) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
   if (!isLocalOrLanAddress(req.socket.remoteAddress)) { send(403, { error: '仅允许本机或局域网' }); return true; }
   try {
-    if (req.method === 'GET') send(200, service.read({ projectId: url.searchParams.get('projectId'), describe: url.searchParams.has('describe') }));
+    if (req.method === 'GET') sendRevalidatedJson(req, res, service.read({ projectId: url.searchParams.get('projectId'), describe: url.searchParams.has('describe') }));
     else if (req.method === 'POST' && url.pathname === '/api/video-redraw/action') {
       let body = '';
       for await (const chunk of req) { body += chunk.toString(); if (Buffer.byteLength(body) > 1024 * 1024) throw new Error('请求超过1MB'); }

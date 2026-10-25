@@ -1,3 +1,4 @@
+import { imageUrl } from '../../image-url'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { StyleSelector } from '@darl/ui'
@@ -171,7 +172,7 @@ function ArtWorkspace({ context }) {
                       >
                         {a.image ? (
                           <img
-                            src={a.image}
+                            src={imageUrl(a.image, 320)}
                             alt={a.name}
                             loading="lazy"
                             decoding="async"

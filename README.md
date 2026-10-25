@@ -29,8 +29,9 @@ Agent Chat 的素材上传、命名字体、项目封面和媒体结果统一通
 
 - 「设置 → 存储」可配置本地 / COS 并测试真实写入和删除；配置保存在服务端 SQLite，SecretKey 不返回浏览器，且配置接口只接受本机回环地址。首次运行也支持用环境变量提供默认值：`STORAGE_MODE`、`LOCAL_STORAGE_ROOT`、`COS_SECRET_ID`、`COS_SECRET_KEY`、`COS_REGION`、`COS_BUCKET`、`COS_SCHEME`、`COS_PUBLIC_BASE_URL`、`COS_OBJECT_PREFIX`。
 - 文件按 SHA-256 内容去重，数据库只保存文件元数据和业务引用，不把大 Base64 写入任务行或项目封面 BLOB。
-- 原图接口为 `/api/files/:fileId`；缩略图通过 `?width=160|320|1024` 实时生成。COS 使用 `imageMogr2`，本地使用 `sharp` 生成等价 WebP。
-- 媒体图片卡片使用 320px 缩略图，点击详情才加载原图；视频卡片首次渲染不挂视频源，点击播放后才请求并支持 Range。
+- 数据库存原图 URL，原图只保存一份；展示尺寸为列表/引用标签 160px、素材卡片 320px、画布节点 640px、详情预览 1024px。COS 使用 `?imageMogr2/thumbnail/宽度x/quality/80/format/webp` 实时处理，缓存键须保留处理参数；本地 `/api/files/:fileId?width=160|320|640|1024` 使用 `sharp` 返回等价 WebP。COS 文件的旧 `/api/files/:fileId` 链接重定向到存储域名，媒体传输不经过应用服务器。
+- 图片列表懒加载，放大原图、下载和 AI 参考素材使用原图；视频卡片首次渲染不挂视频源，点击播放后才请求并支持 Range。
+- 首屏 Skills 只返回目录，管理界面按需读取完整资源；工作台、生成任务和视频转绘轮询等待请求完成后再继续，隐藏页面暂停，未变化快照通过 ETag/304 避免重复传输。任务列表返回摘要，供应商诊断响应保留在详情；不需要多轮改图的 Gemini 图片任务不保存 `thoughtSignature`，启动时清理历史签名。
 - 删除生成批次或任务会真实删除其专属结果文件；仍被其他任务引用的文件会阻止删除。旧 `generated-media/`、旧参考图路径和旧 BLOB 数据不做兼容读取或迁移，已失效的历史供应商 URL 无法恢复。
 
 ### 短剧工作台
@@ -90,6 +91,8 @@ Agent Chat 默认打开 `/studio/`，提供项目、大纲、剧本与场次、�
 - Markdown 使用开源的 `react-markdown`、`remark-gfm` 和 `rehype-sanitize` 渲染；回复中的 `md` / `markdown` 代码块会显示为编译后的内容，复制按钮仍复制原始 Markdown。
 - 系统提示词首次从 `examples/agent-chat/prompts/system.md` 写入本地 SQLite，之后由数据库管理；缺失、空白或过长时报错，代码没有内置默认值。专业 Agent 的提示词在 Agents 编辑器中单独配置。Skill 名称和描述在每轮请求中组成目录，完整指令与资源由模型通过工具按需读取。运行规则从 `examples/agent-chat/prompts/skill-runtime.md` 加载。
 - 对话、Skills、提供方、模型配置和 Agent 配置保存在 Git 忽略的 `.local/agent-chat/data.sqlite`；浏览器只负责调用本机 API，不保存聊天历史。
+- 聊天记录在 SQLite 的 `chat_sessions` 表中逐会话保存，带版本检查，旧页面不能覆盖新记录；历史快照首次迁入后保留原始数据。发送前先保存用户消息，流式回复每秒保存，结束时立即保存；失败会提示并重试，尚未保存时关闭页面会提醒。正常重启不清空记录，部署时须保留整个 `.local/agent-chat/` 数据目录。
+- 进入网站只读取会话目录和短预览，不自动恢复上次打开的历史；点击会话后才请求消息正文，失败可重试。`AgentSession.messagePreview` 可供宿主在未加载消息时显示和搜索预览。
 - 本机执行环境提供技能目录/按需加载、文件列举/分页读取/写入、附件导入、Shell 命令、进程查询/停止和文件交付。技能正文及二进制资源由服务端读取已保存版本，浏览器只传 Skill ID。允许自动调用的技能仅发送目录；关闭自动调用的技能需用户显式引用。
 - 网站默认提供 Anthropic 的 `skill-creator`，所有主 / 子 Agent 都能按需加载。上游完整技能包（含许可）位于 `examples/agent-chat/skills/skill-creator/`，来自 [claude-plugins-official](https://github.com/anthropics/claude-plugins-official/tree/d1adba47161a271799de7b548225d929310046bd/plugins/skill-creator/skills/skill-creator)，固定版本 `d1adba47161a271799de7b548225d929310046bd`，原文件未修改。Claude CLI 专属评测仍依赖对应软件与账号，不属于网站自带能力。
 - 在聊天的「选择 Skill」弹层或「管理 Skill」窗口点击「通过对话创建」，会新开一条对话并将自动引用 skill-creator 的创建请求填入输入框，用户确认发送后才执行，原聊天及草稿保持不变。也可以直接对话「创建一个整理会议行动项的 Skill」或发送技能链接要求安装。Agent 用现有文件 / 命令工具生成或下载完整包，再调用 `builtin_create_skill` 安装进网站 Skills 库；安装复用手动导入校验，不执行包内脚本，不写电脑全局技能目录。默认模式自动批准新增技能，覆盖已有技能需明确 ID、当前版本并确认；内置技能内容只读。同包重复安装复用已有 ID。
@@ -561,3 +564,5 @@ import { InteractiveConfirmDialog } from '@darl/ui';
 Playground：`/#confirm-dialog`（含原著改编确认示例及模拟提交失败）。
 
 AgentSidebar 支持 `embedded` 嵌入宿主容器，使用 `draft` / `onDraftChange` 将草稿交给宿主持久化。`references` / `onReference` 提供稳定 ID 的宿主资料引用（`node:`），`composerHeader`、`composerFooter`、`messageHeader` 和 `renderMessageActions` 用于挂载引用摘要、上下文用量及成果定位等宿主交互。未传这些属性时沿用组件自管草稿与侧栏布局。Agent 管理卡片可通过 `skills` 和 `applications` 编辑默认技能与 MCP 范围，实际权限由宿主后端执行。
+
+AgentSidebar 的 `hideEmptySessions` 可隐藏未发送消息的本地草稿；按需加载消息的宿主可用 `AgentSession.messageCount` 提供已保存消息数量。真实聊天示例默认启用，发送第一条消息后才保存会话。

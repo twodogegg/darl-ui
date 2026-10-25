@@ -1,3 +1,4 @@
+import { imageUrl } from '../../image-url'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useProject, Workflow } from '../components/Shell'
@@ -391,6 +392,15 @@ function Production({ context }) {
       <header className="workspace-toolbar"><div className="sb-toolbar-head"><h2>视频制作</h2><label className="sb-episode-pick"><span>剧集</span><select aria-label="选择剧集" value={episode.id} onChange={(e) => navigate(`/video?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(e.target.value)}`)}>{context.episodes.map((e) => <option key={e.id} value={e.id}>第{e.number}集 · {e.title}</option>)}</select></label><p className="muted">共 {clips.length} 个视频片段 · 同一场的多个分镜组合成一个视频片段</p></div><Link className="btn" to={link('/storyboard')}>查看分镜脚本 ↗</Link></header>
       {context.project.creationMode === 'video-redraw' && <p className="redraw-production-note">当前使用目标资产和分镜重新生成，连续动作不保证逐帧还原。请试听生成结果的目标语言对白。<Link to={link('/film')}>进入合成导出 ↗</Link></p>}
       <div className="production-layout">
+        <div className="production-mobile-picker">
+          <select aria-label="选择视频片段" value={active?.id || ''} disabled={!clips.length} onChange={event => { setActiveId(event.target.value); setHistoryKind('video') }}>
+            {!clips.length && <option value="">暂无视频片段</option>}
+            {scenes.map((scene, index) => <optgroup key={scene.id} label={`第${index + 1}场 · ${scene.location || '地点待填写'}`}>
+              {clips.filter(clip => clip.sceneId === scene.id).map(clip => <option key={clip.id} value={clip.id}>{shotNumber(clips.indexOf(clip))} · {clip.title}</option>)}
+            </optgroup>)}
+          </select>
+          <Button aria-label="创建视频片段" disabled={!shots.length || busy} onClick={() => editGroup()}>＋ 新建</Button>
+        </div>
         <aside className="production-list" aria-label="视频片段列表">
           <h3>视频片段</h3>
           {scenes.map((scene, sceneIndex) => {
@@ -437,7 +447,7 @@ function Production({ context }) {
                   notify(`已切换到${name}`)
                 }
                 return <article key={`${active.id}-${historyKind}-${index}`} aria-label={name} className={selected ? 'current' : ''}>
-                  <button aria-label={historyColumn ? `放大${name}` : `切换到${name}`} title={historyColumn ? `放大${name}` : `切换到${name}`} onClick={historyColumn ? showPreview : switchVersion}>{historyColumn ? <img src={url} alt={name} /> : <video src={url} muted preload="metadata" />}</button>
+                  <button aria-label={historyColumn ? `放大${name}` : `切换到${name}`} title={historyColumn ? `放大${name}` : `切换到${name}`} onClick={historyColumn ? showPreview : switchVersion}>{historyColumn ? <img loading="lazy" src={imageUrl(url, 160)} alt={name} /> : <video src={url} muted preload="none" />}</button>
                   <div className="production-history-meta"><small>版本 {history.length - index}</small>{selected && <span>当前使用</span>}</div>
                   <div className="production-history-actions">
                     <Button onClick={showPreview}>{historyColumn ? '放大' : '预览'}</Button>
@@ -464,7 +474,7 @@ function Production({ context }) {
             <Field label="视频模型"><select aria-label="视频模型" value={model?.id || ''} onChange={event => patch('clips', active.id, { model: event.target.value, resolution: '', ratio: context.project.ratio })}>{!model && <option value="">请选择视频模型</option>}{models.filter(model => model.type === 'video').map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select></Field>
             {[['mode', '生成方式', mode, ['分镜图', '参考生成']], ['resolution', '分辨率', resolution, model?.capabilities?.resolutions || []], ['ratio', '视频画幅', ratio, model?.capabilities?.aspectRatios || []]].map(([key, label, value, options]) => <Field key={key} label={label}><select aria-label={label} value={value || ''} onChange={event => patch('clips', active.id, { [key]: event.target.value })}>{!options.includes(value) && <option value={value || ''} disabled>{value ? `${value}（不支持）` : '暂无可用选项'}</option>}{options.map(value => <option key={value}>{value}</option>)}</select></Field>)}
             <p className="production-duration">生成时长 <strong>{duration ? `${duration} 秒` : '无法生成'}</strong><small>{durationError || `分镜合计 ${totalDuration(linked)} 秒${duration !== totalDuration(linked) ? '，按模型要求向上取整' : ''}`}</small></p>
-            {active.mode === '首尾帧' && <div className="production-frame-inputs">{[['firstFrame', '首帧'], ['lastFrame', '尾帧']].map(([key, label]) => <div key={key}><span>{label}</span>{active[key] && <img src={active[key]} alt={label} />}<FileButton onSelect={(item) => patch('clips', active.id, { [key]: item.url })}>上传{label}</FileButton>{active[key] && <Button onClick={() => patch('clips', active.id, { [key]: '' })}>移除</Button>}</div>)}</div>}
+            {active.mode === '首尾帧' && <div className="production-frame-inputs">{[['firstFrame', '首帧'], ['lastFrame', '尾帧']].map(([key, label]) => <div key={key}><span>{label}</span>{active[key] && <img loading="lazy" src={imageUrl(active[key], 320)} alt={label} />}<FileButton onSelect={(item) => patch('clips', active.id, { [key]: item.url })}>上传{label}</FileButton>{active[key] && <Button onClick={() => patch('clips', active.id, { [key]: '' })}>移除</Button>}</div>)}</div>}
             <h3>引用资产与音色</h3><ClipReferences key={active.id} clip={active} projectId={projectId} />
             <Button className="production-generate" primary disabled={busy || !model || !!durationError || !linked.length || !active.prompt.trim()} onClick={generateVideo}>{busy ? '正在提交…' : '生成视频'}</Button>
             <div className="production-clip-actions"><Button disabled={busy || clips.filter((clip) => clip.sceneId === active.sceneId).indexOf(active) === 0} onClick={() => moveClip(-1)}>上移片段</Button><Button disabled={busy || clips.filter((clip) => clip.sceneId === active.sceneId).at(-1)?.id === active.id} onClick={() => moveClip(1)}>下移片段</Button><Button danger disabled={busy} onClick={() => setDeleting(active)}>删除片段</Button></div>
@@ -484,7 +494,7 @@ function Production({ context }) {
           <Field label={promptEdit.optimization ? '优化后' : '视频描述'}><AssetMentionInput value={promptEdit.text} label={promptEdit.optimization ? '优化后' : '视频描述'} candidates={mentionCandidates} onChange={text => setPromptEdit(current => ({ ...current, text }))} /></Field>
         </div>
       </Modal>}
-      {imageEdit && <Modal title={`修改${imageEdit.label}`} onClose={() => { setImageEdit(null) }} footer={<><Button onClick={() => { setImageEdit(null) }}>取消</Button><Button primary disabled={busy || !imageNotes.trim()} onClick={() => { generateImage(imageEdit); setImageEdit(null) }}>生成改图</Button></>}><img className="production-edit-source" src={imageEdit.source} alt="本次修改的原图" /><Field label="修改要求"><textarea rows={5} maxLength={5000} value={imageNotes} onChange={(e) => setImageNotes(e.target.value)} /></Field></Modal>}
+      {imageEdit && <Modal title={`修改${imageEdit.label}`} onClose={() => { setImageEdit(null) }} footer={<><Button onClick={() => { setImageEdit(null) }}>取消</Button><Button primary disabled={busy || !imageNotes.trim()} onClick={() => { generateImage(imageEdit); setImageEdit(null) }}>生成改图</Button></>}><img loading="lazy" className="production-edit-source" src={imageEdit.source} alt="本次修改的原图" /><Field label="修改要求"><textarea rows={5} maxLength={5000} value={imageNotes} onChange={(e) => setImageNotes(e.target.value)} /></Field></Modal>}
       {deleting && <Confirm title="删除视频片段" danger onClose={() => setDeleting(null)} onConfirm={() => { update((draft) => { draft.clips = draft.clips.filter((clip) => clip.id !== deleting.id) }); setDeleting(null) }}>删除“{deleting.title}”及其生成历史？分镜表中的原始镜头保留。</Confirm>}
       {deletingJob && <Modal title="删除生成记录" onClose={() => { if (!removingJob) setDeletingJob(null) }} footer={<><Button disabled={removingJob} onClick={() => setDeletingJob(null)}>取消</Button><Button danger disabled={removingJob} onClick={deleteJob}>{removingJob ? '正在删除…' : '确认删除'}</Button></>}>删除这条生成记录？{deletingJob.status === 'uncertain' && '上游任务结果未知，删除记录不会取消上游任务或退还费用。'}</Modal>}
       {preview && <MediaPreview item={preview} onClose={() => setPreview(null)} />}

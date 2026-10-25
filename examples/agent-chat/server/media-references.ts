@@ -23,7 +23,7 @@ export async function persistMediaReferencesInStore(options: Record<string, unkn
       const file = files.get(fileId);
       if (!file) throw new Error('参考素材文件不存在');
       if (!file.mimeType.startsWith(`${kind}/`)) throw new Error(`参考素材必须是${mediaNames[kind]}`);
-      return storedReference(file);
+      return storedReference(file, files);
     }
     if (typeof reference !== 'string') throw new Error('参考素材格式无效');
     if (!reference.startsWith('data:')) return reference;
@@ -33,26 +33,27 @@ export async function persistMediaReferencesInStore(options: Record<string, unkn
     if (!data.length) throw new Error('参考素材为空');
     if (data.length > MAX_MEDIA_REFERENCE_BYTES) throw new Error('单个参考素材不能超过 50MB');
     const file = await files.put(data, match[1], `reference.${extension(match[1])}`);
-    return storedReference(file);
+    return storedReference(file, files);
   });
 }
 
 export async function resolveMediaReferencesInStore(options: Record<string, unknown>, files: FileStore): Promise<Record<string, unknown>> {
   return mapReferences(options, async (reference, kind) => {
     const url = typeof reference === 'string' ? reference : reference && typeof reference === 'object' ? (reference as { url?: unknown }).url : undefined;
-    const local = typeof url === 'string' && /^\/api\/files\/([^/?#]+)(?:\/thumbnail)?(?:[?#].*)?$/.exec(url);
-    if (local) {
-      const file = files.get(decodeURIComponent(local[1]));
+    const local = typeof url === 'string' ? /^\/api\/files\/([^/?#]+)(?:\/thumbnail)?(?:[?#].*)?$/.exec(url) : null;
+    const known = files.fromUrl(url);
+    if (local || known) {
+      const file = known || files.get(decodeURIComponent(local![1]));
       if (!file) throw new Error('参考素材文件不存在');
       if (!file.mimeType.startsWith(`${kind}/`)) throw new Error(`参考素材必须是${mediaNames[kind]}`);
-      return storedReference(file);
+      return storedReference(file, files);
     }
     if (!reference || typeof reference !== 'object' || typeof (reference as { fileId?: unknown }).fileId !== 'string') return reference;
     const item = reference as { fileId: string; url?: unknown; name?: unknown };
     const existing = files.get(item.fileId);
     if (existing) {
       if (!existing.mimeType.startsWith(`${kind}/`)) throw new Error(`参考素材必须是${mediaNames[kind]}`);
-      return storedReference(existing);
+      return storedReference(existing, files);
     }
     if (typeof item.url !== 'string' || !/^https?:\/\//i.test(item.url)) throw new Error('参考素材文件不存在');
     const response = await fetch(item.url, { signal: AbortSignal.timeout(120_000) });
@@ -64,13 +65,13 @@ export async function resolveMediaReferencesInStore(options: Record<string, unkn
     // Metadata rebuild for an object that already exists at the canonical key;
     // keep its backend URL so callers can still fetch it directly.
     const retained = files.retain(item.fileId, data, mimeType, typeof item.name === 'string' ? item.name : 'reference');
-    return { fileId: retained.id, url: files.originalUrl(retained) || storedReference(retained).url, mimeType: retained.mimeType, name: retained.name };
+    return { fileId: retained.id, url: files.originalUrl(retained), mimeType: retained.mimeType, name: retained.name };
   });
 }
 
-/** Job rows reference stored files through the backend-independent file proxy. */
-function storedReference(file: StoredFile) {
-  return { fileId: file.id, url: `/api/files/${file.id}`, mimeType: file.mimeType, name: file.name };
+/** Keep stable file IDs and original URLs across local and COS storage. */
+function storedReference(file: StoredFile, files?: FileStore) {
+  return { fileId: file.id, url: files?.originalUrl(file) || `/api/files/${file.id}`, mimeType: file.mimeType, name: file.name };
 }
 
 export function fileIdFromReference(value: unknown) {

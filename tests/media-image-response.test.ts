@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { persistMediaReferencesInStore, resolveMediaReferencesInStore } from '../examples/agent-chat/server/media-references';
 import { FileStore } from '../examples/agent-chat/server/file-storage';
-import { closestAllowedSize, allowedSizesFromError, geminiImageEndpoint, generateGeminiImages, imageResponseRecord, imageSize, normalizeImageReferences } from '../examples/agent-chat/server/media-adapters';
+import { closestAllowedSize, allowedSizesFromError, geminiImageEndpoint, geminiResponseRecord, generateGeminiImages, imageResponseRecord, imageSize, normalizeImageReferences } from '../examples/agent-chat/server/media-adapters';
 import type { MediaJob } from '../examples/agent-chat/server/media-job-store';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
@@ -104,7 +104,12 @@ describe('reference storage', () => {
       // Seed the metadata row for an object already uploaded to COS: retain() is metadata-only in COS mode, so no network is made.
       const stored = files.retain('stored-ref', PNG, 'image/png', 'reference.png');
       const options = await persistMediaReferencesInStore({ references: [{ fileId: stored.id, url: files.originalUrl(stored) }] }, files);
-      expect(options.references).toEqual([{ fileId: stored.id, url: `/api/files/${stored.id}`, mimeType: 'image/png', name: 'reference.png' }]);
+      expect(options.references).toEqual([{ fileId: stored.id, url: files.originalUrl(stored), mimeType: 'image/png', name: 'reference.png' }]);
+      expect(files.fromUrl(files.originalUrl(stored))?.id).toBe(stored.id);
+      expect(files.fromUrl(`https://other.example/darl-ui/${stored.sha256}.png`)).toBeUndefined();
+      const resolved = await resolveMediaReferencesInStore({ references: [files.thumbnailUrl(stored, 320)] }, files);
+      expect(resolved.references).toEqual(options.references);
+      expect(JSON.stringify(resolved)).not.toContain('imageMogr2');
       await expect(persistMediaReferencesInStore({ references: [{ fileId: 'missing' }] }, files)).rejects.toThrow('参考素材文件不存在');
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -258,6 +263,25 @@ describe('style prompt injection', () => {
 });
 
 describe('gemini images', () => {
+  it('omits multi-turn signatures from every diagnostic part without changing the source response', () => {
+    const payload = { usageMetadata: { totalTokenCount: 42 }, candidates: [
+      { content: { parts: [
+        { inlineData: { mimeType: 'image/png', data: 'image-bytes' }, thoughtSignature: 'image-signature' },
+        { text: '生成完成', thoughtSignature: 'text-signature' },
+      ] } },
+      { content: { parts: [{ thought_signature: 'legacy-signature', finishReason: 'STOP' }] } },
+    ] };
+    const record = geminiResponseRecord(payload);
+    expect(record).toEqual({ usageMetadata: { totalTokenCount: 42 }, candidates: [
+      { content: { parts: [
+        { inlineData: { mimeType: 'image/png', data: '<base64 11 字符，已保存为文件>' } },
+        { text: '生成完成' },
+      ] } },
+      { content: { parts: [{ finishReason: 'STOP' }] } },
+    ] });
+    expect(payload.candidates[0].content.parts[0]).toMatchObject({ thoughtSignature: 'image-signature', inlineData: { data: 'image-bytes' } });
+  });
+
   const geminiJob = (options: Record<string, unknown> = {}) => ({
     ...job(options), modelId: 'gemini-3-pro-image-preview', upstreamModelId: 'gemini-3-pro-image-preview', protocolKey: 'gemini-generate-content',
   });

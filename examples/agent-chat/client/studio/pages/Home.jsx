@@ -1,3 +1,4 @@
+import { imageUrl } from '../../image-url'
 import { useRef, useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
@@ -23,6 +24,7 @@ export default function Home() {
   const { data, update, notify, reload, requestAgent, cancelAgent } = useStore()
   const navigate = useNavigate()
   const [requirements, setRequirements] = useState('')
+  const [projectName, setProjectName] = useState('')
   const [creationMode, setCreationMode] = useState('script')
   const [script, setScript] = useState('')
   const [images, setImages] = useState([])
@@ -73,6 +75,9 @@ export default function Home() {
     const text = script.trim()
     if (!text) return notify('请先上传或粘贴原始素材')
     if (text.length > 100000) return notify('原始素材内容不能超过 100000 字')
+    const name = projectName.trim()
+    if (!name) return notify('请填写项目名称')
+    if (name.length > 30) return notify('项目名称不能超过 30 个字')
     if (!styleId) return notify('请选择视觉风格')
     if (planned === '') return notify('请填写计划集数')
     if (!Number.isInteger(Number(planned)) || planned < 1 || planned > 100) return notify('计划集数应为1—100的整数')
@@ -80,7 +85,7 @@ export default function Home() {
     setBusy(true)
     let projectId
     try {
-      const result = await studioApi('workspace/projects', { name: text.split('\n').find(line => line.trim()).slice(0,30), description: text.slice(0,2000), aspect_ratio: ratio, style_catalog_id: Number(styleId) })
+      const result = await studioApi('workspace/projects', { name, description: text.slice(0,2000), aspect_ratio: ratio, style_catalog_id: Number(styleId) })
       projectId = String(result.data.project_id)
       if (images[0]?.fileId) await studioApi(`workspace/projects/${projectId}/covers/files/${images[0].fileId}/select`, {})
       await reload()
@@ -170,7 +175,7 @@ export default function Home() {
               <div className="home-references">
                 {images.map((item) => (
                   <div key={item.id}>
-                    <img src={item.url} alt={item.name} />
+                    <img loading="lazy" src={imageUrl(item.url, 320)} alt={item.name} />
                     <button
                       type="button"
                       aria-label={`移除${item.name}`}
@@ -198,7 +203,7 @@ export default function Home() {
                 <button
                   className="br-primary"
                   type="submit"
-                  disabled={busy || reading}
+                  disabled={busy || reading || !projectName.trim()}
                 >
                   <IconMovie size={16} />
                   {busy ? '正在创建…' : '开始创作'}
@@ -210,9 +215,22 @@ export default function Home() {
               <IconSettings size={16} /> 项目设置
             </p>
             <p className="br-setting-hint">
-              选择视觉风格，按需设置创作导演、生成模式、改编幅度、画幅、集数和时长。
+              填写项目名称，按需设置视觉风格、创作导演、生成模式、改编幅度、画幅、集数和时长。
             </p>
             <div className="br-settings">
+              <div className="br-field br-field--wide">
+                <label htmlFor="home-project-name">项目名称 *</label>
+                <input
+                  id="home-project-name"
+                  type="text"
+                  maxLength={30}
+                  required
+                  value={projectName}
+                  disabled={busy}
+                  placeholder="给你的作品起个名字"
+                  onChange={(e) => setProjectName(e.target.value)}
+                />
+              </div>
               <div className="br-field">
                 <label htmlFor="home-generation-mode">生成模式</label>
                 <select id="home-generation-mode" value={generationMode} onChange={(e) => setGenerationMode(e.target.value)}>
@@ -320,7 +338,7 @@ export default function Home() {
               to={`/${p.creationMode === 'video-redraw' ? 'source' : 'outline'}?projectId=${encodeURIComponent(p.id)}`}
             >
               <span className="br-cover">
-                <>{p.cover ? <img src={p.cover} alt={p.title} /> : <div className="studio-cover-empty">未上传封面</div>}</>
+                <>{p.cover ? <img loading="lazy" src={imageUrl(p.cover, 320)} alt={p.title} /> : <div className="studio-cover-empty">未上传封面</div>}</>
                 <span className="br-cover-label">{p.title}</span>
               </span>
               <span className="br-project-info">

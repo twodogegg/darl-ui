@@ -1,3 +1,4 @@
+import { imageUrl } from '../../image-url'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../store'
@@ -67,7 +68,7 @@ export function Projects() {
         {projects.map((p) => (
           <article className="project-card" key={p.id}>
             <Link to={`/${p.creationMode === 'video-redraw' ? 'source' : 'outline'}?projectId=${encodeURIComponent(p.id)}`}>
-              <>{p.cover ? <img className="project-card-cover" src={p.cover} alt={p.title} /> : <div className="studio-cover-empty">未上传封面</div>}</>
+              <>{p.cover ? <img loading="lazy" className="project-card-cover" src={imageUrl(p.cover, 320)} alt={p.title} /> : <div className="studio-cover-empty">未上传封面</div>}</>
               <div className="project-card-body">
                 <h2>{p.title}</h2>
                 <small>

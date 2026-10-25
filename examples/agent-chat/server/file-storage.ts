@@ -38,7 +38,7 @@ export type FileStoreOptions = {
 
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const FILE_MIMES = new Set([...IMAGE_MIMES, 'video/mp4', 'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/x-wav', 'audio/ogg', 'audio/opus', 'audio/flac', 'application/pdf', 'text/plain', 'application/zip', 'application/octet-stream']);
-const WIDTHS = new Set([160, 320, 1024]);
+const WIDTHS = new Set([160, 320, 640, 1024]);
 const extensionFor = (mime: string, name = '') => {
   const fromName = extname(name).replace(/^\./, '').toLowerCase();
   if (fromName && /^[a-z0-9]{1,8}$/.test(fromName)) return fromName === 'jpeg' ? 'jpg' : fromName;
@@ -129,6 +129,13 @@ export class FileStore {
     const row = this.db.prepare('SELECT * FROM file_assets WHERE sha256 = ?').get(sha256) as FileRow | undefined;
     return row ? this.rowToFile(row) : undefined;
   }
+  fromUrl(value: unknown) {
+    if (typeof value !== 'string') return undefined;
+    const local = /^\/api\/files\/([a-f0-9-]+)(?:[?#].*)?$/.exec(value);
+    if (local) return this.get(local[1]);
+    const original = value.split('?')[0].split('#')[0];
+    return this.list().find(file => file.backend === 'cos' && this.originalUrl(file) === original);
+  }
   originalUrl(file: StoredFile | string) {
     const item = typeof file === 'string' ? this.get(file) : file;
     if (!item) return undefined;
@@ -136,7 +143,7 @@ export class FileStore {
     const config = this.fileConfig(item);
     return publicCosUrl(config.publicBaseUrl, config.scheme || 'https', config.bucket || '', config.region || 'ap-guangzhou', item.objectKey);
   }
-  thumbnailUrl(file: StoredFile | string, width: 160 | 320 | 1024) {
+  thumbnailUrl(file: StoredFile | string, width: 160 | 320 | 640 | 1024) {
     const item = typeof file === 'string' ? this.get(file) : file;
     if (!item || !IMAGE_MIMES.has(item.mimeType)) return this.originalUrl(item || '');
     if (item.backend === 'cos') {
@@ -215,7 +222,7 @@ export class FileStore {
     const value = await this.getBytes(id);
     if (!value) return undefined;
     if (!width || !IMAGE_MIMES.has(value.file.mimeType)) return { ...value, mimeType: value.file.mimeType };
-    if (!WIDTHS.has(width)) throw new Error('仅支持 160、320 或 1024 像素缩略图');
+    if (!WIDTHS.has(width)) throw new Error('仅支持 160、320、640 或 1024 像素缩略图');
     const bytes = await sharp(value.bytes).resize({ width, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
     return { file: value.file, bytes, mimeType: 'image/webp' };
   }
@@ -256,10 +263,11 @@ export class FileStore {
 
   references(id: string) {
     const rows: unknown[][] = [];
+    const original = this.originalUrl(id);
     if (this.tableExists('workspace_style_files')) rows.push(this.db.prepare('SELECT file_id FROM workspace_style_files WHERE file_id = ?').all(id));
     if (this.tableExists('workspace_projects')) rows.push(this.db.prepare('SELECT cover_file_id AS file_id FROM workspace_projects WHERE cover_file_id = ?').all(id));
     if (this.tableExists('media_generation_jobs')) rows.push(this.db.prepare('SELECT id FROM media_generation_jobs WHERE data LIKE ?').all(`%"fileId":"${id}"%`));
-    if (this.tableExists('studio_records')) rows.push(this.db.prepare('SELECT id FROM studio_records WHERE data LIKE ? OR data LIKE ?').all(`%/api/files/${id}%`, `%"fileId":"${id}"%`));
+    if (this.tableExists('studio_records')) rows.push(this.db.prepare('SELECT id FROM studio_records WHERE data LIKE ? OR data LIKE ? OR data LIKE ?').all(`%/api/files/${id}%`, `%"fileId":"${id}"%`, original ? `%${original}%` : `%/api/files/${id}%`));
     if (this.tableExists('video_redraw_jobs')) rows.push(this.db.prepare('SELECT id FROM video_redraw_jobs WHERE data LIKE ?').all(`%${id}%`));
     return rows.some((items) => items.length > 0);
   }

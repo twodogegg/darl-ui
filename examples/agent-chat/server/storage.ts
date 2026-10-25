@@ -4,6 +4,16 @@ import type { ChatMessage } from './models';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
+/** Remove unused Gemini continuation state from historical media diagnostics. */
+export function removeStoredThoughtSignatures(database: DatabaseSync, table: 'media_generation_jobs' | 'request_records') {
+  const rows = database.prepare(`SELECT id, data FROM ${table} WHERE data LIKE '%"thoughtSignature"%' OR data LIKE '%"thought_signature"%'`).all();
+  const update = database.prepare(`UPDATE ${table} SET data=? WHERE id=? AND data=?`);
+  for (const row of rows) {
+    const data = JSON.stringify(JSON.parse(row.data as string, (key, value) => /^thought_?signature$/i.test(key) ? undefined : value));
+    update.run(data, row.id, row.data);
+  }
+}
+
 export interface ClientState { sessions: unknown[]; activeId?: string; skills: unknown[] }
 export interface SubAgentThreadKey {
   scope: string;
@@ -172,7 +182,8 @@ export function validateClientState(value: unknown): ClientState {
   if (!Array.isArray(item.sessions) || item.sessions.length > 500) throw new Error('会话数量无效');
   if (!Array.isArray(item.skills) || item.skills.length > 200) throw new Error('Skill 数量无效');
   if (item.activeId !== undefined && typeof item.activeId !== 'string') throw new Error('当前会话无效');
-  const state = { sessions: item.sessions, skills: item.skills, ...(item.activeId ? { activeId: item.activeId } : {}) };
+  const sessions = item.sessions.filter((session) => Array.isArray((session as { messages?: unknown[] } | null)?.messages) && (session as { messages: unknown[] }).messages.length > 0);
+  const state = { sessions, skills: item.skills, ...(item.activeId ? { activeId: item.activeId } : {}) };
   if (JSON.stringify(state).length > 80 * 1024 * 1024) throw new Error('本地状态超过 80MB');
   return state;
 }

@@ -1,3 +1,4 @@
+import { imageUrl } from '../../image-url'
 import { resolveAssetDependencies, assetDependenciesChanged, validateAssetDependencies } from '../../../asset-dependencies'
 import { useEffect, useRef, useState } from 'react'
 import { SourceEvidence } from './VideoRedraw'
@@ -219,7 +220,7 @@ export default function ArtAssetDrawer({
                 aria-label="查看大图"
                 onClick={() => setPreview({ name: form.name, url: image })}
               >
-                <img src={image} alt={form.name} />
+                <img loading="lazy" src={imageUrl(image, 1024)} alt={form.name} />
               </button>
             ) : (
               <div className="asset-drawer__empty">
@@ -264,7 +265,7 @@ export default function ArtAssetDrawer({
                 <span>
                   {i === 0 ? '最新图片' : `历史图片 ${history.length - i}`}
                 </span>
-                <img src={url} alt={`历史图片${i + 1}`} />
+                <img loading="lazy" src={imageUrl(url, 160)} alt={`历史图片${i + 1}`} />
               </button>
             ))}
           </aside>
@@ -277,7 +278,7 @@ export default function ArtAssetDrawer({
               setHistoryIndex(null)
             }}
           >
-            {form.image ? <img src={form.image} alt="主形象" /> : <i />}
+            {form.image ? <img loading="lazy" src={imageUrl(form.image, 160)} alt="主形象" /> : <i />}
             <span>
               {form.type === '角色'
                 ? '主形象'
@@ -295,7 +296,7 @@ export default function ArtAssetDrawer({
                 setHistoryIndex(null)
               }}
             >
-              {v.image ? <img src={v.image} alt={v.name} /> : <i />}
+              {v.image ? <img loading="lazy" src={imageUrl(v.image, 160)} alt={v.name} /> : <i />}
               <span>{v.name}</span>
               <b
                 role="button"
@@ -350,7 +351,7 @@ export default function ArtAssetDrawer({
             const reference = dependency.variantId ? source?.variants.find(item => item.id === dependency.variantId) : source
             const edit = patch => change('dependencies', form.dependencies.map((item, i) => i === index ? { ...item, ...patch } : item))
             return <div key={index} className="asset-drawer__dependency">
-              {reference?.image && <img src={reference.image} alt="依赖参考图" style={{ width: 64, height: 64, objectFit: 'contain' }} />}
+              {reference?.image && <img loading="lazy" src={imageUrl(reference.image, 160)} alt="依赖参考图" style={{ width: 64, height: 64, objectFit: 'contain' }} />}
               <Field label={`依赖形象 ${index + 1}`}><select aria-label={`依赖形象 ${index + 1}`} value={JSON.stringify({ assetId: dependency.assetId, ...(dependency.variantId ? { variantId: dependency.variantId } : {}) })} onChange={event => {
                 const value = JSON.parse(event.target.value); edit({ ...value, variantId: value.variantId || '' })
               }}><option value="" disabled>选择资产与形态</option>{dependencyChoices.map(({ name, ...value }) => <option key={JSON.stringify(value)} value={JSON.stringify(value)}>{name}</option>)}</select></Field>
@@ -561,7 +562,7 @@ export default function ArtAssetDrawer({
           }
         >
           <div className="image-edit-layout">
-            <img src={image} alt="原图" />
+            <img loading="lazy" src={imageUrl(image, 1024)} alt="原图" />
             <Field label="修改要求">
               <textarea
                 aria-label="修改要求"

@@ -4,7 +4,7 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RequestRecord, RequestRecordFilters, RequestRecordMedia, RequestRecordPage, RequestRecordRetention } from '../../../src/components/request-records/types';
 import type { FileStore } from './file-storage';
-import type { LocalStorage } from './storage';
+import { removeStoredThoughtSignatures, type LocalStorage } from './storage';
 import type { MediaJob } from './media-job-store';
 import { isLocalOrLanAddress } from './local-access';
 
@@ -39,7 +39,7 @@ export function sanitizeRecordValue(value: unknown, secrets: string[] = []): unk
     if (Array.isArray(item)) return item.slice(0, 100).map(entry => clean(entry, depth + 1));
     if (item && typeof item === 'object' && 'type' in item && item.type === 'data' && 'data' in item) return { type: 'data', data: '[媒体内容已保存为文件]' };
     if (item && typeof item === 'object' && 'type' in item && (item.type === 'reasoning' || item.type === 'reasoning-file')) return { type: item.type, content: '[内容已省略]' };
-    if (item && typeof item === 'object') return Object.fromEntries(Object.entries(item).slice(0, 100).map(([key, entry]) => {
+    if (item && typeof item === 'object') return Object.fromEntries(Object.entries(item).filter(([key]) => !/^thought_?signature$/i.test(key)).slice(0, 100).map(([key, entry]) => {
       budget -= key.length;
       return [key, SECRET_FIELD.test(key) ? '[已隐藏]' : /^(?:b64_json|base64|reasoning|reasoningText)$/i.test(key) ? '[内容已省略]' : clean(entry, depth + 1)];
     }));
@@ -63,6 +63,7 @@ export class RequestRecordStore {
       CREATE TABLE IF NOT EXISTS request_records (id TEXT PRIMARY KEY, type TEXT NOT NULL, model_id TEXT NOT NULL, provider_id TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, ended_at TEXT, data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS request_records_time ON request_records(created_at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS request_records_filter ON request_records(type, status, created_at DESC);`);
+    removeStoredThoughtSignatures(this.db, 'request_records');
     // A process restart cannot prove that an interrupted upstream call failed.
     for (const row of this.db.prepare("SELECT data FROM request_records WHERE status='running' AND type IN ('text','audio')").all()) {
       const item = JSON.parse(row.data as string) as RequestRecord;
@@ -122,7 +123,7 @@ export class RequestRecordStore {
     if (!media.fileId) return media;
     const file = this.files.get(media.fileId);
     if (!file) return { ...media, url: undefined, thumbnailUrl: undefined, unavailable: true };
-    return { ...media, url: `/api/files/${encodeURIComponent(file.id)}`, thumbnailUrl: media.type === 'image' ? `/api/files/${encodeURIComponent(file.id)}?width=320` : undefined };
+    return { ...media, url: this.files.originalUrl(file), thumbnailUrl: media.type === 'image' ? this.files.thumbnailUrl(file, 160) : undefined };
   }
   present(record: RequestRecord): RequestRecord {
     return { ...record, references: record.references?.map(media => this.presentMedia(media)), results: record.results?.map(media => this.presentMedia(media)) };

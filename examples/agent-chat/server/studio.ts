@@ -8,6 +8,7 @@ import { emptyStudioData, studioChangeSchema, studioDefaults, studioFields, stud
 import { ProjectStore } from './project-store';
 import { isLocalOrLanAddress } from './local-access';
 import { failure } from './errors';
+import { sendRevalidatedJson } from './http-cache';
 
 export class StudioConflict extends Error {}
 const recordId = (value: unknown) => {
@@ -206,7 +207,7 @@ export class StudioStore {
     const resource = studioResource(target.resource), item = this.snapshot()[resource].find(item => item.id === target.id);
     if (!item) return; // Removed targets never get resurrected by a late result.
     if (job.resultFileIds.some(id => !this.projects.files.get(id)?.mimeType.startsWith(`${job.type}/`))) throw new Error('生成结果文件类型与任务不一致');
-    const urls = job.resultFileIds.map(id => `/api/files/${id}`);
+    const urls = job.resultFileIds.map(id => this.projects.files.originalUrl(id)!);
     const dependencies = target.dependencyImages as DependencyImage[] || [];
     let dependenciesCurrent = true;
     if (resource === 'assets') {
@@ -258,7 +259,7 @@ export class StudioStore {
                 || Number(segment.end) > Number(source.duration) || !Array.isArray(segment.frames) || segment.frames.length > 12) throw new Error('原片镜头区间或参考帧无效');
               ids.add(id);
               for (const frame of segment.frames as Array<Record<string, unknown>>) if (this.projects.files.get(String(frame.fileId))?.mimeType !== 'image/jpeg'
-                || frame.url !== `/api/files/${frame.fileId}` || !Number.isFinite(frame.time) || Number(frame.time) < Number(segment.start) || Number(frame.time) > Number(segment.end)) throw new Error('原片参考帧无效');
+                || this.projects.files.fromUrl(frame.url)?.id !== frame.fileId || !Number.isFinite(frame.time) || Number(frame.time) < Number(segment.start) || Number(frame.time) > Number(segment.end)) throw new Error('原片参考帧无效');
             }
           }
         }
@@ -283,6 +284,9 @@ export class StudioStore {
       }
       if (resource === 'shots') {
         if (!finitePositive(item.duration) || !Array.isArray(item.dialogue)) throw new Error('镜头时长或对白无效');
+        if (item.image !== undefined && typeof item.image !== 'string') throw new Error('镜头分镜图须为上传后的图片地址');
+        if (item.imageHistory !== undefined && (!Array.isArray(item.imageHistory) || item.imageHistory.some(url => typeof url !== 'string'))) throw new Error('镜头分镜图历史无效');
+        if (item.storyboardPrompt !== undefined && typeof item.storyboardPrompt !== 'string') throw new Error('镜头分镜图提示词须为文本');
         const episode = required('episodes', item.episodeId, `${path}.episodeId`);
         if (item.assetIds !== undefined) {
           if (!Array.isArray(item.assetIds) || new Set(item.assetIds).size !== item.assetIds.length) throw new Error('镜头资产关联无效');
@@ -312,12 +316,15 @@ export class StudioStore {
         if (!Array.isArray(source.frames) || source.frames.length > 12) throw new Error('原片参考帧无效');
         for (const frame of source.frames as Array<Record<string, unknown>>) {
           if (!Number.isFinite(frame.time) || Number(frame.time) < Number(source.start) || Number(frame.time) > Number(source.end)
-            || this.projects.files.get(String(frame.fileId))?.mimeType !== 'image/jpeg' || frame.url !== `/api/files/${frame.fileId}`) throw new Error('原片参考帧或时间无效');
+            || this.projects.files.get(String(frame.fileId))?.mimeType !== 'image/jpeg' || this.projects.files.fromUrl(frame.url)?.id !== frame.fileId) throw new Error('原片参考帧或时间无效');
         }
         if (source.confirmed !== undefined && typeof source.confirmed !== 'boolean') throw new Error('来源确认状态无效');
         for (const key of ['description', 'name', 'dialogue', 'notes']) if (source[key] !== undefined && typeof source[key] !== 'string') throw new Error('来源描述须为文本');
       }
       if (resource === 'clips') {
+        if (item.imageSource !== undefined && !['clip', 'shots'].includes(String(item.imageSource))) throw new Error('视频分镜图来源只能是片段自己的分镜图或镜头分镜图');
+        if (item.storyboardPrompt !== undefined && typeof item.storyboardPrompt !== 'string') throw new Error('片段分镜图提示词须为文本');
+        if (item.blocking !== undefined && typeof item.blocking !== 'string') throw new Error('初始站位与状态须为文本');
         const episode = required('episodes', item.episodeId, `${path}.episodeId`);
         if (!Array.isArray(item.shotIds) || new Set(item.shotIds).size !== item.shotIds.length) throw new Error('片段镜头列表无效');
         for (const id of item.shotIds as string[]) {
@@ -348,7 +355,7 @@ export async function handleStudioRequest(req: IncomingMessage, res: ServerRespo
   const send = (status: number, data: unknown) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)); };
   if (!isLocalOrLanAddress(req.socket.remoteAddress)) { send(403, { error: '工作台仅允许本机或局域网访问' }); return true; }
   try {
-    if (path === '/api/studio/state' && req.method === 'GET') { send(200, store.snapshot()); return true; }
+    if (path === '/api/studio/state' && req.method === 'GET') { sendRevalidatedJson(req, res, store.snapshot()); return true; }
     let text = '';
     for await (const part of req) { text += part.toString(); if (Buffer.byteLength(text) > 16 * 1024 * 1024) throw new Error('请求超过16MB'); }
     const body = text ? JSON.parse(text) : {};

@@ -53,6 +53,9 @@ export class SkillLibrary {
     if (!this.builtin) throw new Error('Skills 尚未初始化');
     return [{ ...this.builtin, favorite: this.storage.getConfig<boolean>('skillCreatorFavorite') || false, ...this.storage.getConfig<Pick<AgentSkill, 'favorite' | 'allowImplicitInvocation' | 'version' | 'updatedAt'>>('skillCreatorPreferences') }, ...this.storage.getConfig<AgentSkill[]>('skills') || []];
   }
+  catalog(): AgentSkill[] {
+    return this.list().map(({ instructions: _, resources: __, frontmatter: ___, ...entry }) => entry);
+  }
 
   save(skill: AgentSkill) {
     if (!skill || typeof skill.id !== 'string' || !skill.id || typeof skill.name !== 'string') throw new Error('Skill 格式无效');

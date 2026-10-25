@@ -1,3 +1,4 @@
+import { imageUrl } from '../../image-url'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Button as DarlButton } from '../../../../../src/components/ui/Button'
 import {
@@ -218,7 +219,7 @@ export function MediaPreview({ item, onClose }) {
       }
     >
       {kind === 'image' ? (
-        <img className="preview-image" src={url} alt={item.name || '素材'} />
+        <a href={url} target="_blank" rel="noreferrer"><img loading="lazy" className="preview-image" src={imageUrl(url, 1024)} alt={item.name || '素材'} /></a>
       ) : kind === 'video' ? (
         <video className="preview-video" src={url} controls playsInline />
       ) : (
@@ -372,9 +373,9 @@ export function ReferencePicker({
             className={`picker-card ${picked.some((p) => same(p, item)) ? 'selected' : ''}`}
           >
             {item.kind === 'image' ? (
-              item.url ? <img src={item.thumbnailUrl || item.url} alt={item.name} loading="lazy" /> : <span className="studio-cover-empty">暂无图片</span>
+              item.url ? <img src={imageUrl(item.url, 320)} alt={item.name} loading="lazy" /> : <span className="studio-cover-empty">暂无图片</span>
             ) : item.kind === 'video' ? (
-              <video src={item.url} controls playsInline />
+              <video src={item.url} controls playsInline preload="none" />
             ) : (
               <audio src={item.url} controls />
             )}

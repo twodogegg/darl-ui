@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import type { MediaStyleOption } from '../../../src/components/media-workspace/types';
 import { FileStore, type StoredFile } from './file-storage';
+import { removeStoredThoughtSignatures } from './storage';
 
 export type MediaJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'uncertain';
 export type MediaJob = { id: string; taskId?: string; batchId?: string; modelId: string; type: 'image' | 'video'; status: MediaJobStatus;
@@ -56,6 +57,7 @@ export class MediaJobStore {
     this.db.exec('CREATE TABLE IF NOT EXISTS media_generation_jobs (id TEXT PRIMARY KEY, model_id TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL)');
     this.db.exec('CREATE INDEX IF NOT EXISTS media_generation_jobs_queue ON media_generation_jobs(status,updated_at)');
     this.db.exec('CREATE TABLE IF NOT EXISTS media_model_limits (model_id TEXT PRIMARY KEY, concurrency INTEGER NOT NULL CHECK(concurrency BETWEEN 1 AND 100000))');
+    removeStoredThoughtSignatures(this.db, 'media_generation_jobs');
   }
   list(): MediaJob[] {
     return (this.db.prepare('SELECT data FROM media_generation_jobs ORDER BY updated_at DESC').all() as unknown as Row[]).map(row => JSON.parse(row.data) as MediaJob);
