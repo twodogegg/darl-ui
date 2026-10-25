@@ -132,6 +132,25 @@ export class StudioStore {
         }
       }
       for (const resource of Object.keys(data) as StudioResource[]) for (const item of data[resource]) if (aliases.has(String(item.projectId))) item.projectId = aliases.get(String(item.projectId));
+      // shots.clipId is a write-only mirror of clips.shotIds so one agent edit can place a shot in its segment.
+      // An unchanged clipId never overrides manual clip composition.
+      for (const shot of data.shots) {
+        const next = shot.clipId, previous = original.shots.find(item => item.id === shot.id)?.clipId;
+        if (next === undefined) { delete shot.clipId; continue; }
+        if (next === previous) { delete shot.clipId; continue; }
+        delete shot.clipId;
+        // Clearing clipId keeps the shot in the clip it already belongs to; only an explicit clipId moves it.
+        if (!next) continue;
+        for (const clip of data.clips) {
+          const ids = clip.shotIds as string[];
+          if (clip.id === next) {
+            if (ids.includes(shot.id)) continue;
+            const owner = data.clips.find(other => other.id !== clip.id && (other.shotIds as string[]).includes(shot.id));
+            if (owner || clip.episodeId !== shot.episodeId || clip.sceneId !== shot.sceneId) throw failure('tool-validation', 'STUDIO_REFERENCE_INVALID', `shots[${shot.id}].clipId：片段 ${clip.id} 不存在、不属于同一场次，或镜头已属于其他片段。`, false);
+            ids.push(shot.id);
+          } else if (ids.includes(shot.id)) clip.shotIds = ids.filter(id => id !== shot.id);
+        }
+      }
       // Deleting shots releases their clip associations; durations always derive from current shots.
       for (const clip of data.clips) {
         clip.shotIds = (clip.shotIds as string[]).filter(id => data.shots.some(shot => shot.id === id));
@@ -172,11 +191,12 @@ export class StudioStore {
   mediaTarget(value: unknown, type: string): Record<string, unknown> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('生成目标无效');
     const target = value as Record<string, unknown>, resource = studioResource(target.resource);
-    if (!['assets', 'clips'].includes(resource)) throw new Error('生成目标必须是资产或片段');
+    if (!['assets', 'clips', 'shots'].includes(resource)) throw new Error('生成目标必须是资产、镜头或片段');
     const state = this.snapshot();
     const item = state[resource].find(item => item.id === target.id);
     if (!item || item._version !== target.version) throw new StudioConflict('生成目标已变化，请重新读取');
-    const fields = type === 'video' ? resource === 'clips' ? ['videos'] : [] : resource === 'assets' ? ['image'] : ['image', 'storyboardImage', 'blockingImage'];
+    // 镜头分镜图归属 Shot；片段只维护自己的分镜图与站位参考图，两者互不覆盖。
+    const fields = type === 'video' ? resource === 'clips' ? ['videos'] : [] : resource === 'assets' ? ['image'] : resource === 'shots' ? ['image'] : ['image', 'storyboardImage', 'blockingImage'];
     if (!fields.includes(String(target.field))) throw new Error('生成类型与目标字段不匹配');
     if (resource === 'clips') {
       const state = this.snapshot(), episode = state.episodes.find(episode => episode.id === item.episodeId);
@@ -287,6 +307,7 @@ export class StudioStore {
         if (item.image !== undefined && typeof item.image !== 'string') throw new Error('镜头分镜图须为上传后的图片地址');
         if (item.imageHistory !== undefined && (!Array.isArray(item.imageHistory) || item.imageHistory.some(url => typeof url !== 'string'))) throw new Error('镜头分镜图历史无效');
         if (item.storyboardPrompt !== undefined && typeof item.storyboardPrompt !== 'string') throw new Error('镜头分镜图提示词须为文本');
+        if (['scale', 'camera', 'transition', 'description', 'effects'].some(key => item[key] !== undefined && typeof item[key] !== 'string')) throw new Error('镜头的景别、运镜、切镜、画面和音效须为文本');
         const episode = required('episodes', item.episodeId, `${path}.episodeId`);
         if (item.assetIds !== undefined) {
           if (!Array.isArray(item.assetIds) || new Set(item.assetIds).size !== item.assetIds.length) throw new Error('镜头资产关联无效');
@@ -345,7 +366,7 @@ export class StudioStore {
 }
 
 export const STUDIO_TOOLS = [
-  { name: 'builtin_read_studio', title: '查询短剧创作数据', description: '按项目/剧集/场次批量读取大纲、剧本场次、资产、分镜、片段。先用 describe=true 获取该资源现有字段、默认值与编辑规则。返回真实 ID、_version、total 和 nextCursor；分页未读完不代表全部内容。', risk: 'read' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { resource: { type: 'string', enum: [...Object.keys(studioFields), 'styles'] }, describe: { type: 'boolean' }, projectId: { type: 'string' }, episodeId: { type: 'string' }, sceneId: { type: 'string' }, ids: { type: 'array', items: { type: 'string' }, maxItems: 500 }, fields: { type: 'array', items: { type: 'string' } }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500 } }, required: ['resource'], additionalProperties: false } },
+  { name: 'builtin_read_studio', title: '查询短剧创作数据', description: '按项目/剧集/场次批量读取大纲、剧本场次、资产、镜头（shots）、视频片段（clips）。镜头是片段内的分镜记录：片段通过 shotIds 组合镜头，页面在“视频制作”中统一编辑镜头与视频。先用 describe=true 获取该资源现有字段、默认值与编辑规则。返回真实 ID、_version、total 和 nextCursor；分页未读完不代表全部内容。', risk: 'read' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { resource: { type: 'string', enum: [...Object.keys(studioFields), 'styles'] }, describe: { type: 'boolean' }, projectId: { type: 'string' }, episodeId: { type: 'string' }, sceneId: { type: 'string' }, ids: { type: 'array', items: { type: 'string' }, maxItems: 500 }, fields: { type: 'array', items: { type: 'string' } }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500 } }, required: ['resource'], additionalProperties: false } },
   { name: 'builtin_edit_studio', title: '批量修改短剧内容', description: '按读取到的字段白名单提交一组原子编辑，最多500项。修改/删除传最新 _version 作为 version；values 只含改变字段。资源字段、类型、创建必填项与默认值先通过查询工具 describe 获取。分镜角色对白必须引用当前项目真实角色资产；可把新资产与分镜放同批创建。剧本页显示 episodes.scenes[].content，须包含完整动作与台词并同步 script，不支持 scenes[].dialogue。创建项目的 id 为临时标识，返回实际编号；同批新剧集可用临时 projectId 关联。position 可调整记录排序。requestId 为唯一请求标识，重试沿用。关联变化放同批，失败整批回滚。生成任务用已有媒体工具。', risk: 'write' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { requestId: { type: 'string' }, changes: { type: 'array', minItems: 1, maxItems: 500, items: studioChangeSchema } }, required: ['requestId', 'changes'], additionalProperties: false } },
 ] as const;
 

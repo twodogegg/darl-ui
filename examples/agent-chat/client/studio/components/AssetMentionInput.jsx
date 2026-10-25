@@ -145,8 +145,9 @@ export function MentionText({ value, candidates = [] }) {
     : <span key={index} className={`asset-mention-chip asset-mention-chip--inline ${part.h3 ? 'asset-mention-chip--h3' : part.candidate ? `asset-mention-chip--${part.candidate.typeKey || 'asset'}` : 'asset-mention-chip--unknown'}`} title={part.h3 ? 'H3 内部引用标签' : part.candidate ? `${part.candidate.type} · ${part.candidate.name}${part.candidate.variantName ? ` · ${part.candidate.variantName}` : ''}` : '无法解析的资产引用，请确认'}>{part.candidate?.image && <img loading="lazy" src={imageUrl(part.candidate.image, 160)} alt="" />}<span>{part.label}</span></span>)}</span>
 }
 
-export default function AssetMentionInput({ value = '', onChange, onBlur, candidates = [], multiline = true, label, placeholder = '输入文字，键入 @ 选择资产…' }) {
+export default function AssetMentionInput({ value = '', onChange, onBlur, candidates = [], multiline = true, label, placeholder = '输入文字，键入 @ 选择资产…', inputRef }) {
   const root = useRef(null)
+  const attach = (element) => { root.current = element; if (typeof inputRef === 'function') inputRef(element); else if (inputRef) inputRef.current = element }
   const focused = useRef(false)
   const [menu, setMenu] = useState(null)
   const [selected, setSelected] = useState(0)
@@ -193,7 +194,7 @@ export default function AssetMentionInput({ value = '', onChange, onBlur, candid
   }
   return <div className="asset-mention-field">
     {label && <span className="asset-mention-label">{label}</span>}
-    <Tag ref={root} className="asset-mention-editor" contentEditable suppressContentEditableWarning role="textbox" aria-label={label} data-placeholder={placeholder} onFocus={() => { focused.current = true }} onBlur={() => { setTimeout(() => setMenu(null), 120); focused.current = false; emit(); onBlur?.() }} onInput={() => { emit(); inspect() }} onKeyDown={onKeyDown} />
+    <Tag ref={attach} className="asset-mention-editor" contentEditable suppressContentEditableWarning role="textbox" aria-label={label} data-placeholder={placeholder} onFocus={() => { focused.current = true }} onBlur={() => { setTimeout(() => setMenu(null), 120); focused.current = false; onBlur?.(serialize(root.current)) }} onInput={() => { emit(); inspect() }} onKeyDown={onKeyDown} />
     {menu && <div className="asset-mention-menu" role="listbox">{menu.items.map((candidate, index) => <span key={candidate.protocol || protocolOf(candidate)}>{(index === 0 || menu.items[index - 1].type !== candidate.type) && <strong className="asset-mention-group">{candidate.type === '图片' ? '参考图' : candidate.type}</strong>}<button className={index === selected ? 'active' : ''} role="option" aria-selected={index === selected} onMouseDown={event => { event.preventDefault(); choose(candidate) }}>{candidate.image && <img loading="lazy" src={imageUrl(candidate.image, 160)} alt="" />}<span><strong>@{candidate.name}{candidate.variantName ? ` · ${candidate.variantName}` : ''}</strong><small>{candidate.type}</small></span></button></span>)}</div>}
   </div>
 }

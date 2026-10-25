@@ -153,8 +153,8 @@ function ScriptList({ context }) {
     if (!episodes.length) return notify('暂无剧集，请先在项目大纲中规划分集')
     if (dirty && !save(true)) return
     update(draft => draft.episodes.filter(episode => episode.projectId === project.id).forEach(episode => { episode.stage = Math.max(episode.stage, 2) }))
-    navigate(`/storyboard?projectId=${project.id}&episodeId=${episodes[0].id}`)
-    notify('全部剧集已确认，进入分镜脚本')
+    navigate(`/video?projectId=${project.id}&episodeId=${episodes[0].id}`)
+    notify('全部剧集已确认，进入视频制作')
   }
 
   return (
@@ -163,7 +163,7 @@ function ScriptList({ context }) {
         <div>
           <h2>剧本</h2>
           <p className="muted">
-            全项目共 {episodes.length} 集 · 逐集按场次编写，确认后进入分镜脚本
+            全项目共 {episodes.length} 集 · 逐集按场次编写，确认后进入视频制作，在同一页面设计镜头并制作视频
           </p>
         </div>
         <Field label="本集目标时长（秒）">
@@ -248,7 +248,7 @@ function ScriptList({ context }) {
             重新生成本集
           </Button>
           <Button primary disabled={busy || !episodes.length} onClick={confirmAll}>
-            确认全部剧本，进入分镜脚本 ↗
+            确认全部剧本，进入视频制作 ↗
           </Button>
         </div>
       </footer>

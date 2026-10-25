@@ -7,7 +7,6 @@ import { Projects } from './pages/Projects'
 import Script, { Outline } from './pages/Script'
 import Source from './pages/Source'
 import Art from './pages/Art'
-import Storyboard from './pages/Storyboard'
 import VideoProduction from './pages/VideoProduction'
 import Assets from './pages/Assets'
 import Prompts from './pages/Prompts'
@@ -22,7 +21,6 @@ import './styles/workspaces.css'
 import './styles/selects.css'
 import './styles/art.css'
 import './styles/art-drawer.css'
-import './styles/storyboard.css'
 import './styles/migration.css'
 import './styles/production.css'
 import './styles/integration.css'
@@ -61,7 +59,6 @@ function Pages({ onContextChange }) {
     <Route path="/source" element={<Source key={data.projects.map(item => item.id).join(',')} />} />
     <Route path="/script" element={<Script />} />
     <Route path="/art" element={<Art />} />
-    <Route path="/storyboard" element={<Storyboard />} />
     <Route path="/video" element={<VideoProduction />} />
     <Route path="/film" element={<RedrawFilm />} />
     <Route path="/assets" element={<Assets />} />

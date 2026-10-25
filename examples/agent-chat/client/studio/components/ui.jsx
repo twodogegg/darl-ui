@@ -75,7 +75,7 @@ export function Tabs({ items, value, onChange, label = '分类' }) {
 }
 export function Modal({ title, onClose, children, footer, drawer = false, wide = false, header, panelClassName = '', maskClassName = '', bodyClassName = '', onPaste }) {
   const { pathname } = useLocation()
-  const scope = pathname === '/art' ? 'page-art' : pathname === '/storyboard' ? 'page-storyboard' : ''
+  const scope = pathname === '/art' ? 'page-art' : pathname === '/video' ? 'page-storyboard' : ''
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal><div className="rn-studio"><div className={scope}><div className={`modal-portal ${maskClassName}`}><Dialog.Overlay className="studio-dialog-overlay" /><Dialog.Content onPaste={onPaste} aria-describedby={undefined} className={`dialog studio-dialog-content ${drawer ? 'drawer' : ''} ${wide ? 'wide' : ''} ${panelClassName}`}><Dialog.Title asChild><span className="studio-sr-only">{title}</span></Dialog.Title>{header || <header><h2>{title}</h2><Dialog.Close asChild><button className="icon-btn" aria-label="关闭"><IconX size={20} /></button></Dialog.Close></header>}<div className={`dialog-body ${bodyClassName}`}>{children}</div>{footer && <footer>{footer}</footer>}</Dialog.Content></div></div></div></Dialog.Portal></Dialog.Root>
 }
 export function Confirm({ title, children, onClose, onConfirm, danger }) {

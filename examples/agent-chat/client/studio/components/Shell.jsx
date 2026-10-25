@@ -24,7 +24,7 @@ const stepIcons = [IconNotebook, IconScript, IconLayoutList, IconPhoto, IconVide
 // 项目级步骤：整个项目共用同一份内容，不按集拆分
 const projectLevelPaths = ['/source', '/outline', '/script', '/art', '/film']
 // 分集步骤：进入后才选择具体剧集
-const episodeLevelPaths = ['/storyboard', '/video']
+const episodeLevelPaths = ['/video']
 
 const nav = [
   { to: '/', label: '工作台', mobile: '工作台', icon: IconHome },

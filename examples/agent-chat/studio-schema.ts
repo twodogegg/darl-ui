@@ -3,7 +3,7 @@ export const studioFields = {
   projects: 'title summary cover ratio style_catalog_id generationMode adaptation planned durationMin durationMax duration requirements outline sourceScript updated creationMode targetRegion targetLanguage sourceVideo',
   episodes: 'projectId number title cover script scenes duration stage',
   assets: 'projectId episodeIds name type role alias description appearance costume voiceDescription image prompt variants history voiceId references dependencies imageDependencies source',
-  shots: 'episodeId sceneId description scale camera transition dialogue effects duration source assetIds image imageHistory storyboardPrompt',
+  shots: 'episodeId sceneId description scale camera transition dialogue effects duration source assetIds image imageHistory storyboardPrompt clipId',
   clips: 'episodeId sceneId title shotIds sourceSignature description duration prompt assetIds references disabledVoiceIds lastGenerationVoiceIds image imageHistory imageSource storyboardPrompt blocking blockingImage blockingHistory videos currentVideo model resolution ratio mode firstFrame lastFrame',
   films: 'projectId episodeId title name url',
   history: 'projectId episodeId message time',
@@ -13,6 +13,64 @@ export const studioFields = {
   voices: 'name url language gender favorite',
   prompts: 'group name mode text defaultText',
 } as const;
+/**
+ * 镜头三要素的固定选项（下拉框）。镜头层分别维护，不合并进画面描述。
+ * - 景别：按取景范围由大到小，参考影视视场分类（远景 → 大特写）。
+ * - 运镜：相机在镜头内的运动方式（固定、推拉摇移、升降、跟拍、手持、环绕）。
+ * - 切镜：与上一镜的衔接方式；首镜固定为“—”，默认硬切。
+ * 选项之外的历史自由描述不会被丢弃，仍以“自定义”形式保留并在下拉框显示原值。
+ */
+export const shotOptions = {
+  scale: ['远景', '全景', '中远景', '中景', '中近景', '近景', '特写', '大特写', '空镜'],
+  camera: ['固定', '推近', '拉远', '摇镜', '移镜', '跟拍', '升降', '环绕', '手持', '变焦'],
+  transition: ['—', '硬切', '叠化', '淡入', '淡出', '闪白', '划像', '匹配剪辑', '跳切'],
+} as const;
+export type ShotOptionField = keyof typeof shotOptions;
+/** 首镜没有“上一镜”，切镜固定为破折号。 */
+export const FIRST_SHOT_TRANSITION = '—';
+export const DEFAULT_SHOT_TRANSITION = '硬切';
+/**
+ * 历史值归一到当前选项：只有能确定是单一标准动作时才换算，
+ * 复合描述（如“固定后微推”“手持缓推，贴着人群缝隙向前”）保留原值，由用户在下拉框里重新选择。
+ */
+export function shotOptionValue(field: ShotOptionField, value: unknown): string {
+  const text = String(value ?? '').trim();
+  const options = shotOptions[field] as readonly string[];
+  if (options.includes(text)) return text;
+  if (text === '' || text === '—') return field === 'transition' ? DEFAULT_SHOT_TRANSITION : '';
+  if (field === 'camera') {
+    if (/^固定(镜头)?(，|,|\s)*(浅景深|景深|机位)?$/.test(text)) return '固定';
+    // 只换算描述单一动作、且没有“固定 + 另一动作”这类复合写法。
+    const compound = /(手持|固定|过肩|俯拍|仰拍|升降|环绕|变焦)/.test(text) || /[，,、;；]/.test(text);
+    if (compound) return text;
+    const actions = new Set(Array.from(text).filter(char => '推拉摇移跟'.includes(char)));
+    if (actions.size !== 1) return text;
+    const [action] = actions;
+    if (action === '推') return '推近';
+    if (action === '拉') return '拉远';
+    if (action === '跟') return '跟拍';
+    if (action === '摇') return '摇镜';
+    if (action === '移') return '移镜';
+    return text;
+  }
+  if (field === 'transition') {
+    if (/^(硬切|切)$/.test(text)) return DEFAULT_SHOT_TRANSITION;
+    if (/叠化|溶/.test(text)) return '叠化';
+    if (/^淡入/.test(text)) return '淡入';
+    if (/^淡出|渐黑/.test(text)) return '淡出';
+    return text;
+  }
+  if (/^(远景|大远景|极远景)$/.test(text)) return '远景';
+  if (/^(全景|大全景)$/.test(text)) return '全景';
+  if (/^(中远景)$/.test(text)) return '中远景';
+  if (/^中景$/.test(text)) return '中景';
+  if (/^中近景$/.test(text)) return '中近景';
+  if (/^近景$/.test(text)) return '近景';
+  if (/^(大特写|特写大特写|极特写|微距)$/.test(text)) return '大特写';
+  if (/^特写$/.test(text)) return '特写';
+  if (/^(空镜|空镜头)$/.test(text)) return '空镜';
+  return text;
+}
 export type StudioResource = keyof typeof studioFields;
 export type StudioRecord = { id: string; _version: number; _position?: number; [key: string]: unknown };
 export type StudioData = Record<StudioResource, StudioRecord[]>;
@@ -47,14 +105,14 @@ export const studioDefaults: Partial<Record<StudioResource, Record<string, unkno
   projects: { cover: '', generationMode: '故事版', adaptation: '抽核', planned: null, durationMin: 2, durationMax: 5, duration: 120, requirements: '', outline: { core: '', story: '', keep: '', remove: '', merge: '', risks: '', episodes: '', roles: [], scenes: [], props: [] }, sourceScript: '', creationMode: 'script' },
   episodes: { number: 1, title: '新剧集', cover: '', script: '', scenes: [], duration: 120, stage: 1 },
   assets: { episodeIds: [], name: '', type: '角色', role: '', alias: '', description: '', appearance: '', costume: '', voiceDescription: '', image: '', prompt: '', variants: [], history: [], voiceId: '', references: [], dependencies: [], imageDependencies: {} },
-  shots: { description: '', scale: '中景', camera: '固定', transition: '硬切', dialogue: [], effects: '', duration: 3, assetIds: [], image: '', imageHistory: [], storyboardPrompt: '' },
+  shots: { description: '', scale: '中景', camera: '固定', transition: '硬切', dialogue: [], effects: '', duration: 3, assetIds: [], image: '', imageHistory: [], storyboardPrompt: '', clipId: '' },
   clips: { title: '新片段', shotIds: [], sourceSignature: '', description: '', duration: 0, prompt: '', assetIds: [], references: [], disabledVoiceIds: [], lastGenerationVoiceIds: [], image: '', imageHistory: [], imageSource: 'clip', storyboardPrompt: '', blocking: '', blockingImage: '', blockingHistory: [], videos: [], model: '', resolution: '', ratio: '9:16', mode: '参考生成', firstFrame: '', lastFrame: '' },
 };
 export function studioResource(value: unknown): StudioResource {
   if (typeof value !== 'string' || !Object.hasOwn(studioFields, value)) throw new Error('不支持的资源类型');
   return value as StudioResource;
 }
-const idFields = new Set(['projectId', 'episodeId', 'sceneId', 'voiceId', 'folderId']);
+const idFields = new Set(['projectId', 'episodeId', 'sceneId', 'voiceId', 'folderId', 'clipId']);
 const arrayFields = new Set(['episodeIds', 'scenes', 'variants', 'history', 'references', 'dependencies', 'dialogue', 'shotIds', 'assetIds', 'disabledVoiceIds', 'lastGenerationVoiceIds', 'imageHistory', 'storyboardHistory', 'blockingHistory', 'videos']);
 const numericFields = new Set(['number', 'duration', 'stage', 'planned', 'durationMin', 'durationMax', 'updated', 'group', 'style_catalog_id']);
 const objectFields = new Set(['outline', 'sourceVideo', 'source', 'imageDependencies']);
@@ -116,6 +174,7 @@ export function studioValueSchema(resource: StudioResource): Record<string, unkn
     if (key === 'assetIds') schema = { type: 'array', items: { type: 'string' }, uniqueItems: true };
     if (key === 'favorite') schema = { type: 'boolean' };
     if (key === 'projectId' || key === 'episodeId' || key === 'sceneId') schema = { type: 'string', minLength: 1, description: '关联记录的真实 ID；同批新建记录可用该记录的 ID。' };
+    if (resource === 'shots' && key === 'clipId') schema = { type: 'string', minLength: 1, description: '镜头所属视频片段 ID；写入时把该镜头加入对应片段 shotIds，镜头因此只能属于一个片段。与 clips.shotIds 等价，留空表示不调整归属。' };
     if (key === 'dialogue') schema = { type: 'array', items: dialogueSchema };
     if (resource === 'assets' && key === 'dependencies') schema = dependenciesSchema;
     if (resource === 'assets' && key === 'imageDependencies') schema = dependencyImagesSchema;

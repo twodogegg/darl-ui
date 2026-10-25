@@ -12,9 +12,9 @@ import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv
 import { removeEpisode, sourceScenes, unmatchedSentences } from '../examples/agent-chat/client/studio/scenes';
 import { assetImageRequest, canBatchGenerate } from '../examples/agent-chat/client/studio/art';
 import { MediaJobStore } from '../examples/agent-chat/server/media-job-store';
-import { clipMediaReferences, videoDuration, videoImageReferences } from '../examples/agent-chat/client/studio/storyboard';
+import { CLIP_DURATION_LIMIT, clipImagePrompt, clipMediaReferences, clipPrompt, clipShots, imageSourceOptions, moveShotId, shotPrompt, sourceImageReferences, totalDuration, videoDuration, videoImageReferences } from '../examples/agent-chat/client/studio/storyboard';
 import { defaultModelConfiguration, toMediaModels } from '../src/components/settings/model-config';
-import { studioPositions, type StudioChange } from '../examples/agent-chat/studio-schema';
+import { FIRST_SHOT_TRANSITION, shotOptionValue, shotOptions, studioPositions, type StudioChange } from '../examples/agent-chat/studio-schema';
 import { studioAgentContent } from '../examples/agent-chat/client/studio/agent-task';
 
 let directory: string, store: StudioStore, projectId: string, files: FileStore;
@@ -37,6 +37,60 @@ describe('shared short drama business service', () => {
     expect(videoImageReferences(clip, references, '分镜图')).toEqual([{ id: 'clip-1:storyboard', name: '分镜图', kind: 'image', url: '/api/files/storyboard' }]);
     expect(videoImageReferences({ ...clip, image: '' }, references, '分镜图')).toEqual([]);
     expect(videoImageReferences(clip, references, '参考生成')).toBe(references.images);
+  });
+  it('keeps the merged video workspace on clip own image or the shots in order and separates both image owners', () => {
+    const clip = { id: 'clip-1', image: '/api/files/clip-own', assetIds: [], references: [] };
+    const shots = [{ id: 'shot-1', image: '/api/files/shot-1' }, { id: 'shot-2', image: '' }, { id: 'shot-3', image: '/api/files/shot-3' }];
+    expect(imageSourceOptions(clip, shots).map(option => [option.key, option.available, option.total])).toEqual([['clip', 1, 1], ['shots', 2, 3]]);
+    expect(videoImageReferences({ ...clip, images: [] }, { images: sourceImageReferences(clip, shots, 'shots') }, '参考生成', shots)).toEqual(sourceImageReferences(clip, shots, 'shots'));
+    expect(videoImageReferences({ ...clip, image: '' }, { images: [] }, '分镜图', shots)).toEqual([]);
+    expect(sourceImageReferences(clip, shots, 'shots').map((item: { url: string }) => item.url)).toEqual(['/api/files/shot-1', '/api/files/shot-3']);
+    expect(sourceImageReferences(clip, shots, 'clip').map((item: { url: string }) => item.url)).toEqual(['/api/files/clip-own']);
+    // 15 秒是上限，12 秒不是下限；镜头时长合计直接决定片段计划时长。
+    expect(totalDuration([{ duration: 6 }, { duration: 7 }])).toBe(13);
+    expect(CLIP_DURATION_LIMIT).toBe(15);
+    expect(videoDuration(13, null)).toBe(13);
+  });
+  it('keeps shot fields separate and organizes the whole clip prompt by shot order', () => {
+    const scene = { id: 'scene-1', location: '走廊', setting: '外', time: '夜' };
+    const lines = [
+      { id: 's1', episodeId: 'episode-1', sceneId: 'scene-1', scale: '中景', camera: '推近', transition: '—', description: '她抬手停在门前', dialogue: [{ id: 'd1', type: '角色', assetId: 'asset-1', speaker: 'Lin', description: '压低声音', text: '我回来了' }], effects: '走廊回声', duration: 5 },
+      { id: 's2', episodeId: 'episode-1', sceneId: 'scene-1', scale: '特写', camera: '固定', transition: '硬切', description: '指节叩门', dialogue: [], effects: '', duration: 7 },
+    ];
+    const prompt = clipPrompt(lines, lines, [scene]);
+    expect(prompt).toContain('镜头 01｜5 秒｜中景｜推近｜—');
+    expect(prompt).toContain('镜头 02｜7 秒｜特写｜固定｜硬切');
+    expect(prompt).toContain('Lin｜压低声音｜我回来了');
+    expect(prompt.indexOf('镜头 01')).toBeLessThan(prompt.indexOf('镜头 02'));
+    expect(clipImagePrompt({ id: 'clip-1', blocking: '她站在门外右侧', storyboardPrompt: '' }, lines, [scene])).toContain('初始站位与状态：她站在门外右侧');
+    expect(shotPrompt(lines[1])).toContain('画面：指节叩门');
+  });
+  it('orders a segment by clip.shotIds and moves shots by id, not object identity', () => {
+    const all = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }];
+    const clip = { id: 'clip-1', shotIds: ['c', 'a'] };
+    // 未关联的镜头不会混进当前片段。
+    expect(clipShots(all, clip).map((shot: { id: string }) => shot.id)).toEqual(['c', 'a']);
+    // 拖拽时保存的是旧快照：按 id 计算位置，避免 indexOf 返回 -1。
+    expect(moveShotId(clip.shotIds, 'a', 0)).toEqual(['a', 'c']);
+    expect(moveShotId(['a', 'b', 'c'], 'a', 3)).toEqual(['b', 'c', 'a']);
+    expect(moveShotId(['a', 'b', 'c'], 'c', 0)).toEqual(['c', 'a', 'b']);
+    expect(moveShotId(['a', 'b', 'c'], 'b', 99)).toEqual(['a', 'c', 'b']);
+  });
+  it('offers fixed shot vocabularies and keeps compound historical values instead of mislabelling them', () => {
+    expect(shotOptions.scale).toContain('大特写');
+    expect(shotOptions.camera).toContain('环绕');
+    expect(shotOptions.transition[0]).toBe(FIRST_SHOT_TRANSITION);
+    // 标准写法与常见同义写法归一。
+    expect(shotOptionValue('camera', '推镜')).toBe('推近');
+    expect(shotOptionValue('camera', '右摇')).toBe('摇镜');
+    expect(shotOptionValue('camera', '固定镜头')).toBe('固定');
+    expect(shotOptionValue('transition', '')).toBe('硬切');
+    expect(shotOptionValue('scale', '大全景')).toBe('全景');
+    // 复合描述无法确定单一动作，保留原值由用户重选。
+    expect(shotOptionValue('camera', '固定后微推')).toBe('固定后微推');
+    expect(shotOptionValue('camera', '手持缓推，贴着人群缝隙向前')).toBe('手持缓推，贴着人群缝隙向前');
+    expect(shotOptionValue('scale', '胸口以上')).toBe('胸口以上');
+    expect(shotOptionValue('scale', '')).toBe('');
   });
   it('drops obsolete batch snapshots without losing records or safe retries', () => {
     const changes = shots(1);
@@ -227,6 +281,16 @@ describe('shared short drama business service', () => {
     ])).toThrow('已发生变化');
     expect(store.snapshot().shots[0].duration).toBe(3);
     expect(() => store.apply('forbidden', [{ resource: 'shots', id: 'shot-0', op: 'update', version: 1, values: { apiKey: 'invalid' } }])).toThrow('不允许');
+  });
+  it('places a shot in its segment through shots.clipId and accepts shot images as media targets', () => {
+    store.apply('clip-for-shot', [{ resource: 'clips', op: 'create', id: 'clip-1', values: { episodeId: 'episode-1', sceneId: 'scene-1', title: '片段 01', shotIds: [] } }]);
+    store.apply('shot-clip', [{ resource: 'shots', op: 'create', id: 'shot-1', values: { episodeId: 'episode-1', sceneId: 'scene-1', description: '推门', clipId: 'clip-1' } }]);
+    expect(store.snapshot().clips[0]).toMatchObject({ shotIds: ['shot-1'], duration: 3 });
+    expect(store.snapshot().shots[0].clipId).toBeUndefined();
+    expect(() => store.apply('other-scene', [{ resource: 'shots', op: 'create', id: 'shot-2', values: { episodeId: 'episode-1', sceneId: 'scene-2', description: '走廊', clipId: 'clip-1' } }])).toThrow();
+    const shot = store.snapshot().shots.find(item => item.id === 'shot-1')!;
+    expect(store.mediaTarget({ resource: 'shots', id: 'shot-1', version: shot._version, field: 'image' }, 'image')).toMatchObject({ resource: 'shots', field: 'image' });
+    expect(() => store.mediaTarget({ resource: 'shots', id: 'shot-1', version: shot._version, field: 'videos' }, 'video')).toThrow();
   });
   it('persists sort order, derives clip duration, releases deleted shots and protects cross-scene associations', () => {
     store.apply('shots', shots(3));
