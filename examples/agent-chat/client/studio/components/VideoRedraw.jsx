@@ -113,8 +113,8 @@ export function SourcePlayer({ source, start, end }) {
 export function RedrawSource({ context }) {
   const { project, projectId, link } = context, { models, agents, agentSelection, currentAgentId, notify, reload } = useStore()
   const { jobs, action, busy, running, error } = useRedraw(projectId)
-  const [modelId, setModel] = useState(''), [language, setLanguage] = useState(''), [visualOnly, setVisual] = useState(false)
-  const [start, setStart] = useState(''), [end, setEnd] = useState(''), [selected, setSelected] = useState(null), [preview, setPreview] = useState(null), [addAsset, setAddAsset] = useState(false)
+  const [modelId, setModel] = useState(''), [language, setLanguage] = useState('')
+  const [selected, setSelected] = useState(null), [preview, setPreview] = useState(null)
   const availableModels = models.filter(model => model.type === 'text' && model.enabled !== false)
   const chosenModel = availableModels.find(model => model.id === modelId) || availableModels[0]
   const chosenAgent = agents.find(agent => agent.id === (agentSelection || currentAgentId) && agent.enabled !== false)
@@ -122,7 +122,7 @@ export function RedrawSource({ context }) {
   const draftShots = latest?.draft.shots || []
   const selectedIds = selected && latest && selected.jobId === latest.id ? selected.ids : draftShots.filter(shot => !latest.applied?.includes(shot.segmentId)).map(shot => shot.segmentId)
   const perform = (name, options) => action(name, options).catch(() => {})
-  const analysisOptions = { modelId: chosenModel?.logicalModelId || chosenModel?.id, agentId: chosenAgent?.id, sourceLanguage: language, visualOnly, ...(start !== '' ? { start: Number(start) } : {}), ...(end !== '' ? { end: Number(end) } : {}) }
+  const analysisOptions = { modelId: chosenModel?.logicalModelId || chosenModel?.id, agentId: chosenAgent?.id, sourceLanguage: language }
   return <div className="redraw-source">
     <header className="workspace-toolbar"><div><h2>原片与拉片</h2><p>切镜 → AI 分析 → 校对应用；原始参考与目标版本分别保存。</p></div><Link className="btn" to={link('/art')}>查看转绘资产 ↗</Link></header>
     <div className="redraw-source-layout">
@@ -135,10 +135,8 @@ export function RedrawSource({ context }) {
         <h3>拉片与目标改编</h3><DirectorSelect label="转绘导演" disabled={running || busy} />
         <Field label="视觉分析模型"><select aria-label="视觉分析模型" value={chosenModel?.id || ''} onChange={event => setModel(event.target.value)}>{!availableModels.length && <option value="">请先配置支持图片输入的文本模型</option>}{availableModels.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select></Field>
         <Field label="原片语言"><select aria-label="原片语言" value={language} onChange={event => setLanguage(event.target.value)}><option value="">自动识别</option><option value="zh">中文</option><option value="ja">日语</option><option value="en">英语</option></select></Field>
-        <label><input type="checkbox" checked={visualOnly} onChange={event => setVisual(event.target.checked)} />仅分析画面（不转写、不推断对白）</label>
-        <div className="redraw-fields"><Field label="补漏开始秒"><input aria-label="补漏开始秒" type="number" min="0" step="0.01" value={start} onChange={event => setStart(event.target.value)} /></Field><Field label="补漏结束秒"><input aria-label="补漏结束秒" type="number" min="0" step="0.01" value={end} onChange={event => setEnd(event.target.value)} /></Field></div>
-        <p className="muted">留空分析全片；指定区间会检查与之相交的镜头。使用已配置模型与语音账户，产生实际 API 用量。</p>
-        <div className="toolbar"><Button primary disabled={running || busy || !source.segments?.length || !chosenModel || !chosenAgent} onClick={() => perform('analyze', analysisOptions)}>分析原片并生成改编草稿</Button><Button disabled={!source.duration || busy} onClick={() => setAddAsset(true)}>手工补入原片资产</Button></div>
+        <p className="muted">使用已配置模型与语音账户，产生实际 API 用量。</p>
+        <div className="toolbar"><Button primary disabled={running || busy || !source.segments?.length || !chosenModel || !chosenAgent} onClick={() => perform('analyze', analysisOptions)}>分析原片并生成改编草稿</Button></div>
         {error && <p role="alert">{error}</p>}
         <div className="redraw-jobs" aria-live="polite">{jobs.map(job => <article key={job.id}><strong>{{ prepare: '切镜抽帧', analyze: '拉片分析', export: '成片合成' }[job.kind]} · {statusNames[job.status]}</strong><span>{job.phase}</span>{job.error && <p role="alert">{job.error}</p>}
           {activeJob(job) && <Button disabled={busy} onClick={() => perform('cancel', { jobId: job.id })}>取消任务</Button>}
@@ -155,7 +153,6 @@ export function RedrawSource({ context }) {
         {shot.notes && <p role="note">待核对：{shot.notes}</p>}
       </article> })}
     </section>}
-    {addAsset && <SupplementAsset context={context} onClose={() => setAddAsset(false)} />}
   </div>
 }
 
