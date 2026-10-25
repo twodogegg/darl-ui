@@ -5,6 +5,7 @@
 @import './components/media-workspace/media-workspace.css';
 @import './components/agent-sidebar/agent-sidebar.css';
 @import './components/style-selector/style-selector.css';
+@import './components/asset-library/asset-library.css';
 @import './components/default-model-selector/default-model-selector.css';
 @import './components/interactive-confirm-dialog/interactive-confirm-dialog.css';
 @import './components/request-records/request-records.css';

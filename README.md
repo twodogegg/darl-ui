@@ -543,3 +543,47 @@ Playground：`/#confirm-dialog`（含原著改编确认示例及模拟提交失�
 AgentSidebar 支持 `embedded` 嵌入宿主容器，使用 `draft` / `onDraftChange` 将草稿交给宿主持久化。`references` / `onReference` 提供稳定 ID 的宿主资料引用（`node:`），`composerHeader`、`composerFooter`、`messageHeader` 和 `renderMessageActions` 用于挂载引用摘要、上下文用量及成果定位等宿主交互。未传这些属性时沿用组件自管草稿与侧栏布局。Agent 管理卡片可通过 `skills` 和 `applications` 编辑默认技能与 MCP 范围，实际权限由宿主后端执行。
 
 AgentSidebar 的 `hideEmptySessions` 可隐藏未发送消息的本地草稿；按需加载消息的宿主可用 `AgentSession.messageCount` 提供已保存消息数量。真实聊天示例默认启用，发送第一条消息后才保存会话。
+
+## AssetLibrary｜资产库弹窗
+
+`AssetLibrary` 是资产库弹窗：左侧分区（生成历史、我保存的、我上传的），顶部标签行（全部、角色、场景……及自定义标签）、搜索和新建，主体是资产卡片网格，带空态、加载、分页和右键菜单。组件只负责 UI 与通用交互，资产数据、存储、鉴权和保存都由宿主接管。
+
+```tsx
+import { AssetLibrary } from '@darl/ui';
+
+<AssetLibrary
+  open={open}
+  onOpenChange={setOpen}
+  assets={assets}
+  tags={tags}
+  value={selectedId}
+  onSelect={({ asset, index }) => insertPromptReference(asset, index)}
+  onFavoriteChange={(asset, favorite) => saveFavorite(asset.id, favorite)}
+  onRename={async ({ asset, name }) => renameAsset(asset.id, name)}
+  onDelete={(asset) => deleteAsset(asset.id)}
+  upload={uploadAsset}
+  onCreate={(filter) => openCreateDialog(filter)}
+  onCreateTag={(label) => createTag(label)}
+  onDeleteTag={(tag) => deleteTag(tag.id)}
+  hasMore={hasMore}
+  onLoadMore={loadMoreAssets}
+/>
+```
+
+- 弹窗模式：传入 `open`（或 `onOpenChange`）后渲染为固定遮罩上的模态弹窗，宽 `min(1240px, 100vw - 96px)`、高 `min(820px, 100dvh - 96px)`，680px 以下变为贴底的抽屉（94dvh）。关闭按钮、Esc、点击遮罩都会调用 `onOpenChange(false)`；不传 `open` 只传 `onOpenChange` 时由组件内部维护开关（`defaultOpen` 设置初始值）。完全省略这两个属性时组件原地嵌入渲染，便于宿主自建容器或弹层。
+- `title`：弹窗标题与无障碍名称，默认「资产库」。
+- `assets`：`AssetItem[]`。`id/name/kind` 必填；`kind` 为 `image | video | audio | effect | text | other`，决定缩略图回退图标与视频/音频时长角标。`section` 缺省时按 `favorite` 推断（收藏进「我保存的」，否则「我上传的」）；`tags` 对应 `AssetTag.id`；`thumbnail`/`url` 分别用于预览与下载；`uploading`（0–100）显示上传进度并禁用操作。`detectKind(file)` 可用于上传时推断类型。
+- `tags`：标签定义 `{ id, label, removable? }`。不传时使用默认标签（全部/角色/场景/物品/风格/音效/音频/视频），并自动补充资产里出现但未登记的标签（`label` 为 id）。`removable` 的标签在传 `onDeleteTag` 时显示删除按钮。
+- 生成历史分区与另外两个分区工具栏不同：顶部为「本项目 / 全部项目」范围切换（`scope` / `onScopeChange`，受控或内部维护），第二行为类型筛选（全部/图片/视频/音频，带计数，复用 `tag`/`onTagChange`，值 `all|image|video|audio`）和右端的高级筛选按钮（`onAdvancedFilter`）。资产通过 `scope: 'project' | 'all'` 声明所属范围：`project` 只出现在「本项目」，`all` 两个范围都显示。该分区没有标签行与「新建」按钮。
+- 受控/非受控：`section`、`tag`、`scope` 不传时组件内部维护；传入后通过 `onSectionChange`、`onTagChange`、`onScopeChange` 回写。搜索词由组件内部维护，通过 `onFilterChange({ section, tag, query, scope, kind })` 通知宿主（`tag` 为空字符串表示全部）。
+- `onSelect({ asset, index })`：点击卡片时触发，`index` 为当前清单内 1 起算的序号；传入 `value` 与 `insertIndex` 可显示选中态与序号角标。
+- `onSelectionChange(asset | null)`：选中变化时回调；点击卡片返回资产，切换分区 / 项目范围 / 类型 / 标签后组件会**清空选择**并返回 `null`（确认栏随之隐藏）。宿主用自己的状态保存选中时，应监听该回调同步清空。
+- `onConfirm(asset)` 与 `confirmText`：传入 `onConfirm` 后，只要 `value` 命中某个资产，弹窗底部出现右对齐的确认按钮（左侧显示「已选择：名称」）。支持 Promise，处理中按钮显示「确认中…」并禁用；失败保留弹窗并在上方显示错误，成功后组件自动调用 `onOpenChange(false)` 关闭弹窗。
+- `onFavoriteChange`、`onRename`、`onDelete`：不传则不显示对应入口。`onRename` 支持 Promise，失败时保留输入并提示；删除前会 `window.confirm` 二次确认。
+- 「新建」按钮：传入 `upload` 适配器时，点击「新建」直接打开系统文件选择器，挑选的文件走与拖放完全相同的校验、进度与失败处理；未传 `upload` 只传 `onCreate` 时，点击触发 `onCreate({ section, tag, query })`，由宿主打开自己的创建流程。上传成功后由宿主在适配器返回的 `AssetItem` 基础上把结果并入 `assets`（Playground 演示即如此）。
+- `upload(assetUploadContext)`：宿主上传适配器，参数为 `{ file, section, signal, onProgress }`。组件对每个文件单独校验（`accept`、`maxFileSize`），失败互不影响；进度完全来自 `onProgress`，组件不伪造。支持拖入整个面板。`maxConcurrentUploads` 默认为 3。适配器应返回 `AssetItem`，并把结果合并进 `assets`。
+- 分页：默认每页 24（`pageSize`，最小 4），滚动接近底部自动加载；本地剩余条目按页展开，传入 `hasMore` + 异步 `onLoadMore({ section, tag, query, signal })` 可接远程分页。宿主应遵守 `signal`、按 id 去重追加，并在末页把 `hasMore` 设为 `false`。
+- `getDownloadUrl(asset)`：可选，返回临时下载地址；右键菜单「下载」在资产没有 `url` 时依赖它。
+- `loading` 显示加载态；`emptyText` 可按分区覆盖空态文案；`disabled` 只读；`title` 修改侧栏标题无障碍名称；`className` 透传，样式变量为 `--darl-background/surface/text/muted/border/primary/danger`，可覆盖为任意主题。
+
+Playground：`/#asset-library`，页面加载即打开弹窗（可通过「打开资产库」再次唤起），包含真实拖放上传、失败模拟、分页、收藏/重命名/删除与右键菜单的本地交互演示（文件不会发送到服务器）。

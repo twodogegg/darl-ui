@@ -231,3 +231,6 @@
 .demo-style-created { margin: 12px 0 0; color: var(--muted-foreground); font-size: 12px; }
 .demo-style-trigger-value { margin-left: 12px; color: var(--muted-foreground); font-size: 13px; }
 @media (max-width: 600px) { .demo-agent-frame .demo-agent-embedded { position: fixed; inset: 0; width: 100%; height: 100dvh; } }
+
+/* AssetLibrary 按截图固定深色外观，宿主可用 --darl-* 变量覆盖。 */
+.darl-asset-dialog .darl-asset-library { --darl-background: #0b0b0c; --darl-surface: #17181a; --darl-text: #f4f4f5; --darl-muted: #a1a1aa; --darl-border: #2a2a2d; --darl-primary: #ffffff; --darl-primary-foreground: #111113; --darl-danger: #f87171; }
