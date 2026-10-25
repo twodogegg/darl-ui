@@ -104,10 +104,38 @@ function VideoEditModal({ sources, ratio, onClose, onSaved }) {
   </Modal>
 }
 
+function VersionParametersModal({ item, jobs, models, onClose }) {
+  const fileId = decodeURIComponent(item.url.match(/^\/api\/files\/([^/?#]+)/)?.[1] || '')
+  const job = fileId && jobs.find(job => job.type === item.kind && job.resultFileIds?.includes(fileId))
+  const model = job && models.find(model => model.id === job.modelId)
+  const statusText = { queued: '排队中', running: '生成中', completed: '已完成', failed: '失败', cancelled: '已取消', uncertain: '结果未知' }
+  const options = job?.options || {}
+  const count = value => Array.isArray(value) ? value.length : 0
+  const rows = job ? [
+    ['模型', model?.name || job.modelId],
+    ['生成时间', new Date(job.createdAt).toLocaleString('zh-CN')],
+    ['状态', statusText[job.status] || job.status],
+    ...(options.resolution ? [['分辨率', options.resolution]] : []),
+    ...(options.aspectRatio ? [['画幅', options.aspectRatio]] : []),
+    ...(Number.isFinite(options.duration) ? [['生成时长', `${options.duration} 秒`]] : []),
+    ...(job.style?.name ? [['视觉风格', job.style.name]] : []),
+    ...(count(options.references) ? [['参考图片', `${count(options.references)} 张`]] : []),
+    ...(count(options.referenceVideos) ? [['参考视频', `${count(options.referenceVideos)} 个`]] : []),
+    ...(count(options.referenceAudios) ? [['参考音频', `${count(options.referenceAudios)} 个`]] : []),
+  ] : []
+  return <Modal title={`${item.name} · 生成参数`} wide onClose={onClose} footer={<Button onClick={onClose}>关闭</Button>}>
+    {!job ? <p className="muted">该版本没有对应的生成任务记录（可能来自上传或剪辑合成）。</p> : <>
+      <dl className="production-parameters">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+      <Field label="提示词"><p className="production-parameters-prompt">{job.prompt}</p></Field>
+      {job.error && <p className="production-edit-error" role="alert">{job.error}</p>}
+    </>}
+  </Modal>
+}
+
 function VideoCompareModal({ sources, onClose, onUse }) {
   const [selected, setSelected] = useState(() => sources.slice(0, 2).map(source => source.id))
   const [best, setBest] = useState(null)
-  const items = sources.filter(source => selected.includes(source.id))
+  const items = sources.filter(source => selected.includes(source.id)).map(({ id, url, name }) => ({ id, name, src: url }))
   const toggle = id => setSelected(current => current.includes(id) ? current.filter(value => value !== id) : current.length < 2 ? [...current, id] : current)
   return <Modal title="对比视频" wide onClose={onClose} footer={<><Button onClick={onClose}>关闭</Button>{best && <Button primary onClick={() => { onUse(best); onClose() }}>使用最佳版本</Button>}</>}>
     <p className="muted">选择两个视频进行同步播放。对比不会修改原视频。</p>
@@ -137,6 +165,7 @@ function Production({ context }) {
   const [deletingJob, setDeletingJob] = useState(null)
   const [removingJob, setRemovingJob] = useState(false)
   const [preview, setPreview] = useState(null)
+  const [parameters, setParameters] = useState(null)
   const [editOpen, setEditOpen] = useState(false)
   const [compareOpen, setCompareOpen] = useState(false)
   const [historyKind, setHistoryKind] = useState('video')
@@ -401,16 +430,23 @@ function Production({ context }) {
                 const current = historyColumn ? active[historyColumn.key] : currentVideo
                 const selected = history.indexOf(current) === index
                 const showPreview = () => setPreview({ name, url, kind: historyColumn ? 'image' : 'video' })
+                const showParameters = () => setParameters({ name, url, kind: historyColumn ? 'image' : 'video' })
+                const switchVersion = () => {
+                  if (busy || selected) return
+                  patch('clips', active.id, historyColumn ? { [historyColumn.key]: url } : { currentVideo: url })
+                  notify(`已切换到${name}`)
+                }
                 return <article key={`${active.id}-${historyKind}-${index}`} aria-label={name} className={selected ? 'current' : ''}>
-                  <button aria-label={`${historyColumn ? '放大' : '预览'}${name}`} onClick={showPreview}>{historyColumn ? <img src={url} alt={name} /> : <video src={url} muted preload="metadata" />}</button>
+                  <button aria-label={historyColumn ? `放大${name}` : `切换到${name}`} title={historyColumn ? `放大${name}` : `切换到${name}`} onClick={historyColumn ? showPreview : switchVersion}>{historyColumn ? <img src={url} alt={name} /> : <video src={url} muted preload="metadata" />}</button>
                   <div className="production-history-meta"><small>版本 {history.length - index}</small>{selected && <span>当前使用</span>}</div>
                   <div className="production-history-actions">
                     <Button onClick={showPreview}>{historyColumn ? '放大' : '预览'}</Button>
+                    <Button onClick={showParameters}>参数</Button>
                     {historyColumn && <>
                       <Button disabled={busy} onClick={() => { setImageNotes(''); setImageEdit({ ...historyColumn, source: url }) }}>改图</Button>
                       <FileButton disabled={busy} onSelect={(item) => saveImage(historyColumn, item.url)}>上传替换</FileButton>
                     </>}
-                    <Button disabled={busy || selected} onClick={() => patch('clips', active.id, historyColumn ? { [historyColumn.key]: url } : { currentVideo: url })}>使用此版本</Button>
+                    <Button disabled={busy || selected} onClick={switchVersion}>使用此版本</Button>
                     <Button danger disabled={busy} onClick={() => deleteVersion(index)}>删除</Button>
                   </div>
                 </article>
@@ -452,6 +488,7 @@ function Production({ context }) {
       {deleting && <Confirm title="删除视频片段" danger onClose={() => setDeleting(null)} onConfirm={() => { update((draft) => { draft.clips = draft.clips.filter((clip) => clip.id !== deleting.id) }); setDeleting(null) }}>删除“{deleting.title}”及其生成历史？分镜表中的原始镜头保留。</Confirm>}
       {deletingJob && <Modal title="删除生成记录" onClose={() => { if (!removingJob) setDeletingJob(null) }} footer={<><Button disabled={removingJob} onClick={() => setDeletingJob(null)}>取消</Button><Button danger disabled={removingJob} onClick={deleteJob}>{removingJob ? '正在删除…' : '确认删除'}</Button></>}>删除这条生成记录？{deletingJob.status === 'uncertain' && '上游任务结果未知，删除记录不会取消上游任务或退还费用。'}</Modal>}
       {preview && <MediaPreview item={preview} onClose={() => setPreview(null)} />}
+      {parameters && <VersionParametersModal item={parameters} jobs={mediaJobs} models={models} onClose={() => setParameters(null)} />}
       {editOpen && <VideoEditModal sources={sourceVideos(active)} ratio={ratio} onClose={() => setEditOpen(false)} onSaved={saveComposed} />}
       {compareOpen && <VideoCompareModal sources={sourceVideos(active)} onClose={() => setCompareOpen(false)} onUse={url => patch('clips', active.id, { currentVideo: sourceVideos(active).find(item => item.id === url)?.url || url })} />}
     </div>

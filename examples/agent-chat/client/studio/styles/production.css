@@ -232,6 +232,11 @@
 .production-compare-pick { margin-bottom: 16px; }
 .production-compare-pick label { display: flex; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid var(--br-border); border-radius: 5px; font-size: 12px; }
 .production-compare-empty { padding: 24px; text-align: center; color: var(--br-text-secondary); border: 1px dashed var(--br-border); border-radius: 8px; }
+.production-parameters { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px 18px; margin: 0 0 16px; padding: 12px; border: 1px solid var(--br-border); border-radius: 8px; background: var(--br-canvas); }
+.production-parameters > div { display: grid; gap: 3px; align-content: start; }
+.production-parameters dt { font-size: 11px; color: var(--br-text-secondary); }
+.production-parameters dd { margin: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.production-parameters-prompt { max-height: 240px; margin: 0; overflow-y: auto; padding: 10px 12px; border: 1px solid var(--br-border); border-radius: 6px; background: var(--br-canvas); font-size: 12px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   .production-edit-item-head { align-items: flex-start; flex-direction: column; }
   .production-edit-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
