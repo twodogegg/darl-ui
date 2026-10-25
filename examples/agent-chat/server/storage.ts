@@ -172,7 +172,8 @@ export function validateClientState(value: unknown): ClientState {
   if (!Array.isArray(item.sessions) || item.sessions.length > 500) throw new Error('会话数量无效');
   if (!Array.isArray(item.skills) || item.skills.length > 200) throw new Error('Skill 数量无效');
   if (item.activeId !== undefined && typeof item.activeId !== 'string') throw new Error('当前会话无效');
-  const state = { sessions: item.sessions, skills: item.skills, ...(item.activeId ? { activeId: item.activeId } : {}) };
+  const sessions = item.sessions.filter((session) => Array.isArray((session as { messages?: unknown[] } | null)?.messages) && (session as { messages: unknown[] }).messages.length > 0);
+  const state = { sessions, skills: item.skills, ...(item.activeId ? { activeId: item.activeId } : {}) };
   if (JSON.stringify(state).length > 80 * 1024 * 1024) throw new Error('本地状态超过 80MB');
   return state;
 }

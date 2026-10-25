@@ -211,6 +211,8 @@ export interface AgentSession {
   agentId?: string;
   title: string;
   updatedAt?: string;
+  /** Number of saved messages when a host supplies only session metadata. */
+  messageCount?: number;
   messages: AgentMessage[];
 }
 
@@ -246,6 +248,8 @@ export interface AgentSidebarProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sessions: AgentSession[];
+  /** Hide unsent local drafts from the history list. */
+  hideEmptySessions?: boolean;
   activeSessionId?: string;
   onSessionChange?: (sessionId: string) => void;
   onSessionRename?: (sessionId: string, title: string) => void | Promise<void>;

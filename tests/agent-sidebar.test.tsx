@@ -535,6 +535,18 @@ describe('AgentSidebar', () => {
     await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('const value = `<Picture 1>`;'));
   });
 
+  it('hides empty drafts while retaining saved metadata and sent attachment messages', () => {
+    render(<AgentSidebar open hideEmptySessions onOpenChange={() => {}} sessions={[
+      { id: 'draft', title: '没有发送的草稿', messages: [] },
+      { id: 'metadata', title: '尚未加载的真实历史', messageCount: 2, messages: [] },
+      { id: 'sent', title: '已发送附件', messages: [{ id: 'file', role: 'user', content: '', attachments: ['附件.txt'] }] },
+    ]} />);
+    fireEvent.click(screen.getByRole('button', { name: '查看历史记录' }));
+    expect(screen.queryByText('没有发送的草稿')).not.toBeInTheDocument();
+    expect(screen.getByText('尚未加载的真实历史')).toBeInTheDocument();
+    expect(screen.getByText('已发送附件')).toBeInTheDocument();
+  });
+
   it('支持打开历史记录和创建新对话', () => {
     const onNewSession = vi.fn();
     const onSessionChange = vi.fn();

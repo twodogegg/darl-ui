@@ -35,6 +35,23 @@ function dbJson<T>(directory: string, key: string): T {
 }
 
 describe('Agent configuration API', () => {
+  it('does not persist unsent drafts while retaining conversations with sent messages', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'darl-chat-empty-'));
+    const promptFile = join(directory, 'system.md');
+    await writeFile(promptFile, '默认提示词');
+    try {
+      await withApi(directory, promptFile, async request => {
+        const draft = { id: 'draft', title: '新对话', messages: [] };
+        expect((await request('state', { sessions: [draft], skills: [] })).ok).toBe(true);
+        expect((await (await request('state')).json()).sessions).toEqual([]);
+        const sent = { id: 'sent', title: '已发送', messages: [{ id: 'user', role: 'user', content: '实际发送的消息' }] };
+        expect((await request('state', { sessions: [draft, sent], skills: [] })).ok).toBe(true);
+        expect((await (await request('state')).json()).sessions).toEqual([sent]);
+        expect(dbJson<{ sessions: unknown[] }>(directory, 'clientState').sessions).toEqual([sent]);
+      });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
   it('exposes the actual runtime schemas alongside media tools', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'darl-runtime-tools-'));
     const promptFile = join(directory, 'system.md');
@@ -78,7 +95,7 @@ describe('Agent configuration API', () => {
     await writeFile(promptFile, '默认提示词');
     try {
       await withApi(directory, promptFile, async request => {
-        const sessions = [{ id: 'one', agentId: 'art', title: '会话', messages: [] }];
+        const sessions = [{ id: 'one', agentId: 'art', title: '会话', messages: [{ id: 'user-1', role: 'user', content: '你好' }] }];
         expect((await request('state', { sessions, skills: [], activeId: 'one' })).ok).toBe(true);
         expect((await (await request('state')).json()).sessions).toEqual(sessions);
         const denied = await request('chat', { sessionId: 'one', agentId: 'writer', messages: [{ role: 'user', content: '你好' }] });
@@ -273,7 +290,7 @@ describe('Agent configuration API', () => {
     await writeFile(promptFile, '默认提示词');
     try {
       await withApi(directory, promptFile, async (request) => {
-        const state = { sessions: [{ id: 's1', title: '小说', messages: [] }], activeId: 's1', skills: [] };
+        const state = { sessions: [{ id: 's1', title: '小说', messages: [{ id: 'user-1', role: 'user', content: '小说创作' }] }], activeId: 's1', skills: [] };
         const skill = { id: 'skill-1', name: '编剧', description: '按场次写作', instructions: '按场次输出', version: '1.0' };
         expect((await request('skills', { skill })).ok).toBe(true);
         expect((await request('state', state)).status).toBe(200);

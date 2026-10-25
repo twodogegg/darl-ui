@@ -539,3 +539,5 @@ import { InteractiveConfirmDialog } from '@darl/ui';
 Playground：`/#confirm-dialog`（含原著改编确认示例及模拟提交失败）。
 
 AgentSidebar 支持 `embedded` 嵌入宿主容器，使用 `draft` / `onDraftChange` 将草稿交给宿主持久化。`references` / `onReference` 提供稳定 ID 的宿主资料引用（`node:`），`composerHeader`、`composerFooter`、`messageHeader` 和 `renderMessageActions` 用于挂载引用摘要、上下文用量及成果定位等宿主交互。未传这些属性时沿用组件自管草稿与侧栏布局。Agent 管理卡片可通过 `skills` 和 `applications` 编辑默认技能与 MCP 范围，实际权限由宿主后端执行。
+
+AgentSidebar 的 `hideEmptySessions` 可隐藏未发送消息的本地草稿；按需加载消息的宿主可用 `AgentSession.messageCount` 提供已保存消息数量。真实聊天示例默认启用，发送第一条消息后才保存会话。

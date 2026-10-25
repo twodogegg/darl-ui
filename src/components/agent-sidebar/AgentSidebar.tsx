@@ -342,7 +342,7 @@ function statusText(status: AgentApplication['status']): string {
   return status === 'connected' ? '已连接' : status === 'needs-auth' ? '需要授权' : '未连接';
 }
 
-export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraftChange, references, onReference, composerHeader, composerFooter, messageHeader, renderMessageActions, voice, open, onOpenChange, sessions, activeSessionId, onSessionChange, onSessionRename, onSessionDelete, onNewSession, onSend, onRegenerate, onToolConfirm, approvalMode, onApprovalModeChange, approvalModePending = false, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onSkillCreate, onFileUpload, uploadAttachment, models = [], agents = [], selectedAgentId: controlledAgentId, selectedApplicationIds, selectedSkillIds, onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
+export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraftChange, references, onReference, composerHeader, composerFooter, messageHeader, renderMessageActions, voice, open, onOpenChange, sessions, hideEmptySessions = false, activeSessionId, onSessionChange, onSessionRename, onSessionDelete, onNewSession, onSend, onRegenerate, onToolConfirm, approvalMode, onApprovalModeChange, approvalModePending = false, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onSkillCreate, onFileUpload, uploadAttachment, models = [], agents = [], selectedAgentId: controlledAgentId, selectedApplicationIds, selectedSkillIds, onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
   const [view, setView] = useState<'chat' | 'history'>('chat');
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [handledConfirmation, setHandledConfirmation] = useState<string | null>(null);
@@ -433,7 +433,7 @@ export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraft
   }, [files]);
   useEffect(() => () => { if (typeof URL.revokeObjectURL === 'function') Object.values(attachmentPreviewUrls.current).forEach((url) => URL.revokeObjectURL(url)); }, []);
   const setDraft = (value: string) => { onDraftChange?.(value); setDrafts((current) => ({ ...current, [draftKey]: value })); onSelectedApplicationIdsChange?.(referenceIds(value, 'app')); onSelectedSkillIdsChange?.(referenceIds(value, 'skill')); };
-  const filteredSessions = useMemo(() => sessions.filter((session) => `${session.title} ${session.messages.at(-1)?.content ?? ''}`.toLowerCase().includes(historyQuery.toLowerCase())), [historyQuery, sessions]);
+  const filteredSessions = useMemo(() => sessions.filter((session) => (!hideEmptySessions || (session.messageCount ?? session.messages.length) > 0) && `${session.title} ${session.messages.at(-1)?.content ?? ''}`.toLowerCase().includes(historyQuery.toLowerCase())), [hideEmptySessions, historyQuery, sessions]);
   useEffect(() => { setError(''); setPicker(null); }, [activeSession?.id]);
 
   const pendingConfirmation = activeSession?.messages.flatMap(message => message.toolCalls || []).find(call => call.status === 'confirmation');
