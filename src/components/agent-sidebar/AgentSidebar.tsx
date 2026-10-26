@@ -3,14 +3,15 @@ import { AgentVoiceInput, AgentVoicePicker } from './AgentVoiceControls';
 import { StreamingSpeechPlayer, speechTranscript, type SpeechState } from './voice-playback';
 import { Switch } from '../ui/FormControls';
 import { AgentComposerInput, ReferenceText, referenceIds } from './AgentComposerInput';
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { AlertCircle, ArrowDown, ArrowLeft, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Clipboard, Clock3, Copy, History, LoaderCircle, Maximize2, MessageSquareText, Minimize2, Paperclip, Pencil, Plus, RefreshCw, Search, Send, Sparkles, Square, Trash2, Upload, Volume2, VolumeX, Wrench, X } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
 import { Button } from '../ui/Button';
-import { InteractiveConfirmDialog } from '../interactive-confirm-dialog/InteractiveConfirmDialog';
+import { InteractiveConfirmDialog, type ConfirmAnswers } from '../interactive-confirm-dialog/InteractiveConfirmDialog';
+import { useDarlTheme } from '../../theme/DarlUIProvider';
 import type { AgentApplication, AgentAttachment, AgentErrorInfo, AgentExecutionEvent, AgentImageAttachment, AgentSession, AgentSidebarProps, AgentSkill, AgentToolCall } from './types';
 import { ApprovalModeSelector } from './ApprovalModeSelector';
 import { importSkillPackage } from './skill-package';
@@ -191,9 +192,19 @@ function toolDelegationTask(call?: AgentToolCall) {
   return call?.appId.startsWith('agent:') && call.input && typeof call.input === 'object' && 'task' in call.input && typeof call.input.task === 'string' ? call.input.task : '';
 }
 
+function UserInputAnswers({ call }: { call?: AgentToolCall }) {
+  const answers = call?.userInput && call.output && typeof call.output === 'object' && 'answers' in call.output ? call.output.answers as ConfirmAnswers : undefined;
+  if (!answers) return null;
+  return <div className="darl-agent-tool-detail">{call!.userInput!.questions.map(question => {
+    const value = answers[question.id];
+    const selected = Array.isArray(value) ? value.filter(item => typeof item === 'string') : typeof value === 'string' && value ? [value] : [];
+    return <div key={question.id}><span>{question.label}</span><pre>{selected.map(item => question.options?.find(option => option.value === item)?.label ?? item).join('、') || '未填写'}</pre></div>;
+  })}</div>;
+}
+
 function ToolCallCard({ call }: { call: AgentToolCall }) {
   const state = call.errorInfo?.stage === 'cancellation' ? 'cancelled' : call.status;
-  const status = { pending: '等待调用', running: '执行中', retrying: '重试中', success: '已完成', error: '调用失败', confirmation: '等待确认', cancelled: call.errorInfo?.code === 'TOOL_REJECTED' ? '已拒绝' : '已停止' }[state];
+  const status = { pending: '等待调用', running: '执行中', retrying: '重试中', success: '已完成', error: '调用失败', confirmation: call.userInput ? '等待回答' : '等待确认', cancelled: call.userInput ? '已取消' : call.errorInfo?.code === 'TOOL_REJECTED' ? '已拒绝' : '已停止' }[state];
   const StatusIcon = state === 'running' || state === 'retrying' ? LoaderCircle : state === 'error' ? AlertCircle : state === 'success' ? Check : state === 'cancelled' ? Square : Wrench;
   const delegationTask = toolDelegationTask(call);
   return <article className={`darl-agent-tool-call darl-agent-tool-call--${state}`}>
@@ -205,6 +216,7 @@ function ToolCallCard({ call }: { call: AgentToolCall }) {
     {delegationTask && <div className="darl-agent-tool-detail">
       {delegationTask && <div><span>委派任务</span><pre>{delegationTask}</pre></div>}
     </div>}
+    <UserInputAnswers call={call} />
     {call.errorInfo ? <AgentErrorCard error={call.errorInfo} /> : call.error && state !== 'cancelled' && <p className="darl-agent-tool-error">{call.error}</p>}
   </article>;
 }
@@ -313,7 +325,7 @@ function ExecutionTimeline({ events = [], calls = [], streaming = false, error, 
     return <li key={key} className={`darl-agent-execution-item darl-agent-execution-item--${latest.status}`} style={{ '--darl-agent-depth': depth } as CSSProperties}>
       <details className="darl-agent-execution-step">
         <summary className="darl-agent-execution-row"><span className="darl-agent-execution-dot">{running && ['running', 'retrying'].includes(latest.status) ? <LoaderCircle size={13} className="darl-agent-spin" /> : latest.status === 'success' ? <Check size={13} /> : latest.status === 'error' || latest.status === 'timeout' ? <AlertCircle size={13} /> : latest.status === 'cancelled' ? <Square size={12} /> : <Wrench size={13} />}</span><span className="darl-agent-execution-copy"><strong>{latest.name}</strong><span>{call?.appName || executionSourceText(latest)}</span></span>{retryCount > 0 && <span className="darl-agent-execution-retry">重试 {retryCount}</span>}<span className="darl-agent-execution-state">{call?.errorInfo?.code === 'TOOL_REJECTED' ? '已拒绝' : executionStatusText[latest.status]}</span><ChevronRight size={12} /></summary>
-        <div className="darl-agent-execution-details"><span>来源：{call?.appName || executionSourceText(latest)}{call && ` · ${call.toolName}`}</span>{first.summary && <p>{first.summary}</p>}{stepDuration !== undefined && <span>耗时 {formatDuration(stepDuration)}</span>}{transitions.length > 1 && <small className="darl-agent-execution-transitions">{transitions.join(' → ')}</small>}{latest.error && <p className={latest.error.stage === 'cancellation' ? 'darl-agent-status-note' : 'darl-agent-tool-error'}>{latest.error.message}</p>}{toolDelegationTask(call) && <div><span>委派任务</span><p>{toolDelegationTask(call)}</p></div>}</div>
+        <div className="darl-agent-execution-details"><span>来源：{call?.appName || executionSourceText(latest)}{call && ` · ${call.toolName}`}</span>{first.summary && <p>{first.summary}</p>}{stepDuration !== undefined && <span>耗时 {formatDuration(stepDuration)}</span>}{transitions.length > 1 && <small className="darl-agent-execution-transitions">{transitions.join(' → ')}</small>}{latest.error && <p className={latest.error.stage === 'cancellation' ? 'darl-agent-status-note' : 'darl-agent-tool-error'}>{latest.error.message}</p>}{toolDelegationTask(call) && <div><span>委派任务</span><p>{toolDelegationTask(call)}</p></div>}<UserInputAnswers call={call} /></div>
       </details>
     </li>;
   };
@@ -342,10 +354,10 @@ function statusText(status: AgentApplication['status']): string {
   return status === 'connected' ? '已连接' : status === 'needs-auth' ? '需要授权' : '未连接';
 }
 
-export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraftChange, references, onReference, composerHeader, composerFooter, messageHeader, renderMessageActions, voice, open, onOpenChange, sessions, hideEmptySessions = false, activeSessionId, onSessionChange, onSessionRename, onSessionDelete, onNewSession, onSend, onRegenerate, onToolConfirm, approvalMode, onApprovalModeChange, approvalModePending = false, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onSkillCreate, onFileUpload, uploadAttachment, models = [], agents = [], selectedAgentId: controlledAgentId, selectedApplicationIds, selectedSkillIds, onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
+export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraftChange, references, onReference, composerHeader, composerFooter, messageHeader, renderMessageActions, voice, open, onOpenChange, sessions, hideEmptySessions = false, activeSessionId, onSessionChange, onSessionRename, onSessionDelete, onNewSession, onSend, onRegenerate, onToolConfirm, onUserInput, approvalMode, onApprovalModeChange, approvalModePending = false, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onSkillCreate, onFileUpload, uploadAttachment, models = [], agents = [], selectedAgentId: controlledAgentId, selectedApplicationIds, selectedSkillIds, onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
   const [view, setView] = useState<'chat' | 'history'>('chat');
   const [confirmBusy, setConfirmBusy] = useState(false);
-  const [handledConfirmation, setHandledConfirmation] = useState<string | null>(null);
+  const [handledConfirmations, setHandledConfirmations] = useState<Set<string>>(() => new Set());
   const [confirmError, setConfirmError] = useState('');
   const [expanded, setExpanded] = useState(false);
   const [expandedTheme, setExpandedTheme] = useState<ImagePreviewTheme>();
@@ -436,16 +448,37 @@ export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraft
   const filteredSessions = useMemo(() => sessions.filter((session) => (!hideEmptySessions || (session.messageCount ?? session.messages.length) > 0) && `${session.title} ${session.messages.at(-1)?.content ?? session.messagePreview ?? ''}`.toLowerCase().includes(historyQuery.toLowerCase())), [hideEmptySessions, historyQuery, sessions]);
   useEffect(() => { setError(''); setPicker(null); }, [activeSession?.id]);
 
-  const pendingConfirmation = activeSession?.messages.flatMap(message => message.toolCalls || []).find(call => call.status === 'confirmation');
+  const pendingConfirmation = activeSession?.messages.flatMap(message => message.toolCalls || []).find(call => call.status === 'confirmation' && !handledConfirmations.has(call.id));
+  const userInput = pendingConfirmation?.userInput;
+  const theme = useDarlTheme();
+  const [questionTheme, setQuestionTheme] = useState<CSSProperties>();
+  useLayoutEffect(() => {
+    if (!userInput || !sidebarRef.current) return;
+    const colors = readAgentTheme(sidebarRef.current);
+    setQuestionTheme({
+      ...colors,
+      colorScheme: theme?.resolvedMode,
+      '--darl-confirm-bg': colors['--darl-background'],
+      '--darl-confirm-text': colors['--darl-text'],
+      '--darl-confirm-muted': colors['--darl-muted'],
+      '--darl-confirm-border': colors['--darl-border'],
+      '--darl-confirm-accent': colors['--darl-primary'],
+      '--darl-confirm-accent-foreground': colors['--darl-primary-foreground'],
+    } as CSSProperties);
+  }, [userInput, theme, open, expanded]);
   const pendingInput = pendingConfirmation?.input && typeof pendingConfirmation.input === 'object' ? pendingConfirmation.input as Record<string, unknown> : {};
   const isMediaConfirmation = pendingConfirmation?.appId === 'builtin:media';
   const mediaKind = ['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-image-preview'].includes(String(pendingInput.modelId)) ? '图片' : '视频';
   const mediaModelLabel = ({ 'gpt-image-2': 'GPT Image 2', 'gpt-image-2.5': 'GPT Image 2.5', 'gemini-3-pro-image-preview': 'Gemini 3 Pro Image Preview', 'minimax-h3-flash': 'MiniMax H3 Flash' } as Record<string, string>)[String(pendingInput.modelId)] ?? String(pendingInput.modelId || '—');
   const mediaRows = mediaOptionRows(pendingInput.options, mediaKind === '图片' ? 'image' : 'video');
-  const confirmAction = async (approved: boolean) => {
-    if (!pendingConfirmation || !onToolConfirm || confirmBusy) return;
+  const confirmAction = async (approved: boolean, answers?: ConfirmAnswers) => {
+    if (!pendingConfirmation || confirmBusy || (userInput ? !onUserInput : !onToolConfirm)) return;
     setConfirmBusy(true); setConfirmError('');
-    try { await onToolConfirm(pendingConfirmation.id, approved); setHandledConfirmation(pendingConfirmation.id); }
+    try {
+      if (userInput) await onUserInput!(pendingConfirmation.id, approved ? answers ?? {} : null);
+      else await onToolConfirm!(pendingConfirmation.id, approved);
+      setHandledConfirmations(current => new Set(current).add(pendingConfirmation.id));
+    }
     catch (reason) { setConfirmError(reason instanceof Error ? reason.message : '确认失败，请重试'); }
     finally { setConfirmBusy(false); }
   };
@@ -629,8 +662,20 @@ export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraft
     {picker === 'models' && <Picker title="模型与思考等级" onClose={closePicker}><div className="darl-agent-picker-list">{models.map((model) => <button key={model.id} type="button" className="darl-agent-picker-row" aria-pressed={model.id === selectedModel?.id} onClick={() => { setModelId(model.id); if (!model.reasoningEfforts?.length) setPicker(null); }}><span className="darl-agent-picker-icon"><Bot size={15} /></span><span className="darl-agent-picker-copy"><strong>{model.name}</strong><small>{model.description || '对话模型'}</small></span>{model.id === selectedModel?.id && <Check size={16} />}</button>)}</div>{supportedEfforts.length > 0 && <fieldset className="darl-agent-model-efforts"><legend>思考等级</legend><div className="darl-agent-effort-list">{supportedEfforts.map(value => <Button key={value} variant="ghost" size="sm" aria-pressed={value === effort} onClick={() => { setEffort(value); setPicker(null); }}>{value}{value === effort && <Check size={14} />}</Button>)}</div></fieldset>}</Picker>}
     <input ref={fileInput} aria-label="选择上传文件" type="file" hidden multiple={uploadKind === 'file'} onChange={(event) => { const files = Array.from(event.target.files ?? []); const first = files[0]; if (uploadKind === 'skill' && files.length) void Promise.resolve().then(async () => { const imported = await importSkillPackage(files); await onSkillImport?.(imported); if (first) await onSkillUpload?.(first); setLocalSkills((current) => [...current.filter((item) => item.id !== imported.id), imported]); }).catch((reason) => setError(reason instanceof Error ? reason.message : '导入失败')); if (uploadKind === 'file' && files.length) addAttachments(files); setPicker(null); event.currentTarget.value = ''; }} accept={uploadKind === 'skill' ? skillFileAccept : uploadAttachment ? undefined : 'image/*,.png,.jpg,.jpeg,.webp,.gif'} />
   </aside>
-    <InteractiveConfirmDialog
-      open={Boolean(pendingConfirmation && onToolConfirm && pendingConfirmation.id !== handledConfirmation)}
+    {userInput ? <InteractiveConfirmDialog
+        key={pendingConfirmation?.id}
+        open={Boolean(onUserInput)}
+        onOpenChange={(open) => { if (!open) void confirmAction(false); }}
+        title={userInput.title}
+        description={userInput.description}
+        questions={userInput.questions}
+        style={questionTheme}
+        confirmText="提交选择"
+        onConfirm={(answers) => confirmAction(true, answers)}
+        details={confirmError && <p role="alert">{confirmError}</p>}
+      /> : <InteractiveConfirmDialog
+      key={pendingConfirmation?.id ?? 'no-confirmation'}
+      open={Boolean(pendingConfirmation && onToolConfirm)}
       onOpenChange={(open) => { if (!open) void confirmAction(false); }}
       title={isMediaConfirmation ? `确认生成${mediaKind}` : '确认执行工具'}
       description={isMediaConfirmation ? '请核对以下生成设置，提交后将开始生成并可能产生费用。' : '请核对以下工具、操作与参数。'}
@@ -662,7 +707,7 @@ export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraft
           {confirmError && <p role="alert">{confirmError}</p>}
           {confirmBusy && <p role="status">正在提交审批…</p>}
         </div>)}
-    />
+    />}
     {voice && <DialogPrimitive.Root open={picker === 'voices'} onOpenChange={(next) => { if (!next) closeVoicePicker(); }}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="darl-agent-confirm-overlay" />

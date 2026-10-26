@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { AgentModelCapabilities, AgentModelType } from '../settings/types';
+import type { ConfirmAnswers, ConfirmQuestion } from '../interactive-confirm-dialog/InteractiveConfirmDialog';
 
 export type AgentMessageRole = 'user' | 'assistant';
 export type AgentToolStatus = 'pending' | 'running' | 'retrying' | 'success' | 'error' | 'confirmation' | 'cancelled';
@@ -116,6 +117,8 @@ export interface AgentToolCall {
   toolTitle?: string;
   risk?: 'read' | 'write' | 'dangerous';
   input?: unknown;
+  /** Host-supplied questions waiting for the user's answer, independent of tool approval. */
+  userInput?: { title: string; description?: string; questions: ConfirmQuestion[] };
   output?: unknown;
   error?: string;
   status: AgentToolStatus;
@@ -264,6 +267,8 @@ export interface AgentSidebarProps {
   onRegenerate?: (messageId: string) => void;
   /** Host confirms or rejects a pending tool call. The host must enforce the decision. */
   onToolConfirm?: (toolCallId: string, approved: boolean) => void | Promise<void>;
+  /** Submit structured answers; null means the user cancelled the question. */
+  onUserInput?: (toolCallId: string, answers: ConfirmAnswers | null) => void | Promise<void>;
   /** Controlled by the host, which must persist and enforce this policy server-side. */
   approvalMode?: AgentApprovalMode;
   onApprovalModeChange?: (mode: AgentApprovalMode) => void | Promise<void>;

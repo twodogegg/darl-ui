@@ -535,10 +535,12 @@ import { InteractiveConfirmDialog } from '@darl/ui';
 - `open/onOpenChange`：受控弹窗开关；`title/description`：标题与描述；`questions`：按顺序展示的问题数组（`id` 必须唯一）。
 - `type`：`single` 单选、`multiple` 多选、`text` 单行文本、`textarea` 多行文本；选择题使用 `options: { value, label, description?, disabled? }[]`。
 - `required` 默认为否，`defaultValue` 提供初始答案；`placeholder` 设置输入提示。
-- 默认只显示确认按钮；需要额外的取消按钮时传入 `showCancel`，并可用 `confirmText/cancelText` 配置文案。`cancelVariant` 可为取消按钮选择 Button 变体（例如 `destructive` 显示危险红色），`onCancel` 响应所有关闭方式，包括 Esc、遮罩、关闭按钮和取消按钮；`accentColor/className` 可覆盖样式。
+- 默认只显示确认按钮；需要额外的取消按钮时传入 `showCancel`，并可用 `confirmText/cancelText` 配置文案。`cancelVariant` 可为取消按钮选择 Button 变体（例如 `destructive` 显示危险红色），`onCancel` 响应所有关闭方式，包括 Esc、遮罩、关闭按钮和取消按钮；`accentColor/className` 可覆盖样式，`style` 可将宿主主题 CSS 变量传入弹窗 Portal。
 - `onConfirm(answers)` 返回 `Record<questionId, string | string[]>`；多选始终是数组，输入题始终是字符串。支持 Promise：处理中禁用按钮，失败保留答案并显示错误；成功后由宿主关闭弹窗并恢复 Agent。
 
 Playground：`/#confirm-dialog`（含原著改编确认示例及模拟提交失败）。
+
+Agent Chat 已接入真实交互提问：模型通过当轮工具目录中的 `builtin_request_user_input` 提供标题及 `questions`，`AgentSidebar` 根据 `AgentToolCall.userInput` 复用此弹窗。宿主通过 `onUserInput(toolCallId, answers)` 提交答案，取消传 `null`；示例调用 `POST /api/user-inputs/:id`，后端校验题目和选项后恢复当前模型循环，并保存选择结果供后续对话读取。等待回答期间暂停无输出超时；停止、断连或刷新会使本轮提问失效。提问弹窗复用模板库的确认方案布局，并继承聊天宿主的背景、文字、边框和品牌色；深色页面使用同样的黑色背景，不套用执行审批配色，仅保留确认按钮；关闭、Esc 或遮罩均取消提问。该交互与执行审批独立，所有审批模式均等待用户实际提交。连续提问会各自初始化表单，提交失败保留选择并允许重试。
 
 AgentSidebar 支持 `embedded` 嵌入宿主容器，使用 `draft` / `onDraftChange` 将草稿交给宿主持久化。`references` / `onReference` 提供稳定 ID 的宿主资料引用（`node:`），`composerHeader`、`composerFooter`、`messageHeader` 和 `renderMessageActions` 用于挂载引用摘要、上下文用量及成果定位等宿主交互。未传这些属性时沿用组件自管草稿与侧栏布局。Agent 管理卡片可通过 `skills` 和 `applications` 编辑默认技能与 MCP 范围，实际权限由宿主后端执行。
 

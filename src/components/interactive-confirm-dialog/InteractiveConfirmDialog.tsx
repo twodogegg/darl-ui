@@ -35,6 +35,8 @@ export interface InteractiveConfirmDialogProps {
   onCancel?: () => void;
   accentColor?: string;
   className?: string;
+  /** Host theme variables carried into the portal. */
+  style?: CSSProperties;
 }
 
 function startingAnswers(questions: ConfirmQuestion[]): ConfirmAnswers {
@@ -50,7 +52,7 @@ function startingAnswers(questions: ConfirmQuestion[]): ConfirmAnswers {
 
 export function InteractiveConfirmDialog({
   open, onOpenChange, title, description, questions, details, confirmText = '确认', cancelText = '取消',
-  cancelVariant = 'outline', showCancel = false, onConfirm, onCancel, accentColor, className = '',
+  cancelVariant = 'outline', showCancel = false, onConfirm, onCancel, accentColor, className = '', style,
 }: InteractiveConfirmDialogProps) {
   const headingId = useId();
   const theme = useDarlTheme();
@@ -126,7 +128,7 @@ export function InteractiveConfirmDialog({
       <Dialog.Content
         aria-describedby={description ? undefined : headingId}
         className={['darl-confirm-dialog', theme?.resolvedMode === 'dark' ? 'darl-confirm-dark' : '', className].filter(Boolean).join(' ')}
-        style={vars}
+        style={{ ...vars, ...style }}
       >
         <div className="darl-confirm-header">
           <Dialog.Title className="darl-confirm-title">{title}</Dialog.Title>

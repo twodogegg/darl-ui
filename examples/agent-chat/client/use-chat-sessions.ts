@@ -4,9 +4,9 @@ import type { AgentSession } from '@darl/ui';
 type Summary = AgentSession & { version: number };
 type Saved = { session: AgentSession; version: number };
 const pathFor = (id: string) => `/api/sessions/${encodeURIComponent(id)}`;
-const serializable = (session: AgentSession): AgentSession => ({ ...session, messagePreview: undefined, messages: session.messages.map(message => ({ ...message,
+export const serializable = (session: AgentSession): AgentSession => ({ ...session, messagePreview: undefined, messages: session.messages.map(message => ({ ...message,
   attachments: message.attachments?.map(attachment => typeof attachment === 'string' ? attachment : { ...attachment, url: attachment.url?.startsWith('data:') ? undefined : attachment.url }),
-  toolCalls: message.toolCalls?.map(({ output: _output, ...call }) => call),
+  toolCalls: message.toolCalls?.map(({ output, ...call }) => call.userInput ? { ...call, output } : call),
 })) });
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {

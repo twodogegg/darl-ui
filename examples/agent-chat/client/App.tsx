@@ -375,6 +375,7 @@ export function App() {
       draft={drafts[activeId] ?? ''} onDraftChange={(value) => setDrafts(current => ({ ...current, [activeId]: value }))}
       onSend={async (request) => { await run(request); setDrafts(current => current[request.sessionId]?.trim() === request.content ? { ...current, [request.sessionId]: '' } : current); }} onStop={() => running.current?.abort()} isGenerating={generating} onRegenerate={regenerate}
       applications={applications} onToolConfirm={async (id, approved) => { await api(`tool-confirmations/${id}`, { approved }); }}
+      onUserInput={async (id, answers) => { await api(`user-inputs/${id}`, { answers }); }}
       agents={agents} selectedAgentId={agentId} models={models} selectedModelId={availableModelId} onSelectedModelIdChange={setModelId} selectedReasoningEffort={activeEffort} onSelectedReasoningEffortChange={setEffort}
       uploadAttachment={async (file) => {
         const body = new FormData();
