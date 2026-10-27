@@ -33,10 +33,23 @@ export async function readSkillPackage(path: string, signal?: AbortSignal): Prom
   return importSkillPackage(files);
 }
 
+/** Everything except the heavy package body, used by lists that never open a Skill. */
+export function skillSummary(skill: AgentSkill): AgentSkill {
+  return {
+    id: skill.id, name: skill.name, description: skill.description, version: skill.version, slug: skill.slug,
+    category: skill.category, allowImplicitInvocation: skill.allowImplicitInvocation, scope: skill.scope,
+    favorite: skill.favorite, updatedAt: skill.updatedAt,
+  };
+}
+
 /** Website-owned library, separate from chat autosaves. */
 export class SkillLibrary {
   readonly ready: Promise<void>;
   private builtin!: AgentSkill;
+  /** Parsing the stored JSON is ~20 ms for a multi-MB library; every save invalidates it. */
+  private stored?: AgentSkill[];
+  /** Builtin package plus its preferences; reused by full and summary reads. */
+  private first?: AgentSkill;
 
   constructor(private storage: LocalStorage) {
     if (!storage.getConfig<AgentSkill[]>('skills')) {
@@ -51,7 +64,19 @@ export class SkillLibrary {
 
   list(): AgentSkill[] {
     if (!this.builtin) throw new Error('Skills 尚未初始化');
-    return [{ ...this.builtin, favorite: this.storage.getConfig<boolean>('skillCreatorFavorite') || false, ...this.storage.getConfig<Pick<AgentSkill, 'favorite' | 'allowImplicitInvocation' | 'version' | 'updatedAt'>>('skillCreatorPreferences') }, ...this.storage.getConfig<AgentSkill[]>('skills') || []];
+    this.first ||= { ...this.builtin, favorite: this.storage.getConfig<boolean>('skillCreatorFavorite') || false, ...this.storage.getConfig<Pick<AgentSkill, 'favorite' | 'allowImplicitInvocation' | 'version' | 'updatedAt'>>('skillCreatorPreferences') };
+    return [this.first, ...this.storedSkills()];
+  }
+  /** Metadata-only view for pickers and dialogs; carries no instructions or resource bodies. */
+  catalog(): AgentSkill[] {
+    return this.list().map(skillSummary);
+  }
+  private storedSkills(): AgentSkill[] {
+    return this.stored ||= this.storage.getConfig<AgentSkill[]>('skills') || [];
+  }
+  private writeStored(skills: AgentSkill[]) {
+    this.storage.setConfig('skills', skills);
+    this.stored = skills;
   }
 
   save(skill: AgentSkill) {
@@ -60,6 +85,7 @@ export class SkillLibrary {
       const content = ({ favorite: _favorite, allowImplicitInvocation: _automatic, version: _version, updatedAt: _updatedAt, ...rest }: AgentSkill) => rest;
       if (!isDeepStrictEqual(content(skill), content(this.builtin))) throw new Error('内置 Skill 不能被覆盖，请另存为自定义 Skill');
       this.storage.setConfig('skillCreatorPreferences', { favorite: skill.favorite === true, allowImplicitInvocation: skill.allowImplicitInvocation !== false, version: skill.version || this.builtin.version, updatedAt: skill.updatedAt });
+      this.first = undefined;
       return skill;
     }
     validateSkill(skill);
@@ -69,7 +95,7 @@ export class SkillLibrary {
     const saved = { ...skill, scope: 'custom' as const, updatedAt: new Date().toISOString() };
     const next = [...custom.filter(item => item.id !== saved.id), saved];
     if (next.length > 199 || JSON.stringify(next).length > 80 * 1024 * 1024) throw new Error('Skills 库已达到容量限制');
-    this.storage.setConfig('skills', next);
+    this.writeStored(next);
     return saved;
   }
 
@@ -92,6 +118,6 @@ export class SkillLibrary {
 
   delete(id: string) {
     if (id === this.builtin.id) throw new Error('默认创建技能不能删除');
-    this.storage.setConfig('skills', this.list().slice(1).filter(skill => skill.id !== id));
+    this.writeStored(this.storedSkills().filter(skill => skill.id !== id));
   }
 }

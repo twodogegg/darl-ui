@@ -26,6 +26,7 @@ import { isLocalOrLanAddress } from './local-access';
 import { DEFAULT_APPROVAL_MODE, validateApprovalSettings, shouldConfirm, isLowRiskCommand } from './approval-settings';
 import { RUNTIME_TOOLS, SkillRuntime } from './skill-runtime';
 import { SkillLibrary } from './skill-library';
+import { sendRevalidatedJson } from './http-cache';
 import { RequestRecordStore, requestRecordsApi, requestRecordScope } from './request-records';
 import { createPromptOptimization, type OptimizationPromptKey } from './prompt-optimization';
 import { RequestTimeout } from './request-timeout';
@@ -433,15 +434,20 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         storage.setConfig('approvalSettings', next);
         return send(200, next);
       }
-      if (path === '/api/skills' && request.method === 'GET') return send(200, skillLibrary.list());
+      if (path === '/api/skills' && request.method === 'GET') return sendRevalidatedJson(request, response, new URL(request.url, 'http://localhost').searchParams.has('summary') ? skillLibrary.catalog() : skillLibrary.list());
+      const singleSkill = path.match(/^\/api\/skills\/([^/]+)$/);
+      if (singleSkill && request.method === 'GET') {
+        const found = skillLibrary.list().find(skill => skill.id === decodeURIComponent(singleSkill[1]));
+        return found ? send(200, found) : send(404, { error: 'Skill 不存在或已删除' });
+      }
       if (path === '/api/skills' && request.method === 'POST') {
         const { skill } = await readBody(request);
         skillLibrary.save(skill);
-        return send(200, skillLibrary.list());
+        return send(200, new URL(request.url, 'http://localhost').searchParams.has('summary') ? skillLibrary.catalog() : skillLibrary.list());
       }
       if (path.startsWith('/api/skills/') && request.method === 'DELETE') {
         skillLibrary.delete(decodeURIComponent(path.slice('/api/skills/'.length)));
-        return send(200, skillLibrary.list());
+        return send(200, new URL(request.url, 'http://localhost').searchParams.has('summary') ? skillLibrary.catalog() : skillLibrary.list());
       }
       if (path === '/api/sessions' && request.method === 'GET') return send(200, chatSessions.list());
       if (path.startsWith('/api/sessions/')) {
@@ -463,7 +469,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           throw error;
         }
       }
-      if (path === '/api/state' && request.method === 'GET') return send(200, { sessions: chatSessions.list().map(item => chatSessions.get(item.id)!.session), activeId: storage.getConfig<string>('chatActiveId') || storage.getConfig<ClientState>('clientState')?.activeId, skills: skillLibrary.list() });
+      if (path === '/api/state' && request.method === 'GET') return send(200, { sessions: chatSessions.list().map(item => chatSessions.get(item.id)!.session), activeId: storage.getConfig<string>('chatActiveId') || storage.getConfig<ClientState>('clientState')?.activeId, skills: skillLibrary.catalog() });
       if (path === '/api/state' && request.method === 'POST') {
         const state = validateClientState({ ...await readBody(request), skills: [] });
         try { chatSessions.importLegacy(state.sessions); }

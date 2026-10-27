@@ -4,17 +4,19 @@ import { Check, FileText, FolderOpen, Plus, Search, Sparkles, Star, Trash2, Tria
 import { Button } from '../ui/Button';
 import { Switch } from '../ui/FormControls';
 import type { AgentSkill, AgentSkillResource } from './types';
-import { importSkillPackage, newSkillDraft, nextSkillVersion, validateSkill } from './skill-package';
+import { importSkillPackage, newSkillDraft, nextSkillVersion, skillSummary, validateSkill } from './skill-package';
 import { SkillFileTree, SkillMarkdown } from './SkillFiles';
 
 type Filter = 'all' | 'favorite' | 'mine' | 'builtin';
 type ImportConflict = { preview: AgentSkill; existing: AgentSkill };
 const skillNameKey = (name: string) => name.trim().toLocaleLowerCase();
 
-export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport, onFavoriteChange, onCreateViaChat, createViaChatDisabled = false }: {
+export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport, onFavoriteChange, onCreateViaChat, createViaChatDisabled = false, loadSkill }: {
   open: boolean;
   skills: AgentSkill[];
   onClose: () => void;
+  /** Fetch one Skill's instructions and resources when the list only carries metadata. */
+  loadSkill?: (skill: AgentSkill) => Promise<AgentSkill>;
   onCreateViaChat?: () => void | Promise<void>;
   createViaChatDisabled?: boolean;
   onSave: (skill: AgentSkill) => void | Promise<void>;
@@ -38,18 +40,19 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
   const [importConflictBusy, setImportConflictBusy] = useState(false);
   const importInput = useRef<HTMLInputElement>(null);
   const importFolderInput = useRef<HTMLInputElement>(null);
+  const waitingForInitialSkills = useRef(false);
 
+  const [bodies, setBodies] = useState<Record<string, AgentSkill>>({});
+  const [bodyState, setBodyState] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [bodyError, setBodyError] = useState('');
   const selected = skills.find((skill) => skill.id === selectedId);
+  const body = selected ? bodies[selected.id] : undefined;
+  const hasBody = (skill?: AgentSkill) => !skill || skill.instructions !== undefined || skill.resources !== undefined;
+  // 列表可能只带元数据，此时选中项与草稿的内容部分天然不一致；只有两端都带包体时才比较正文差异，
+  // 已加载的草稿修订正文后仍需正常判定为未保存修改。
   const dirty = selected
-    ? Object.keys({ ...selected, ...draft }).some((key) => {
-        if (key === 'resources') return false;
-        const field = key as keyof AgentSkill;
-        return selected[field] !== draft[field];
-      }) || (selected.resources?.length || 0) !== (draft.resources?.length || 0)
-        || (selected.resources || []).some((resource, index) => {
-          const other = draft.resources?.[index];
-          return !other || resource.path !== other.path || resource.content !== other.content || resource.encoding !== other.encoding;
-        })
+    ? JSON.stringify(skillSummary(selected)) !== JSON.stringify(skillSummary({ ...draft, updatedAt: selected.updatedAt, version: selected.version }))
+      || (hasBody(body || selected) && hasBody(draft) && ((body || selected).instructions !== draft.instructions || (body || selected).frontmatter !== draft.frontmatter || ((body || selected).resources?.length || 0) !== (draft.resources?.length || 0) || ((body || selected).resources || []).some((resource, index) => { const other = draft.resources?.[index]; return !other || resource.path !== other.path || resource.content !== other.content || resource.encoding !== other.encoding; })))
     : Boolean(draft.name?.trim() || draft.description?.trim() || draft.instructions?.trim() || draft.resources?.length);
   const visible = useMemo(() => {
     const text = query.trim().toLocaleLowerCase();
@@ -71,10 +74,14 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
   useEffect(() => {
     if (!open) return;
     const initial = skills.find((skill) => skill.id === selectedId) || skills[0];
+    waitingForInitialSkills.current = !initial;
     setSelectedId(initial?.id || null);
     setDraft(initial ? { ...initial, resources: initial.resources?.map((resource) => ({ ...resource })) } : newSkillDraft());
     setResourcePath(null);
     setFileMode(initial ? 'preview' : 'edit');
+    setBodies({});
+    setBodyState('idle');
+    setBodyError('');
     setError('');
     setNotice('');
     setImportConflict(null);
@@ -84,11 +91,34 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  useEffect(() => {
+    if (!open || !waitingForInitialSkills.current || !skills.length) return;
+    waitingForInitialSkills.current = false;
+    setSelectedId(skills[0].id);
+    setDraft({ ...skills[0], resources: skills[0].resources?.map((resource) => ({ ...resource })) });
+    setFileMode('preview');
+  }, [open, skills]);
+
+  // 列表里的元数据不足以编辑正文：打开或切换选中项后补取包体，不阻塞对话框打开。
+  useEffect(() => {
+    if (!open || !selected || hasBody(selected) || bodies[selected.id] !== undefined || !loadSkill) return;
+    let active = true;
+    setBodyState('loading');
+    setBodyError('');
+    loadSkill(selected).then(
+      (full) => { if (!active) return; setBodies((current) => ({ ...current, [full.id]: full })); setDraft((current) => ({ ...full, ...current, instructions: full.instructions, frontmatter: full.frontmatter, resources: full.resources?.map((resource) => ({ ...resource })) })); setBodyState('idle'); },
+      (reason) => { if (active) { setBodyState('error'); setBodyError(reason instanceof Error ? reason.message : 'Skill 正文加载失败'); } },
+    );
+    return () => { active = false; };
+  }, [open, selected, bodies, loadSkill]);
+
   if (!open) return null;
 
   const resources = draft.resources || [];
   const currentResource = resources.find((resource) => resource.path === resourcePath);
   const isBuiltin = selected?.scope === 'builtin';
+  // 收藏与内置开关只改元数据，正文还没回来时也可以保存；编辑正文必须先等到包体。
+  const bodyUnavailable = Boolean(selected && loadSkill && !hasBody(draft));
   const filePath = currentResource?.path ?? 'SKILL.md';
   const fileContent = currentResource ? currentResource.content : draft.instructions || '';
   const isMarkdown = /\.(md|markdown)$/i.test(filePath);
@@ -100,15 +130,22 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
   const select = (skill: AgentSkill) => {
     if (dirty && !window.confirm('当前 Skill 有未保存修改，是否放弃？')) return;
     setSelectedId(skill.id);
-    setDraft({ ...skill, resources: skill.resources?.map((resource) => ({ ...resource })) });
+    waitingForInitialSkills.current = false;
+    const full = bodies[skill.id] || skill;
+    setDraft({ ...full, ...skill, resources: full.resources?.map((resource) => ({ ...resource })) });
     setResourcePath(null);
     setFileMode('preview');
+    setBodyState('idle');
+    setBodyError('');
     setError('');
     setNotice('');
   };
   const create = () => {
     if (dirty && !window.confirm('当前 Skill 有未保存修改，是否放弃？')) return;
     setSelectedId(null);
+    waitingForInitialSkills.current = false;
+    setBodyState('idle');
+    setBodyError('');
     setDraft(newSkillDraft());
     setResourcePath(null);
     setFileMode('edit');
@@ -117,10 +154,12 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
   };
   const save = async () => {
     const { enabled: _enabled, ...withoutLegacyEnabled } = draft;
+    // 列表只有元数据时，保存必须基于加载到的正文，否则会把指令正文覆盖成空。
     const next: AgentSkill = { ...withoutLegacyEnabled, name: draft.name?.trim() || '', description: draft.description?.trim() || '', instructions: draft.instructions?.trim() || '', resources: resources.map((resource) => ({ ...resource, path: resource.path.trim() })), version: nextSkillVersion(draft.version), updatedAt: new Date().toISOString(), allowImplicitInvocation: draft.allowImplicitInvocation !== false, scope: draft.scope || 'custom' };
     try {
       validateSkill(next);
       await onSave(next);
+      setBodies((current) => ({ ...current, [next.id]: next }));
       setSelectedId(next.id);
       setDraft(next);
       setNotice('Skill 已保存。');
@@ -202,6 +241,7 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
   const toggleFavorite = async (skill: AgentSkill) => {
     try {
       await onFavoriteChange(skill.id, !skill.favorite);
+      if (skill.id === selectedId) setDraft((current) => ({ ...current, favorite: !skill.favorite }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '收藏状态保存失败');
     }
@@ -230,7 +270,7 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
           <div className="darl-agent-skill-editor-heading"><div><span className="darl-agent-manager-eyebrow">{selectedId ? 'EDIT SKILL' : 'NEW SKILL'}</span><h3>{draft.name || '新建 Skill'}</h3></div><div className="darl-agent-skill-editor-actions">{selected && !isBuiltin && <Button variant="ghost" size="sm" onClick={() => setDeleteOpen(true)}><Trash2 data-icon="inline-start" />删除</Button>}</div></div>
           <div className="darl-agent-skill-form"><label><span>Skill 原名</span><input value={draft.slug || draft.name || ''} readOnly /></label><label><span>显示名称</span><input value={draft.name || ''} disabled={isBuiltin} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="例如：代码审查" /></label><label><span>描述</span><textarea value={draft.description || ''} disabled={isBuiltin} rows={2} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="说明什么时候使用这个 Skill" /></label><div className="darl-agent-skill-auto-invocation"><Switch aria-label="允许自动调用" checked={draft.allowImplicitInvocation !== false} onChange={(event) => setDraft({ ...draft, allowImplicitInvocation: event.target.checked })}>允许自动调用</Switch><small>关闭后，只有在聊天中手动 @ 引用时才会使用。</small></div></div>
           <div className="darl-agent-skill-files">
-            <aside><div className="darl-agent-skill-files-heading"><strong>文件 <span>{resources.length + 1}</span></strong><Button variant="ghost" size="sm" disabled={isBuiltin} onClick={() => { let index = resources.length + 1; while (resources.some((resource) => resource.path === `references/resource-${index}.md`)) index += 1; const path = `references/resource-${index}.md`; setDraft({ ...draft, resources: [...resources, { path, content: '' }] }); setResourcePath(path); setFileMode('edit'); }}><Plus data-icon="inline-start" />资源</Button></div>
+            <aside><div className="darl-agent-skill-files-heading"><strong>文件 <span>{resources.length + 1}</span></strong><Button variant="ghost" size="sm" disabled={isBuiltin || bodyUnavailable} onClick={() => { let index = resources.length + 1; while (resources.some((resource) => resource.path === `references/resource-${index}.md`)) index += 1; const path = `references/resource-${index}.md`; setDraft({ ...draft, resources: [...resources, { path, content: '' }] }); setResourcePath(path); setFileMode('edit'); }}><Plus data-icon="inline-start" />资源</Button></div>
               <SkillFileTree key={draft.id} paths={['SKILL.md', ...resources.map((resource) => resource.path)]} selectedPath={filePath} onSelect={selectFile} />
             </aside>
             <div className="darl-agent-skill-file-editor">
@@ -238,11 +278,11 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
                 {!isBinary && <div className="darl-agent-skill-file-modes" role="group" aria-label="文件显示方式">{isMarkdown && <button type="button" aria-pressed={fileMode === 'preview'} onClick={() => setFileMode('preview')}>预览</button>}<button type="button" aria-pressed={fileMode === 'edit' || !isMarkdown} onClick={() => setFileMode('edit')}>{isBuiltin ? '源码' : '编辑'}</button></div>}
                 {currentResource && !isBuiltin && <Button variant="ghost" size="icon" aria-label="删除资源" onClick={() => { setDraft({ ...draft, resources: resources.filter((resource) => resource !== currentResource) }); setResourcePath(null); }}><Trash2 /></Button>}
               </div>
-              {isBinary ? <div className="darl-agent-skill-file-empty"><FileText /><strong>{filePath.split('/').pop()}</strong><span>二进制资源无法在此编辑</span></div> : isMarkdown && fileMode === 'preview' ? <div className="darl-agent-skill-file-preview" key={filePath}>{fileContent.trim() ? <SkillMarkdown content={fileContent} filePath={filePath} resources={resources} onSelect={selectFile} /> : <p className="darl-agent-empty">暂无内容{!isBuiltin && '，点击「编辑」开始编写。'}</p>}</div> : <textarea value={fileContent} readOnly={isBuiltin} spellCheck={false} onChange={(event) => currentResource ? updateResource({ content: event.target.value }) : setDraft({ ...draft, instructions: event.target.value })} aria-label={`${filePath} 内容`} placeholder="写下输入要求、执行流程和输出格式…" />}
+              {isBinary ? <div className="darl-agent-skill-file-empty"><FileText /><strong>{filePath.split('/').pop()}</strong><span>二进制资源无法在此编辑</span></div> : isMarkdown && fileMode === 'preview' ? <div className="darl-agent-skill-file-preview" key={filePath}>{fileContent.trim() ? <SkillMarkdown content={fileContent} filePath={filePath} resources={resources} onSelect={selectFile} /> : <p className="darl-agent-empty">暂无内容{!isBuiltin && '，点击「编辑」开始编写。'}</p>}</div> : <textarea value={fileContent} readOnly={isBuiltin || bodyUnavailable} spellCheck={false} onChange={(event) => currentResource ? updateResource({ content: event.target.value }) : setDraft({ ...draft, instructions: event.target.value })} aria-label={`${filePath} 内容`} placeholder="写下输入要求、执行流程和输出格式…" />}
             </div>
           </div>
-          <div className="darl-agent-skill-manager-feedback" role="status">{error ? <span className="is-error">{error}</span> : notice || (dirty ? '有未保存的修改' : 'Skill 已保存')}</div>
-          <footer className="darl-agent-skill-manager-footer"><span>{isBuiltin ? '内置 Skill 只能修改自动调用设置。' : '保存后会增加版本号。'}</span><div><Button variant="outline" onClick={close}>关闭</Button><Button disabled={!dirty} onClick={() => void save()}>保存修改</Button></div></footer>
+          <div className="darl-agent-skill-manager-feedback" role="status">{error ? <span className="is-error">{error}</span> : bodyState === 'error' ? <span className="is-error">{bodyError}</span> : notice || (bodyState === 'loading' ? '正在加载 Skill 正文…' : dirty ? '有未保存的修改' : 'Skill 已保存')}</div>
+          <footer className="darl-agent-skill-manager-footer"><span>{isBuiltin ? '内置 Skill 只能修改自动调用设置。' : '保存后会增加版本号。'}</span><div><Button variant="outline" onClick={close}>关闭</Button><Button disabled={!dirty || bodyUnavailable} onClick={() => void save()}>保存修改</Button></div></footer>
         </section>
       </div>
       {deleteSuccess && <div className="darl-agent-skill-toast" role="status">删除成功</div>}

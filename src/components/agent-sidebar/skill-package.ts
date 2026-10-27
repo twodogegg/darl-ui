@@ -7,6 +7,19 @@ const MAX_FILE = 2 * 1024 * 1024;
 export const skillPathIgnored = (path: string) => path.split('/').some((part) => ['__MACOSX', '.skillhub', '.DS_Store', '.git', 'node_modules'].includes(part));
 const newId = () => crypto.randomUUID();
 
+/**
+ * Metadata-only view of a Skill. Lists and pickers never need instructions or resource bodies;
+ * projecting them away keeps saved snapshots comparable regardless of whether the body was loaded.
+ */
+export function skillSummary(skill: AgentSkill): AgentSkill {
+  return {
+    id: skill.id, name: skill.name, description: skill.description, version: skill.version, slug: skill.slug,
+    category: skill.category, allowImplicitInvocation: skill.allowImplicitInvocation, scope: skill.scope,
+    favorite: skill.favorite, updatedAt: skill.updatedAt,
+  };
+}
+
+
 export function skillPathValid(path: string) {
   return !!path && !/[\\:\u0000-\u001f]/.test(path) && path.split('/').every((part) => !!part && part !== '.' && part !== '..');
 }
