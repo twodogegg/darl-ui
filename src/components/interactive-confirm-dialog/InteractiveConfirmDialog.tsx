@@ -18,6 +18,7 @@ export interface ConfirmQuestion {
   placeholder?: string;
   defaultValue?: ConfirmAnswer;
 }
+export type ConfirmDialogTheme = 'light' | 'dark';
 export interface InteractiveConfirmDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -34,6 +35,8 @@ export interface InteractiveConfirmDialogProps {
   onConfirm: (answers: ConfirmAnswers) => void | Promise<void>;
   onCancel?: () => void;
   accentColor?: string;
+  /** 明暗外观；省略时跟随 DarlUIProvider 主题，未接入 Provider 时跟随 CSS color-scheme。 */
+  theme?: ConfirmDialogTheme;
   className?: string;
   /** Host theme variables carried into the portal. */
   style?: CSSProperties;
@@ -52,7 +55,7 @@ function startingAnswers(questions: ConfirmQuestion[]): ConfirmAnswers {
 
 export function InteractiveConfirmDialog({
   open, onOpenChange, title, description, questions, details, confirmText = '确认', cancelText = '取消',
-  cancelVariant = 'outline', showCancel = false, onConfirm, onCancel, accentColor, className = '', style,
+  cancelVariant = 'outline', showCancel = false, onConfirm, onCancel, accentColor, theme: appearance, className = '', style,
 }: InteractiveConfirmDialogProps) {
   const headingId = useId();
   const theme = useDarlTheme();
@@ -115,11 +118,13 @@ export function InteractiveConfirmDialog({
     }
   };
 
+  // 显式 theme 优先；否则取 Provider 的解析结果。都没有时不写内联颜色，交给 CSS 的语义变量与 color-scheme。
+  const dark = (appearance ?? (theme ? theme.resolvedMode : undefined)) === 'dark';
+  const accent = accentColor ?? theme?.theme.primaryColor ?? (dark ? '#f1f5f9' : '#18181b');
   const vars = {
-    '--darl-confirm-accent': accentColor ?? theme?.theme.primaryColor ?? (theme?.resolvedMode === 'dark' ? '#f1f5f9' : '#18181b'),
-    '--darl-confirm-accent-foreground': readableForeground(accentColor ?? theme?.theme.primaryColor ?? (theme?.resolvedMode === 'dark' ? '#f1f5f9' : '#18181b')),
+    '--darl-confirm-accent': accent,
+    '--darl-confirm-accent-foreground': readableForeground(accent),
     ...(theme?.theme.radius !== undefined ? { '--darl-radius': theme.theme.radius + 'px' } : {}),
-    ...(theme?.resolvedMode === 'dark' ? { '--darl-confirm-bg': '#111827', '--darl-confirm-text': '#f1f5f9', '--darl-confirm-muted': '#94a3b8', '--darl-confirm-border': '#344155' } : {}),
   } as CSSProperties;
 
   return <Dialog.Root open={open} onOpenChange={requestOpen}>
@@ -127,7 +132,9 @@ export function InteractiveConfirmDialog({
       <Dialog.Overlay className="darl-confirm-overlay" />
       <Dialog.Content
         aria-describedby={description ? undefined : headingId}
-        className={['darl-confirm-dialog', theme?.resolvedMode === 'dark' ? 'darl-confirm-dark' : '', className].filter(Boolean).join(' ')}
+        className={['darl-confirm-dialog', dark ? 'darl-confirm-dark' : '', className].filter(Boolean).join(' ')}
+        data-darl-theme={appearance ?? theme?.resolvedMode}
+        data-theme={appearance ?? theme?.resolvedMode}
         style={{ ...vars, ...style }}
       >
         <div className="darl-confirm-header">

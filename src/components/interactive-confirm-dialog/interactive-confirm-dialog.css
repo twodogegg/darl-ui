@@ -1,18 +1,46 @@
 .darl-confirm-overlay { position: fixed; inset: 0; z-index: 2000; background: rgb(0 0 0 / .68); animation: darl-confirm-fade .15s ease-out; }
+/* 语义变量：优先跟随宿主主题（DarlUIProvider 的 --darl-* 或 shadcn 的 --background 等）；
+   宿主都没有时再按弹窗自身的 color-scheme 取深/浅默认值，深色站里不会退回纯白。 */
 .darl-confirm-dialog {
-  --darl-confirm-bg: var(--darl-background, var(--background, #fff));
-  --darl-confirm-text: var(--darl-text, var(--foreground, #111));
-  --darl-confirm-muted: var(--darl-muted, var(--muted-foreground, #666));
-  --darl-confirm-border: var(--darl-border, var(--border, #ddd));
+  --darl-confirm-light-bg: #fff;
+  --darl-confirm-light-text: #111;
+  --darl-confirm-light-muted: #666;
+  --darl-confirm-light-border: #ddd;
+  --darl-confirm-dark-bg: #111827;
+  --darl-confirm-dark-text: #f1f5f9;
+  --darl-confirm-dark-muted: #94a3b8;
+  --darl-confirm-dark-border: #344155;
+  color-scheme: light;
+  --darl-confirm-bg: var(--darl-background, var(--background, var(--darl-confirm-light-bg)));
+  --darl-confirm-text: var(--darl-text, var(--foreground, var(--darl-confirm-light-text)));
+  --darl-confirm-muted: var(--darl-muted, var(--muted-foreground, var(--darl-confirm-light-muted)));
+  --darl-confirm-border: var(--darl-border, var(--border, var(--darl-confirm-light-border)));
   --darl-confirm-accent: var(--darl-primary, var(--primary, #18181b));
   --darl-confirm-accent-foreground: var(--darl-primary-foreground, var(--primary-foreground, #fff));
+  /* 浮层底色：在弹窗底色上轻微提亮（深色）或压暗（浅色），用于明细卡片和输入区域。 */
+  --darl-confirm-surface: color-mix(in srgb, var(--darl-confirm-text) 5%, var(--darl-confirm-bg));
   box-sizing: border-box; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2001;
   width: min(620px, calc(100vw - 32px)); max-height: min(85dvh, 860px); display: flex; flex-direction: column;
   background: var(--darl-confirm-bg); border: 1px solid var(--darl-confirm-border); border-radius: var(--darl-radius, 14px);
   color: var(--darl-confirm-text); box-shadow: 0 24px 70px rgb(0 0 0 / .25); font: 14px/1.5 Inter, system-ui, sans-serif; overflow: hidden;
 }
-.darl-confirm-dark { --darl-confirm-bg: #111827; --darl-confirm-text: #f1f5f9; --darl-confirm-muted: #94a3b8; --darl-confirm-border: #344155; }
+/* 显式暗色外观（组件 class、data 属性或宿主自行标注）。:where() 不增加优先级，因此这里用
+   .darl-confirm-dialog:where(...) 的更高优先级覆盖上面默认的 color-scheme: light，
+   让原生单选/多选、滚动条等 UA 控件跟随深色调色板。 */
+.darl-confirm-dialog:where(.darl-confirm-dark, [data-theme="dark"], [data-darl-theme="dark"]) { color-scheme: dark; }
+/* 深色弹窗（组件根据主题自动添加，或宿主直接加在中性宿主上）：未收到主题变量时使用深色调色板。 */
+.darl-confirm-dark {
+  color-scheme: dark;
+  --darl-confirm-bg: var(--darl-background, var(--background, var(--darl-confirm-dark-bg)));
+  --darl-confirm-text: var(--darl-text, var(--foreground, var(--darl-confirm-dark-text)));
+  --darl-confirm-muted: var(--darl-muted, var(--muted-foreground, var(--darl-confirm-dark-muted)));
+  --darl-confirm-border: var(--darl-border, var(--border, var(--darl-confirm-dark-border)));
+  --darl-confirm-accent: var(--darl-primary, var(--primary, #f1f5f9));
+  --darl-confirm-accent-foreground: var(--darl-primary-foreground, var(--primary-foreground, #141414));
+}
 .darl-confirm-dialog * { box-sizing: border-box; }
+/* 弹窗内的 Button 变量随弹窗语义色走：Provider 渲染在 Portals 之外，按钮不能依赖外层的 --darl-*。 */
+.darl-confirm-dialog .darl-button { --darl-text: var(--darl-confirm-text); --darl-muted: var(--darl-confirm-muted); --darl-border: var(--darl-confirm-border); --darl-surface: var(--darl-confirm-surface); --darl-primary: var(--darl-confirm-accent); --darl-primary-foreground: var(--darl-confirm-accent-foreground); }
 .darl-confirm-header { position: relative; flex: none; padding: 22px 56px 14px 24px; }
 .darl-confirm-header .darl-button { position: absolute; top: 15px; right: 16px; }
 .darl-confirm-title { margin: 0; font-size: 20px; font-weight: 700; line-height: 1.35; }
@@ -22,16 +50,22 @@
 .darl-confirm-question { margin: 0; padding: 16px 0 20px; border: 0; min-width: 0; border-bottom: 1px solid var(--darl-confirm-border); }
 .darl-confirm-question:last-child { border-bottom: 0; }
 .darl-confirm-question legend { padding: 0; font-weight: 650; font-size: 14px; }
+/* 滚动条跟随弹窗主题，避免深色弹窗里出现浏览器默认的亮色滑轨。 */
+.darl-confirm-questions { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--darl-confirm-text) 22%, transparent) transparent; }
 .darl-confirm-hint { margin: 4px 0 10px; font-size: 12px; color: var(--darl-confirm-muted); }
 .darl-confirm-required { color: #e11d48; }
 .darl-confirm-options { display: grid; gap: 4px; margin-top: 8px; }
 .darl-confirm-option { display: flex; gap: 11px; align-items: flex-start; padding: 7px 0; cursor: pointer; }
+.darl-confirm-option:hover { color: var(--darl-confirm-text); }
+.darl-confirm-option:has(input:focus-visible) { border-radius: 7px; outline: 2px solid color-mix(in srgb, var(--darl-confirm-accent) 45%, transparent); outline-offset: 2px; }
 .darl-confirm-option:has(input:disabled) { cursor: not-allowed; opacity: .5; }
 .darl-confirm-option input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--darl-confirm-accent); flex: none; }
 .darl-confirm-option-text { min-width: 0; overflow-wrap: anywhere; }
 .darl-confirm-option-text small { display: block; color: var(--darl-confirm-muted); font-size: 12px; }
-.darl-confirm-input { margin-top: 8px; display: block; width: 100%; min-height: 40px; border: 1px solid var(--darl-confirm-border); border-radius: 9px; padding: 10px 12px; background: transparent; color: var(--darl-confirm-text); font: inherit; outline: none; }
-.darl-confirm-input:focus-visible { border-color: var(--darl-confirm-accent); outline: 2px solid color-mix(in srgb, var(--darl-confirm-accent) 24%, transparent); }
+.darl-confirm-input { margin-top: 8px; display: block; width: 100%; min-height: 40px; border: 1px solid var(--darl-confirm-border); border-radius: 9px; padding: 10px 12px; background: var(--darl-confirm-surface); color: var(--darl-confirm-text); font: inherit; outline: none; transition: border-color .15s, background .15s; }
+.darl-confirm-input:hover:not(:disabled) { border-color: color-mix(in srgb, var(--darl-confirm-text) 26%, var(--darl-confirm-border)); }
+.darl-confirm-input:focus, .darl-confirm-input:focus-visible { border-color: var(--darl-confirm-accent); outline: 2px solid color-mix(in srgb, var(--darl-confirm-accent) 24%, transparent); }
+.darl-confirm-input:disabled { opacity: .6; }
 .darl-confirm-textarea { min-height: 82px; resize: vertical; }
 .darl-confirm-input::placeholder { color: var(--darl-confirm-muted); }
 .darl-confirm-field-error, .darl-confirm-error { color: #e11d48; font-size: 12px; margin: 6px 0 0; }

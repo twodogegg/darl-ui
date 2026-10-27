@@ -75,4 +75,23 @@ describe('InteractiveConfirmDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /确认/ }));
     await waitFor(() => expect(onConfirm).toHaveBeenCalledWith({}));
   });
+  it('uses the semantic theme classes instead of hard-coded inline colors', () => {
+    render(<InteractiveConfirmDialog open onOpenChange={vi.fn()} title="确认" questions={[]} onConfirm={vi.fn()} />);
+    const dialog = screen.getByRole('dialog', { name: '确认' });
+    // 没有 Provider 时不写死背景色：交给 CSS 变量与 color-scheme，深色宿主不会退回纯白。
+    expect(dialog.style.getPropertyValue('--darl-confirm-bg')).toBe('');
+    expect(dialog).not.toHaveClass('darl-confirm-dark');
+    expect(dialog).not.toHaveAttribute('data-darl-theme');
+  });
+  it('follows the DarlUIProvider dark theme', () => {
+    render(<DarlUIProvider theme={{ mode: 'dark', primaryColor: '#8ba4c5' }}><InteractiveConfirmDialog open onOpenChange={vi.fn()} title="确认" questions={[]} onConfirm={vi.fn()} /></DarlUIProvider>);
+    const dialog = screen.getByRole('dialog', { name: '确认' });
+    expect(dialog).toHaveClass('darl-confirm-dark');
+    expect(dialog).toHaveAttribute('data-darl-theme', 'dark');
+    expect(dialog.style.getPropertyValue('--darl-confirm-accent')).toBe('#8ba4c5');
+  });
+  it('lets an explicit theme override the provider', () => {
+    render(<DarlUIProvider theme={{ mode: 'light' }}><InteractiveConfirmDialog open onOpenChange={vi.fn()} title="确认" questions={[]} onConfirm={vi.fn()} theme="dark" /></DarlUIProvider>);
+    expect(screen.getByRole('dialog', { name: '确认' })).toHaveClass('darl-confirm-dark');
+  });
 });

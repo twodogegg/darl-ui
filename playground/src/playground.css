@@ -234,3 +234,4 @@
 
 /* AssetLibrary 按截图固定深色外观，宿主可用 --darl-* 变量覆盖。 */
 .darl-asset-dialog .darl-asset-library { --darl-background: #0b0b0c; --darl-surface: #17181a; --darl-text: #f4f4f5; --darl-muted: #a1a1aa; --darl-border: #2a2a2d; --darl-primary: #ffffff; --darl-primary-foreground: #111113; --darl-danger: #f87171; }
+.darl-confirm-host-demo { max-width: 720px; padding: 16px 18px; border: 1px solid #2d3036; border-radius: 12px; font-size: 12px; line-height: 1.6; }

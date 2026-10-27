@@ -38,4 +38,4 @@ export type { AssetAction, AssetCreateRequest, AssetFilter, AssetItem, AssetKind
 export { defaultSections, defaultTags, kindLabels } from './components/asset-library/types';
 
 export { InteractiveConfirmDialog } from './components/interactive-confirm-dialog/InteractiveConfirmDialog';
-export type { ConfirmAnswer, ConfirmAnswers, ConfirmOption, ConfirmQuestion, InteractiveConfirmDialogProps } from './components/interactive-confirm-dialog/InteractiveConfirmDialog';
+export type { ConfirmAnswer, ConfirmAnswers, ConfirmDialogTheme, ConfirmOption, ConfirmQuestion, InteractiveConfirmDialogProps } from './components/interactive-confirm-dialog/InteractiveConfirmDialog';
