@@ -3,9 +3,9 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FileStore } from './file-storage';
-import { createFrameSheet, extractVideoFrames } from '../../../scripts/video-frames.mjs';
+import { createFrameSheet, extractVideoFrames, prepareVideoFrames, probeVideoFile, FRAMES_PER_SHEET, REDRAW_LIMITS } from '../../../scripts/video-frames.mjs';
 
-export const REDRAW_LIMITS = { maxBytes: 50 * 1024 * 1024, maxDuration: 120, maxShots: 40 };
+export { REDRAW_LIMITS };
 export type VideoInfo = { duration: number; width: number; height: number; fps: number; hasAudio: boolean };
 export type SourceFrame = { fileId: string; time: number; url: string };
 export type SourceSegment = { id: string; start: number; end: number; frames: SourceFrame[] };
@@ -24,11 +24,7 @@ export async function videoCommand(binary: 'ffmpeg' | 'ffprobe', args: string[],
 }
 
 export async function probeVideo(path: string, signal: AbortSignal): Promise<VideoInfo> {
-  const info = JSON.parse(await videoCommand('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', path], signal));
-  const video = info.streams?.find((stream: { codec_type: string }) => stream.codec_type === 'video');
-  const duration = Number(info.format?.duration || video?.duration), [n, d] = String(video?.avg_frame_rate || '0/1').split('/').map(Number);
-  if (!video || !Number.isFinite(duration) || duration <= 0 || !video.width || !video.height) throw new Error('无法读取视频时长或画面');
-  return { duration, width: video.width, height: video.height, fps: d ? n / d : 0, hasAudio: info.streams.some((stream: { codec_type: string }) => stream.codec_type === 'audio') };
+  return probeVideoFile(path, signal);
 }
 
 export async function withVideoFiles<T>(files: FileStore, fileIds: string[], fn: (paths: string[], root: string) => Promise<T>) {
@@ -53,8 +49,8 @@ export async function extractFrame(files: FileStore, path: string, root: string,
   return { fileId: file.id, time: frame.time, url: files.originalUrl(file)! };
 }
 
-/** Sheets are request-local; original frame file IDs remain the source evidence. */
-export async function analysisFrameSheet(files: FileStore, segments: SourceSegment[], signal: AbortSignal) {
+/** Build time-ordered reference sheets while preserving each source shot's frame indices. */
+export async function analysisFrameSheets(files: FileStore, segments: SourceSegment[], signal: AbortSignal) {
   const frames = [];
   for (const segment of segments) for (const [frameIndex, frame] of segment.frames.entries()) {
     signal.throwIfAborted();
@@ -62,34 +58,31 @@ export async function analysisFrameSheet(files: FileStore, segments: SourceSegme
     if (!file) throw new Error('原片参考帧已丢失，请重新抽帧');
     frames.push({ image: file.bytes, segmentId: segment.id, frameIndex, time: frame.time });
   }
-  return createFrameSheet(frames, signal);
+  if (!frames.length) throw new Error('原片镜头没有参考帧，请重新抽帧');
+  const segmentOrder = segments.map(segment => segment.id);
+  const sheets = [];
+  for (let index = 0; index < frames.length; index += FRAMES_PER_SHEET) {
+    signal.throwIfAborted();
+    sheets.push(await createFrameSheet(frames.slice(index, index + FRAMES_PER_SHEET), signal, segmentOrder));
+  }
+  return sheets;
 }
 
 export async function prepareVideo(files: FileStore, fileId: string, signal: AbortSignal, onSegment: (segment: SourceSegment) => void) {
   const file = files.get(fileId);
   if (!file || file.size > REDRAW_LIMITS.maxBytes) throw new Error('原视频不能超过 50 MB');
   return withVideoFiles(files, [fileId], async ([path], root) => {
-    const info = await probeVideo(path, signal);
-    if (info.duration > REDRAW_LIMITS.maxDuration) throw new Error('第一版原视频最长 120 秒');
-    const log = await videoCommand('ffmpeg', ['-i', path, '-an', '-vf', 'scdet=threshold=10', '-f', 'null', '-'], signal);
-    const candidates = [...log.matchAll(/lavfi\.scd\.time:\s*([\d.]+)/g)].map(match => Number(match[1]));
-    const points = [0];
-    for (const time of candidates) if (time - points.at(-1)! >= 0.15 && info.duration - time >= 0.15) points.push(time);
-    points.push(info.duration);
-    if (points.length - 1 > REDRAW_LIMITS.maxShots) throw new Error('检测到超过 40 个镜头，请先裁剪原视频');
-    const times = points.slice(0, -1).flatMap((start, index) => [0.12, 0.5, 0.88].map(fraction =>
-      Math.max(start, Math.min(start + (points[index + 1] - start) * fraction, points[index + 1] - 1 / (info.fps || 24)))));
-    const extracted = await extractVideoFrames(path, root, times, signal);
+    const { segments: sourceSegments, ...info } = await prepareVideoFrames(path, root, signal);
     const segments: SourceSegment[] = [];
-    for (let index = 0; index < points.length - 1; index++) {
+    for (const segment of sourceSegments) {
       signal.throwIfAborted();
-      const start = points[index], end = points[index + 1], frames: SourceFrame[] = [];
-      for (const frame of extracted.slice(index * 3, index * 3 + 3)) {
+      const frames: SourceFrame[] = [];
+      for (const frame of segment.frames) {
         const file = await files.put(await readFile(frame.path), 'image/jpeg', `原片参考-${frame.time.toFixed(3)}.jpg`);
         frames.push({ fileId: file.id, time: frame.time, url: files.originalUrl(file)! });
       }
-      const segment = { id: crypto.randomUUID(), start, end, frames };
-      segments.push(segment); onSegment(segment);
+      const stored = { ...segment, frames };
+      segments.push(stored); onSegment(stored);
     }
     return { ...info, fileId, url: files.originalUrl(fileId)!, segments };
   });

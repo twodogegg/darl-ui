@@ -9,7 +9,7 @@ import prompts from '../prompts/video-redraw.json';
 import { StudioStore, StudioConflict } from './studio';
 import { generate, safeError, type ChatMessage, type StoredProvider } from './models';
 import type { TimedTranscript } from './voice';
-import { REDRAW_LIMITS, analysisFrameSheet, composeVideo, extractFrame, prepareVideo, videoCommand, withVideoFiles, type SourceSegment } from './video-processing';
+import { REDRAW_LIMITS, analysisFrameSheets, composeVideo, extractFrame, prepareVideo, videoCommand, withVideoFiles, type SourceSegment } from './video-processing';
 import { isLocalOrLanAddress } from './local-access';
 
 type DraftAsset = { key: string; type: string; name: string; description: string; targetName: string; targetDescription: string; targetAppearance?: string; targetCostume?: string; targetVoiceDescription?: string; targetPrompt?: string; evidenceSegmentId: string; frameIndex: number };
@@ -163,20 +163,16 @@ export class VideoRedraw {
         for (let index = 0; index < pending.length;) {
           signal.throwIfAborted();
           const segments: SourceSegment[] = [];
-          let frameCount = 0;
-          while (index < pending.length && segments.length < 4) {
-            const segment = pending[index];
-            if (segments.length && frameCount + segment.frames.length > 12) break;
-            segments.push(segment); frameCount += segment.frames.length; index++;
-          }
+          while (index < pending.length && segments.length < 4) segments.push(pending[index++]);
           job.phase = `视觉分析 ${job.draft.shots.length}/${job.segments.length} 镜头`; this.save(job);
-          const sheet = await analysisFrameSheet(this.files, segments, signal);
+          const sheets = await analysisFrameSheets(this.files, segments, signal);
           const transcriptSegments = job.transcript?.segments.filter(line => segments.some(segment => line.end > segment.start && line.start < segment.end));
+          const frameSheets = sheets.map((sheet, index) => ({ index: index + 1, width: sheet.width, height: sheet.height, frames: sheet.frames }));
           const content: Exclude<ChatMessage['content'], string> = [{ type: 'text', text: JSON.stringify({ targetRegion: project.targetRegion, targetLanguage: project.targetLanguage, requirements: project.requirements,
-            segments: segments.map(({ frames: _, ...segment }) => segment), frameSheet: { width: sheet.width, height: sheet.height, frames: sheet.frames },
+            segments: segments.map(({ frames: _, ...segment }) => segment), frameSheets,
             transcript: job.transcript ? { language: job.transcript.language, segments: transcriptSegments } : null, existingAssets: [...existing.map(asset => ({ key: asset.id, type: asset.type, name: asset.name, description: asset.source || asset.description })), ...job.draft.assets],
             instruction: this.prompt('analysis') }) }];
-          content.push({ type: 'image', name: 'source-frame-sheet.jpg', mimeType: 'image/jpeg', data: sheet.bytes.toString('base64') });
+          for (const [index, sheet] of sheets.entries()) content.push({ type: 'image', name: `source-frame-sheet-${index + 1}.jpg`, mimeType: 'image/jpeg', data: sheet.bytes.toString('base64') });
           let output = '';
           for await (const chunk of generate(selected.provider, selected.model, [{ role: 'user', content }], instructions, undefined, signal)) output += chunk;
           const decoded = JSON.parse(output.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
@@ -293,7 +289,7 @@ export class VideoRedraw {
     const a = left.source as Record<string, unknown>, b = right.source as Record<string, unknown>;
     if (!a || !b || Math.abs(Number(a.end) - Number(b.start)) > 0.05) throw new Error('只能合并原片时间相邻且顺序一致的镜头');
     if (state.clips.some(clip => asList<string>(clip.shotIds).some(id => id === left.id || id === right.id))) throw new Error('请先调整已关联片段，避免合并后丢失视频关联');
-    const source = { ...a, end: b.end, frames: [...asList(a.frames), ...asList(b.frames)].slice(0, 12), description: [a.description, b.description].filter(Boolean).join('\n'), dialogue: [a.dialogue, b.dialogue].filter(Boolean).join('\n'), confirmed: false };
+    const source = { ...a, end: b.end, frames: [...asList(a.frames), ...asList(b.frames)], description: [a.description, b.description].filter(Boolean).join('\n'), dialogue: [a.dialogue, b.dialogue].filter(Boolean).join('\n'), confirmed: false };
     const video = project.sourceVideo as Record<string, unknown>;
     return this.studio.apply(randomUUID(), [
       { resource: 'shots', id: left.id, op: 'update', version: left._version, values: { source, description: `${left.description}\n${right.description}`, dialogue: [...asList(left.dialogue), ...asList(right.dialogue)], duration: Number(left.duration) + Number(right.duration), assetIds: [...new Set([...asList<string>(left.assetIds), ...asList<string>(right.assetIds)])] } },

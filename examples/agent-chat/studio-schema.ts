@@ -14,11 +14,11 @@ export const studioFields = {
   prompts: 'group name mode text defaultText',
 } as const;
 /**
- * 镜头三要素的固定选项（下拉框）。镜头层分别维护，不合并进画面描述。
- * - 景别：按取景范围由大到小，参考影视视场分类（远景 → 大特写）。
- * - 运镜：相机在镜头内的运动方式（固定、推拉摇移、升降、跟拍、手持、环绕）。
- * - 切镜：与上一镜的衔接方式；首镜固定为“—”，默认硬切。
- * 选项之外的历史自由描述不会被丢弃，仍以“自定义”形式保留并在下拉框显示原值。
+ * 镜头三要素的取值。镜头层分别维护，不合并进画面描述。
+ * - 景别：下拉框，按取景范围由大到小，参考影视视场分类（远景 → 大特写）。
+ * - 运镜：页面为文本框，可自由填写复合描述；shotOptions.camera 只是推荐写法，不做写入限制。
+ * - 切镜：下拉框，与上一镜的衔接方式；首镜固定为“—”，默认硬切。
+ * 下拉选项之外的历史自由描述不会被丢弃，仍以“自定义”形式保留并显示原值。
  */
 export const shotOptions = {
   scale: ['远景', '全景', '中远景', '中景', '中近景', '近景', '特写', '大特写', '空镜'],
@@ -26,12 +26,14 @@ export const shotOptions = {
   transition: ['—', '硬切', '叠化', '淡入', '淡出', '闪白', '划像', '匹配剪辑', '跳切'],
 } as const;
 export type ShotOptionField = keyof typeof shotOptions;
+/** 页面用文本框输入的镜头字段，不限制为 shotOptions 中的选项。 */
+export const freeShotFields: ReadonlySet<ShotOptionField> = new Set<ShotOptionField>(['camera']);
 /** 首镜没有“上一镜”，切镜固定为破折号。 */
 export const FIRST_SHOT_TRANSITION = '—';
 export const DEFAULT_SHOT_TRANSITION = '硬切';
 /**
  * 历史值归一到当前选项：只有能确定是单一标准动作时才换算，
- * 复合描述（如“固定后微推”“手持缓推，贴着人群缝隙向前”）保留原值，由用户在下拉框里重新选择。
+ * 复合描述（如“固定后微推”“手持缓推，贴着人群缝隙向前”）保留原值，由用户在页面里重新填写或选择。
  */
 export function shotOptionValue(field: ShotOptionField, value: unknown): string {
   const text = String(value ?? '').trim();

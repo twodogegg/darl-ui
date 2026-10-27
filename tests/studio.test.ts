@@ -14,7 +14,7 @@ import { assetImageRequest, canBatchGenerate } from '../examples/agent-chat/clie
 import { MediaJobStore } from '../examples/agent-chat/server/media-job-store';
 import { CLIP_DURATION_LIMIT, clipImagePrompt, clipMediaReferences, clipPrompt, clipShots, imageSourceOptions, moveShotId, shotPrompt, sourceImageReferences, totalDuration, videoDuration, videoImageReferences } from '../examples/agent-chat/client/studio/storyboard';
 import { defaultModelConfiguration, toMediaModels } from '../src/components/settings/model-config';
-import { FIRST_SHOT_TRANSITION, shotOptionValue, shotOptions, studioPositions, type StudioChange } from '../examples/agent-chat/studio-schema';
+import { FIRST_SHOT_TRANSITION, freeShotFields, shotOptionValue, shotOptions, studioPositions, type StudioChange } from '../examples/agent-chat/studio-schema';
 import { studioAgentContent } from '../examples/agent-chat/client/studio/agent-task';
 
 let directory: string, store: StudioStore, projectId: string, files: FileStore;
@@ -75,6 +75,16 @@ describe('shared short drama business service', () => {
     expect(moveShotId(['a', 'b', 'c'], 'a', 3)).toEqual(['b', 'c', 'a']);
     expect(moveShotId(['a', 'b', 'c'], 'c', 0)).toEqual(['c', 'a', 'b']);
     expect(moveShotId(['a', 'b', 'c'], 'b', 99)).toEqual(['a', 'c', 'b']);
+  });
+  it('keeps camera as free text while scale and transition stay fixed options', () => {
+    // 运镜为文本框，不受选项限制；景别与切镜仍是下拉选项。
+    expect(freeShotFields.has('camera')).toBe(true);
+    expect(freeShotFields.has('scale')).toBe(false);
+    expect(freeShotFields.has('transition')).toBe(false);
+    // 复合运镜描述原样保存，不被归一或截断。
+    const camera = '缓慢推近，最后停在手背特写';
+    store.apply('camera-text', [{ resource: 'shots', op: 'create', id: 'shot-camera', values: { episodeId: 'episode-1', sceneId: 'scene-1', camera } }]);
+    expect((store.query({ resource: 'shots', ids: ['shot-camera'], fields: ['camera'] }).items?.[0] as { camera: string }).camera).toBe(camera);
   });
   it('offers fixed shot vocabularies and keeps compound historical values instead of mislabelling them', () => {
     expect(shotOptions.scale).toContain('大特写');

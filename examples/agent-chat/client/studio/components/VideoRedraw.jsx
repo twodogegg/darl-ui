@@ -14,6 +14,7 @@ const languages = { ja: '日语', en: '英语' }
 const statusNames = { queued: '排队', running: '进行中', completed: '完成', failed: '失败', cancelled: '已取消', interrupted: '已中断' }
 export const sourceTime = value => `${Number(value || 0).toFixed(2)}s`
 const activeJob = job => ['queued', 'running'].includes(job?.status)
+const previewFrame = segment => segment.frames[Math.floor(segment.frames.length / 2)]
 
 function useRedraw(projectId) {
   const { reload, notify } = useStore()
@@ -129,7 +130,7 @@ export function RedrawSource({ context }) {
       <section><SourcePlayer source={source} start={preview?.start} end={preview?.end} />
         <p>{source.name || '原始视频'} {source.duration && `· ${source.duration.toFixed(2)} 秒 · ${source.width}×${source.height} · ${source.hasAudio ? '有音轨' : '无音轨'}`}</p>
         <Field label="目标地区与语言"><p>{regions[project.targetRegion]} · {languages[project.targetLanguage]}</p></Field>
-        <details><summary>原片镜头 {source.segments?.length || 0} 个</summary><div className="redraw-frame-grid">{source.segments?.map(segment => <button key={segment.id} onClick={() => setPreview(segment)}><img loading="lazy" src={imageUrl(segment.frames[1]?.url, 320)} alt="" /><span>{sourceTime(segment.start)} – {sourceTime(segment.end)}</span></button>)}</div></details>
+        <details><summary>原片镜头 {source.segments?.length || 0} 个</summary><div className="redraw-frame-grid">{source.segments?.map(segment => <button key={segment.id} onClick={() => setPreview(segment)}><img loading="lazy" src={imageUrl(previewFrame(segment)?.url, 320)} alt="" /><span>{sourceTime(segment.start)} – {sourceTime(segment.end)}</span></button>)}</div></details>
       </section>
       <section className="redraw-analysis">
         <h3>拉片与目标改编</h3><DirectorSelect label="转绘导演" disabled={running || busy} />
@@ -148,7 +149,7 @@ export function RedrawSource({ context }) {
       <p>应用前核对原片与目标描述；应用后可在分镜表、资产页编辑。再次分析不会自动覆盖已保存内容。</p>
       {draftShots.map(shot => { const segment = latest.segments.find(segment => segment.id === shot.segmentId); return <article key={shot.segmentId}>
         <label><input type="checkbox" checked={selectedIds.includes(shot.segmentId)} onChange={event => setSelected({ jobId: latest.id, ids: event.target.checked ? [...selectedIds, shot.segmentId] : selectedIds.filter(id => id !== shot.segmentId) })} />{sourceTime(segment.start)} – {sourceTime(segment.end)} {latest.applied?.includes(shot.segmentId) && '已应用'}</label>
-        <button className="redraw-thumb" onClick={() => setPreview(segment)}><img loading="lazy" src={imageUrl(segment.frames[1]?.url, 320)} alt="回看原镜头" /></button>
+        <button className="redraw-thumb" onClick={() => setPreview(segment)}><img loading="lazy" src={imageUrl(previewFrame(segment)?.url, 320)} alt="回看原镜头" /></button>
         <div><strong>原片</strong><p>{shot.description}</p><p>{shot.dialogue || '未识别对白'}</p></div><div><strong>目标 · {regions[project.targetRegion]} / {languages[project.targetLanguage]}</strong><p>{shot.targetDescription}</p>{shot.targetDialogue.map((line, index) => <p key={index}>{line.text}</p>)}</div>
         {shot.notes && <p role="note">待核对：{shot.notes}</p>}
       </article> })}

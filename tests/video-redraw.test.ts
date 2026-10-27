@@ -10,7 +10,7 @@ import { FileStore } from '../examples/agent-chat/server/file-storage';
 import { ProjectStore } from '../examples/agent-chat/server/project-store';
 import { StudioStore } from '../examples/agent-chat/server/studio';
 import { VideoRedraw, validateRedrawDraft } from '../examples/agent-chat/server/video-redraw';
-import { analysisFrameSheet, composeVideo, prepareVideo, probeVideo, videoCommand, withVideoFiles, type SourceSegment } from '../examples/agent-chat/server/video-processing';
+import { analysisFrameSheets, composeVideo, prepareVideo, probeVideo, videoCommand, withVideoFiles, type SourceSegment } from '../examples/agent-chat/server/video-processing';
 
 let directory: string, files: FileStore, studio: StudioStore, service: VideoRedraw, projectId: string;
 const signal = () => AbortSignal.timeout(30_000);
@@ -51,33 +51,68 @@ it('detects actual cuts, persists real frames, and composes playable silent foot
   expect(segments.length).toBe(2);
   expect(segments[0].start).toBe(0);
   expect(segments.at(-1)!.end).toBe(prepared.duration);
+  expect(segments[0].frames).toHaveLength(1);
+  expect(segments[0].frames[0].time).toBeCloseTo(0, 3);
+  expect(segments[1].frames).toHaveLength(1);
+  expect(segments[1].frames[0].time).toBeCloseTo(1, 3);
   for (const segment of segments) {
-    expect(segment.frames).toHaveLength(3);
     for (const frame of segment.frames) {
       expect(frame.time).toBeGreaterThanOrEqual(segment.start);
       expect(frame.time).toBeLessThan(segment.end);
       expect((await files.getBytes(frame.fileId))!.bytes.length).toBeGreaterThan(100);
     }
   }
-  const sheet = await analysisFrameSheet(files, segments, signal());
+  const [sheet] = await analysisFrameSheets(files, segments, signal());
   expect(sheet.frames.map(frame => [frame.segmentId, frame.frameIndex])).toEqual(segments.flatMap(segment => segment.frames.map((_, index) => [segment.id, index])));
   expect(sheet.frames.map(frame => frame.time)).toEqual(segments.flatMap(segment => segment.frames.map(frame => frame.time)));
   const { data, info } = await sharp(sheet.bytes).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-  expect(info.width).toBe(1440);
-  expect(info.height).toBe(592);
-  // Actual red and blue shot pixels stay in separate rows, beneath their own source mappings.
-  for (const [row, channel] of [[0, 0], [1, 2]]) {
-    const offset = ((row * 296 + 100) * info.width + 100) * info.channels;
+  expect(info.width).toBe(960);
+  expect(info.height).toBe(296);
+  // Actual red and blue shot pixels stay in separate cells, beneath their own source mappings.
+  for (const [column, channel] of [[0, 0], [1, 2]]) {
+    const offset = (100 * info.width + column * 480 + 100) * info.channels;
     expect(data[offset + channel]).toBeGreaterThan(200);
     expect(data[offset + (channel === 0 ? 2 : 0)]).toBeLessThan(50);
   }
-  await expect(analysisFrameSheet(files, [{ ...segments[0], frames: [{ fileId: 'missing', time: 0, url: '' }] }], signal())).rejects.toThrow('已丢失');
+  await expect(analysisFrameSheets(files, [{ ...segments[0], frames: [{ fileId: 'missing', time: 0, url: '' }] }], signal())).rejects.toThrow('已丢失');
   const result = await composeVideo(files, [{ fileId: video.id, start: 0, end: 0.5 }, { fileId: video.id, start: 0.65, end: 1.1 }], '16:9', signal());
   expect(result.duration).toBeGreaterThan(0.85);
   expect(result.duration).toBeLessThan(1.3);
   expect(result.hasAudio).toBe(true);
   await withVideoFiles(files, [result.fileId], async ([path]) => expect((await probeVideo(path, signal())).width).toBe(854));
   await expect(composeVideo(files, [{ fileId: video.id, start: 0, end: 10 }], '16:9', signal())).rejects.toThrow('实际时长');
+}, 30_000);
+
+it('keeps every second of long shots across sheets with stable shot numbers and frame indices', async () => {
+  const path = join(directory, 'long-shots.mp4');
+  await videoCommand('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'color=c=red:s=160x90:r=5:d=13.2', '-f', 'lavfi', '-i', 'color=c=blue:s=160x90:r=5:d=2.2',
+    '-filter_complex', '[0:v][1:v]concat=n=2:v=1:a=0[v]', '-map', '[v]', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path], signal());
+  const video = await files.put(await readFile(path), 'video/mp4', '长镜头.mp4');
+  const prepared = await prepareVideo(files, video.id, signal(), () => {});
+  expect(prepared.segments).toHaveLength(2);
+  expect(prepared.segments.flatMap(segment => segment.frames.map(frame => frame.time))).toEqual(Array.from({ length: 16 }, (_, second) => second));
+  const sheets = await analysisFrameSheets(files, prepared.segments, signal());
+  expect(sheets.map(sheet => sheet.frames.length)).toEqual([12, 4]);
+  expect(sheets[1].frames.map(frame => frame.label)).toEqual(['S1-F12', 'S1-F13', 'S2-F0', 'S2-F1']);
+  expect(sheets.flatMap(sheet => sheet.frames.map(frame => [frame.segmentId, frame.frameIndex, frame.time]))).toEqual(
+    prepared.segments.flatMap(segment => segment.frames.map((frame, index) => [segment.id, index, frame.time])));
+}, 30_000);
+
+it('adds an in-shot reference when a low-frame-rate short shot falls between second samples', async () => {
+  const path = join(directory, 'short-shots.mp4');
+  await videoCommand('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'color=c=red:s=160x90:r=5:d=0.4', '-f', 'lavfi', '-i', 'color=c=blue:s=160x90:r=5:d=0.2',
+    '-f', 'lavfi', '-i', 'color=c=white:s=160x90:r=5:d=0.6', '-filter_complex', '[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]', '-map', '[v]', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path], signal());
+  const video = await files.put(await readFile(path), 'video/mp4', '短镜头.mp4');
+  const prepared = await prepareVideo(files, video.id, signal(), () => {});
+  expect(prepared.segments).toHaveLength(3);
+  for (const segment of prepared.segments) {
+    expect(segment.frames.length).toBeGreaterThan(0);
+    for (const frame of segment.frames) {
+      expect(frame.time).toBeGreaterThanOrEqual(segment.start);
+      expect(frame.time).toBeLessThan(segment.end);
+    }
+  }
+  expect(prepared.segments[1].frames[0].time).toBeCloseTo(0.4, 3);
 }, 30_000);
 
 it('batch extraction preserves order and shared-frame timestamps, and rejects missing or cancelled samples', async () => {

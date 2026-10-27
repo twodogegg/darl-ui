@@ -40,6 +40,8 @@ function MentionShotInput({ value, version, label, candidates, onCommit }) {
 }
 
 const shotFields = [['scale', '景别'], ['camera', '运镜'], ['transition', '切镜方式']]
+// 运镜可自由填写：能写成“缓慢推近，最后停在手背特写”这类复合描述，不受固定选项限制。
+const freeShotFields = new Set(['camera'])
 
 /** 画面与动作的放大编辑弹窗：与表格内同一个 @ 引用编辑器，仅编辑空间更大。 */
 function ShotDescriptionModal({ shot, label, candidates, onClose, onSave }) {
@@ -62,7 +64,7 @@ function ShotDescriptionModal({ shot, label, candidates, onClose, onSave }) {
 }
 
 /**
- * 景别 / 运镜 / 切镜的下拉选择。选项来自共享的 shotOptions；
+ * 景别 / 切镜的下拉选择。选项来自共享的 shotOptions；
  * 历史自由描述不在选项里时保留为“自定义”并原样显示，选中标准选项后即被替换。
  */
 function ShotSelect({ field, value, label, onChange, disabled, hint }) {
@@ -226,14 +228,16 @@ export default function ShotList({ clip, shots, shotsIndex, characters, projectA
                   </div>
                 </td>
                 <td className="segment-shot-fields">
-                  {shotFields.map(([key, label]) => <label key={key}><span>{label}</span><ShotSelect
-                    label={`镜头${shotNumber(index)} ${label}`}
-                    field={key}
-                    value={shot[key]}
-                    disabled={busy || (key === 'transition' && index === 0)}
-                    onChange={(value) => patch('shots', shot.id, { [key]: value })}
-                    hint={key === 'transition' && index === 0 ? '首镜' : undefined}
-                  /></label>)}
+                  {shotFields.map(([key, label]) => <label key={key}><span>{label}</span>{freeShotFields.has(key)
+                    ? <ShotInput key={`${shot.id}-${key}-${shot._version}`} version={shot._version} label={`镜头${shotNumber(index)} ${label}`} value={shot[key]} onCommit={(value) => patch('shots', shot.id, { [key]: value })} />
+                    : <ShotSelect
+                      label={`镜头${shotNumber(index)} ${label}`}
+                      field={key}
+                      value={shot[key]}
+                      disabled={busy || (key === 'transition' && index === 0)}
+                      onChange={(value) => patch('shots', shot.id, { [key]: value })}
+                      hint={key === 'transition' && index === 0 ? '首镜' : undefined}
+                    />}</label>)}
                 </td>
                 <td className="segment-shot-description">
                   <MentionShotInput key={`${shot.id}-${shot._version}`} version={shot._version} label={`镜头${shotNumber(index)} 画面`} value={shot.description} candidates={candidates} onCommit={(value) => patch('shots', shot.id, { description: value })} />
