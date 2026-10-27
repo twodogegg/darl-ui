@@ -6,7 +6,7 @@ import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import type { Mode } from './usePlaygroundTheme';
 
-export type Page = 'intro' | 'theme' | 'uploader' | 'video' | 'media' | 'styles' | 'agent' | 'agent-plaza' | 'settings' | 'confirm-dialog';
+export type Page = 'intro' | 'theme' | 'uploader' | 'video' | 'media' | 'styles' | 'agent' | 'agent-plaza' | 'settings' | 'confirm-dialog' | 'assets';
 const pages = [
   { id: 'intro', label: '概览', title: 'Introduction', icon: LayoutPanelTop },
   { id: 'theme', label: '主题系统', title: 'Theme', icon: Palette },
@@ -14,6 +14,7 @@ const pages = [
   { id: 'video', label: 'VideoCompare', title: 'VideoCompare', icon: Play },
   { id: 'media', label: 'MediaWorkspace', title: 'MediaWorkspace', icon: FileImage },
   { id: 'styles', label: 'StyleSelector', title: 'StyleSelector', icon: Palette },
+  { id: 'assets', label: 'AssetLibrary', title: 'AssetLibrary', icon: Layers3 },
   { id: 'agent', label: 'AgentSidebar', title: 'AgentSidebar', icon: Bot },
   { id: 'agent-plaza', label: 'Agent 广场', title: 'Agent Plaza', icon: Bot },
   { id: 'settings', label: 'SettingsPage', title: 'SettingsPage', icon: Settings },
@@ -28,14 +29,13 @@ export function DemoLayout({ selected, onNavigate, mode, onModeChange, children 
   const navigation = <nav aria-label="组件导航" className="demo-navigation">
     <p className="demo-nav-caption">开始使用</p>
     {pages.map((page, index) => <div key={page.id}>
-      {index === 2 && <p className="demo-nav-caption mt-6">组件 <Badge variant="secondary">7</Badge></p>}
+      {index === 2 && <p className="demo-nav-caption mt-6">组件 <Badge variant="secondary">8</Badge></p>}
       <Button variant={selected === page.id ? 'secondary' : 'ghost'} className="w-full justify-start" aria-current={selected === page.id ? 'page' : undefined} onClick={() => navigate(page.id)}>
         <page.icon data-icon="inline-start" />{page.label}
       </Button>
     </div>)}
     <p className="demo-nav-caption mt-6">即将推出</p>
     <Button variant="ghost" disabled className="w-full justify-start"><FileImage data-icon="inline-start" />ImageViewer</Button>
-    <Button variant="ghost" disabled className="w-full justify-start"><Layers3 data-icon="inline-start" />AssetPicker</Button>
   </nav>;
 
   return <div className="demo-shell">

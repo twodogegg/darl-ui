@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { finishToolCalls, messageTextForModel, toolHistoryForModel } from '../examples/agent-chat/client/message-history';
+import { serializable } from '../examples/agent-chat/client/use-chat-sessions';
+import type { AgentSession } from '../src';
 
 describe('tool history sent to the model', () => {
+  it('keeps selected answers in saved history and follow-up context while omitting ordinary tool payloads', () => {
+    const saved: AgentSession = JSON.parse(JSON.stringify(serializable({ id: 'choice', title: '选择功能', messages: [{ id: 'answer', role: 'assistant', content: '', toolCalls: [
+      { id: 'choice', appId: 'interaction', appName: '用户交互', toolName: 'question', status: 'success', userInput: { title: '选择功能', questions: [{ id: 'features', label: '功能', type: 'multiple', options: [{ value: 'upload', label: '上传' }] }] }, output: { status: 'answered', answers: { features: ['upload'] } } },
+      { id: 'other', appId: 'runtime', appName: '执行环境', toolName: 'read', status: 'success', output: { private: '不保存的工具详情' } },
+    ] }] })));
+    expect(messageTextForModel(saved.messages[0])).toContain('"answers":{"features":["upload"]}');
+    expect(JSON.stringify(saved)).not.toContain('不保存的工具详情');
+  });
   it('preserves speech-only replies and independent speech alongside written content', () => {
     expect(messageTextForModel({ id: 'spoken', role: 'assistant', content: '', outputs: [{ output_type: 'speech', content: '请告诉我你希望的风格。' }] })).toBe('[语音回复]\n请告诉我你希望的风格。');
     expect(messageTextForModel({ id: 'both', role: 'assistant', content: '完整材料', outputs: [{ output_type: 'text', content: '完整材料' }, { output_type: 'speech', content: '注意最后一项。' }] })).toBe('完整材料\n\n[语音回复]\n注意最后一项。');

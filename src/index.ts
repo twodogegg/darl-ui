@@ -33,5 +33,9 @@ export type { StyleCollection, StyleOption, StyleCreateRequest, StyleFilter, Sty
 export { DefaultModelSelector, normalizeDefaultModels, modelOptions } from './components/default-model-selector/DefaultModelSelector';
 export type { DefaultModelKind, DefaultModelOption, DefaultModelChoice, DefaultModelDraft, DefaultModelSelection, DefaultModelSelectorProps } from './components/default-model-selector/DefaultModelSelector';
 
+export { AssetLibrary } from './components/asset-library/AssetLibrary';
+export type { AssetAction, AssetCreateRequest, AssetFilter, AssetItem, AssetKind, AssetKindFilter, AssetLibraryProps, AssetLoadMoreRequest, AssetRenameRequest, AssetScope, AssetSection, AssetSelectRequest, AssetSource, AssetTag, AssetUploadContext, AssetUploadFn, AssetUploadRequest } from './components/asset-library/types';
+export { defaultSections, defaultTags, kindLabels } from './components/asset-library/types';
+
 export { InteractiveConfirmDialog } from './components/interactive-confirm-dialog/InteractiveConfirmDialog';
 export type { ConfirmAnswer, ConfirmAnswers, ConfirmOption, ConfirmQuestion, InteractiveConfirmDialogProps } from './components/interactive-confirm-dialog/InteractiveConfirmDialog';

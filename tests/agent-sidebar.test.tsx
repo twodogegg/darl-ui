@@ -132,6 +132,57 @@ describe('AgentSidebar', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '确认执行工具' })).not.toBeInTheDocument());
   });
 
+  it('collects multiple choices with text, keeps answers on failure, and initializes the next question', async () => {
+    const onUserInput = vi.fn().mockRejectedValueOnce(new Error('提交失败，请重试')).mockResolvedValue(undefined);
+    const onToolConfirm = vi.fn();
+    const call = { id: 'question-one', appId: 'interaction', appName: '用户交互', toolName: 'dynamic_question_tool', status: 'confirmation' as const, userInput: { title: '选择功能', questions: [
+      { id: 'features', label: '所需功能', type: 'multiple' as const, required: true, options: [{ value: 'upload', label: '上传' }, { value: 'search', label: '搜索' }] },
+      { id: 'notes', label: '补充要求', type: 'textarea' as const },
+    ] } };
+    const history: AgentSession[] = [{ id: 'one', title: '交互提问', messages: [{ id: 'assistant', role: 'assistant', content: '', toolCalls: [call] }] }];
+    const props = { open: true, onOpenChange: vi.fn(), sessions: history, activeSessionId: 'one', approvalMode: 'full' as const, onToolConfirm, onUserInput };
+    const { rerender } = render(<AgentSidebar {...props} />, { wrapper: ({ children }) => <DarlUIProvider theme={{ mode: 'dark', primaryColor: '#8ba4c5' }}>{children}</DarlUIProvider> });
+    expect(screen.getByRole('dialog', { name: '选择功能' })).not.toHaveClass('darl-agent-approval-confirm');
+    expect(screen.getByRole('dialog', { name: '选择功能' })).toHaveClass('darl-confirm-dark');
+    expect(screen.getByRole('dialog', { name: '选择功能' })).toHaveStyle({ colorScheme: 'dark' });
+    expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '提交选择' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('请完成所有必填问题');
+    expect(onUserInput).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('checkbox', { name: '上传' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '搜索' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '补充要求' }), { target: { value: '手机端优先' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交选择' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('提交失败，请重试');
+    expect(screen.getByRole('checkbox', { name: '上传' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: '提交选择' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '选择功能' })).not.toBeInTheDocument());
+    expect(onUserInput).toHaveBeenLastCalledWith('question-one', { features: ['upload', 'search'], notes: '手机端优先' });
+    expect(onToolConfirm).not.toHaveBeenCalled();
+    rerender(<AgentSidebar {...props} sessions={[{ ...history[0], messages: [{ ...history[0].messages[0], toolCalls: [call, { ...call, id: 'question-two' }] }] }]} />);
+    expect(screen.getByRole('checkbox', { name: '上传' })).not.toBeChecked();
+    expect(screen.getByRole('textbox', { name: '补充要求' })).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: '关闭弹窗' }));
+    await waitFor(() => expect(onUserInput).toHaveBeenLastCalledWith('question-two', null));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '选择功能' })).not.toBeInTheDocument());
+  });
+
+  it('shows saved choice labels and free text in the execution details without reopening a form', () => {
+    const history: AgentSession[] = [{ id: 'one', title: '已回答', messages: [{ id: 'assistant', role: 'assistant', content: '完成', toolCalls: [{
+      id: 'choice', appId: 'interaction', appName: '用户交互', toolName: 'question', toolTitle: '选择功能', status: 'success',
+      userInput: { title: '选择功能', questions: [
+        { id: 'features', label: '功能', type: 'multiple', options: [{ value: 'upload', label: '上传' }, { value: 'export', label: '导出' }] },
+        { id: 'notes', label: '补充', type: 'text' },
+      ] }, output: { answers: { features: ['upload', 'export'], notes: '手机端优先' } },
+    }] }] }];
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={history} activeSessionId="one" onUserInput={vi.fn()} />);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /执行过程/ }));
+    fireEvent.click(screen.getByText('选择功能'));
+    expect(screen.getByText('上传、导出')).toBeVisible();
+    expect(screen.getByText('手机端优先')).toBeVisible();
+  });
+
   it('媒体生成确认展示可读参数，像素尺寸映射为 1K/2K，并提供红色拒绝按钮', () => {
     const pending: AgentSession[] = [{ id: 'media', title: '生成图片', messages: [{ id: 'assistant', role: 'assistant', content: '', toolCalls: [{ id: 'media-call', appId: 'builtin:media', appName: '媒体生成', toolName: 'generate_media', status: 'confirmation', input: { modelId: 'gpt-image-2', prompt: '雨夜的霓虹街道', options: { size: '1536x1024', aspectRatio: '16:9', count: 2 } } }] }] }];
     render(<AgentSidebar open onOpenChange={vi.fn()} sessions={pending} activeSessionId="media" onToolConfirm={vi.fn()} />);

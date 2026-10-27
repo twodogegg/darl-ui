@@ -1,0 +1,39 @@
+name: "开发任务"
+description: "统一提交功能需求、Bug 修复、优化和重构任务"
+body:
+  - type: textarea
+    id: background
+    attributes:
+      label: "背景与目标"
+      description: "说明当前问题、使用场景，以及希望达到的效果"
+      placeholder: |
+        当前情况：
+        希望实现：
+    validations:
+      required: true
+
+  - type: textarea
+    id: requirements
+    attributes:
+      label: "修改要求"
+      description: "写清需要修改或实现的内容；复杂任务可自行增加小标题和任务清单"
+      placeholder: |
+        1. 
+        2. 
+        3. 
+
+        精准修改：保持与本任务无关的现有功能不变。
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: "验收标准"
+      description: "列出能够实际检查的完成条件"
+      placeholder: |
+        - [ ] 
+        - [ ] 
+        - [ ] 相关功能无回归
+    validations:
+      required: true

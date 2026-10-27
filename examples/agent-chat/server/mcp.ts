@@ -290,21 +290,21 @@ export async function applicationCatalog(directory: string, signal?: AbortSignal
   }));
 }
 
-export class ToolConfirmations {
-  private pending = new Map<string, (approved: boolean) => void>();
+export class ToolConfirmations<T = boolean> {
+  private pending = new Map<string, (value: T) => void>();
 
-  wait(id: string, signal: AbortSignal): Promise<boolean> {
+  wait(id: string, signal: AbortSignal, validate?: (value: T) => T): Promise<T> {
     signal.throwIfAborted();
     if (this.pending.has(id)) throw new Error('工具确认 ID 重复');
     return new Promise((resolve, reject) => {
       const cleanup = () => { this.pending.delete(id); signal.removeEventListener('abort', abort); };
       const abort = () => { cleanup(); reject(new Error('工具调用已停止')); };
-      this.pending.set(id, (approved) => { cleanup(); resolve(approved); });
+      this.pending.set(id, (value) => { const validated = validate ? validate(value) : value; cleanup(); resolve(validated); });
       signal.addEventListener('abort', abort, { once: true });
     });
   }
 
-  decide(id: string, approved: boolean) {
+  decide(id: string, approved: T) {
     const resolve = this.pending.get(id);
     if (!resolve) throw new Error('确认已过期或已处理，请重新发起请求');
     resolve(approved);

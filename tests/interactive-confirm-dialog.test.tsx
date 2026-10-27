@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { InteractiveConfirmDialog, type ConfirmQuestion } from '../src/components/interactive-confirm-dialog/InteractiveConfirmDialog';
+import { DarlUIProvider } from '../src/theme/DarlUIProvider';
 
 const questions: ConfirmQuestion[] = [
   { id: 'choice', label: '选择方向', type: 'single', required: true, defaultValue: 'a', options: [{ value: 'a', label: '忠实原著' }, { value: 'b', label: '戏剧化' }] },
@@ -10,6 +11,11 @@ const questions: ConfirmQuestion[] = [
 ];
 
 describe('InteractiveConfirmDialog', () => {
+  it('preserves host colors inside the portal instead of replacing them with dark defaults', () => {
+    render(<DarlUIProvider theme={{ mode: 'dark' }}><InteractiveConfirmDialog open onOpenChange={vi.fn()} title="主题" questions={[]} onConfirm={vi.fn()}
+      style={{ '--darl-confirm-bg': '#101113', '--darl-confirm-text': '#e7e8eb', '--darl-confirm-border': '#2d3036' } as React.CSSProperties} /></DarlUIProvider>);
+    expect(screen.getByRole('dialog', { name: '主题' })).toHaveStyle({ '--darl-confirm-bg': '#101113', '--darl-confirm-text': '#e7e8eb', '--darl-confirm-border': '#2d3036' });
+  });
   it('validates required questions and returns ids and values rather than labels', async () => {
     const onConfirm = vi.fn();
     render(<InteractiveConfirmDialog open onOpenChange={vi.fn()} title="改编确认" questions={questions} onConfirm={onConfirm} confirmText="开始写作" />);
