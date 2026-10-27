@@ -177,7 +177,7 @@ export function MediaGenerationPage({ onBack, initialTaskId }: { onBack: () => v
       ...(payload.batchId ? { batchId: payload.batchId } : {}),
       taskId,
       prompt: payload.prompt,
-      options: { ...payload.options, ...(payload.references ? { references: payload.references.images?.map((input) => input instanceof File ? input : { ...(input.fileId ? { fileId: input.fileId } : {}), url: input.url }) } : {}) },
+      options: { ...payload.options, ...(payload.references?.images?.length ? { references: payload.references.images.map((input) => input instanceof File ? input : { ...(input.fileId ? { fileId: input.fileId } : {}), url: input.url }) } : {}), ...(payload.references?.firstFrame ? { firstFrame: payload.references.firstFrame } : {}), ...(payload.references?.lastFrame ? { lastFrame: payload.references.lastFrame } : {}) },
       ...(payload.style ? { style: payload.style } : {}),
     });
     return job;
@@ -244,6 +244,12 @@ export function MediaGenerationPage({ onBack, initialTaskId }: { onBack: () => v
       onCreateStyle={createStyle}
       onUpdateStyle={updateStyle}
       onOptimizePrompt={optimizePrompt}
+      onCancel={(_batchId, resultId) => {
+        const jobId = resultId.replace(/-pending$/, '');
+        void request<MediaJob>(`media-generation/jobs/${encodeURIComponent(jobId)}/cancel`, {}, 'POST')
+          .then((job) => mergeJobs([job]))
+          .catch((reason) => setError(reason instanceof Error ? reason.message : '取消生成失败'));
+      }}
       onRetry={(batchId) => { void retry(batchId); }}
       onRegenerate={(batchId) => { void retry(batchId); }}
       onFavoriteChange={favorite}

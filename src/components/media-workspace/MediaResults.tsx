@@ -68,7 +68,7 @@ export function MediaResults({ task, models, onReuse, onReference, onRetry, onCa
             {result.status === 'failed' && <p>{result.error ?? '请重试'}</p>}
             {result.status === 'completed' && (!result.url || !type) && <p>{!result.url ? '结果地址不可用' : '请为历史批次配置输出类型'}</p>}
             {result.status === 'failed' && onRetry && <Button size="sm" variant="outline" onClick={() => onRetry(batch.id, result.id)}>重试</Button>}
-            {(result.status === 'queued' || result.status === 'running') && onCancel && <Button size="sm" variant="ghost" onClick={() => onCancel(batch.id, result.id)}>取消</Button>}
+            {(result.status === 'queued' || result.status === 'running') && onCancel && <ConfirmPopover label="取消生成" message="确定取消本次生成？上游任务可能仍在运行。" confirmLabel="确认取消" cancelLabel="继续生成" onConfirm={() => onCancel(batch.id, result.id)} trigger={<Button size="sm" variant="ghost">取消生成</Button>} />}
           </>}
         </div>
         <div className="darl-mw-result-actions">{isBest && <span className="darl-mw-best-badge">✓ 最佳</span>}{result.status === 'completed' && result.url && <>

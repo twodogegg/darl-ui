@@ -45,7 +45,9 @@ export function supportsFrames(model?: MediaModel): boolean {
   return model?.type === 'video' && model.capabilities.firstLastFrame === true;
 }
 export function generationModes(model?: MediaModel): MediaGenerationMode[] {
-  return model?.capabilities.generationModes ? [...model.capabilities.generationModes] : [];
+  if (model?.capabilities.generationModes) return [...model.capabilities.generationModes];
+  if (supportsFrames(model) && model && (['images', 'videos', 'audios'] as const).some((kind) => referenceLimit(model, kind))) return ['first-last-frame', 'reference'];
+  return [];
 }
 export function selectedGenerationMode(model: MediaModel | undefined, inputMode: MediaInputMode, references: MediaReferences): MediaGenerationMode | undefined {
   const modes = generationModes(model);

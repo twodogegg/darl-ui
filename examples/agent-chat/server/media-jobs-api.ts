@@ -111,6 +111,16 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         void runner.tick();
         reply(res,201,job);return true;
       }
+      const cancelMatch=path.match(/^\/api\/media-generation\/jobs\/([a-f0-9-]+)\/cancel$/);
+      if(cancelMatch && method==='POST'){
+        const job=store.get(cancelMatch[1]);
+        if(!job){reply(res,404,{error:'任务不存在'});return true;}
+        if(job.status==='queued'||job.status==='running'){
+          job.status='cancelled'; job.phase='cancelled'; job.error='已取消本地等待，上游任务可能仍在运行'; job.nextPollAt=undefined;
+          store.put(job);
+        }
+        reply(res,200,presentJob(job,files));return true;
+      }
       const match=path.match(/^\/api\/media-generation\/jobs\/([a-f0-9-]+)(\/file)?$/);
       if(match && !match[2] && method==='DELETE'){
         const job=store.get(match[1]);

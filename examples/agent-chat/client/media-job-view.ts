@@ -86,7 +86,14 @@ export function jobReferences(options: Record<string, unknown>): MediaReferences
       }
     }
   }
-  return images.length ? { images } : undefined;
+  const frame = (value: unknown): MediaInput | undefined => {
+    if (!value || typeof value !== 'object') return undefined;
+    const item = value as { fileId?: unknown; url?: unknown };
+    if (typeof item.fileId !== 'string') return undefined;
+    return { id: item.fileId, fileId: item.fileId, url: typeof item.url === 'string' ? item.url : `/api/files/${item.fileId}` };
+  };
+  const firstFrame = frame(options.firstFrame), lastFrame = frame(options.lastFrame);
+  return images.length || firstFrame || lastFrame ? { ...(images.length ? { images } : {}), ...(firstFrame ? { firstFrame } : {}), ...(lastFrame ? { lastFrame } : {}) } : undefined;
 }
 
 export function jobToBatch(job: MediaJob, jobs: MediaJob[] = [job]): MediaBatch {
@@ -100,6 +107,7 @@ export function jobToBatch(job: MediaJob, jobs: MediaJob[] = [job]): MediaBatch 
     options: jobOptions(job),
     ...(job.style ? { style: job.style } : {}),
     ...(references ? { references } : {}),
+    ...(job.type === 'video' ? { mode: references?.firstFrame || references?.lastFrame ? 'first-last-frame' as const : references?.images?.length ? 'reference' as const : 'text-to-video' as const } : {}),
     results: jobs.flatMap(jobResults),
     providerId: job.providerId,
     upstreamModelId: job.upstreamModelId,

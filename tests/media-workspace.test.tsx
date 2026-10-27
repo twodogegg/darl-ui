@@ -17,8 +17,8 @@ const switchModel = (name: string) => {
 };
 const switchType = (value: '图片' | '视频') => fireEvent.click(screen.getByRole('radio', { name: `生成${value}` }));
 const switchInput = (value: '首尾帧' | '参考素材') => {
-  fireEvent.click(screen.getByRole('button', { name: '素材方式' }));
-  fireEvent.click(screen.getByRole('radio', { name: value }));
+  fireEvent.click(screen.getByRole('button', { name: /^生成方式/ }));
+  fireEvent.click(screen.getByRole('radio', { name: value === '参考素材' ? '全能参考' : value }));
 };
 const prompt = () => fireEvent.change(screen.getByRole('textbox', { name: '生成提示词' }), { target: { value: '生成测试画面' } });
 const submit = () => fireEvent.click(screen.getByRole('button', { name: '✧ 生成' }));
@@ -231,7 +231,7 @@ describe('MediaWorkspace', () => {
     expect(onGenerate.mock.calls[1][0].references).toEqual({ firstFrame: expect.any(File) });
     await waitFor(() => expect(screen.getByRole('button', { name: '✧ 生成' })).toBeInTheDocument());
     switchInput('参考素材'); prompt(); submit(); await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(3));
-    expect(onGenerate.mock.calls[2][0].references).toEqual({ videos: [expect.any(File)], audios: [expect.any(File)] });
+    expect(onGenerate.mock.calls[2][0].references).toEqual({ images: [expect.any(File)], videos: [expect.any(File)], audios: [expect.any(File)] });
   });
   it('复用历史模型、参数、提示词和参考素材，宿主重渲染不重置参数', async () => {
     const history: MediaTask[] = [{ ...tasks[0], batches: [{ id: 'old', modelId: 'video', type: 'video', prompt: '旧提示词', options: { count: 2, duration: 6, generateAudio: false }, references: { images: [{ id: 'ref', url: '/ref.png' }] }, results: [] }] }];
@@ -253,7 +253,7 @@ describe('MediaWorkspace', () => {
     const callbacks = { onRetry: vi.fn(), onCancel: vi.fn(), onRegenerate: vi.fn(), onFavoriteChange: vi.fn(), onTaskChange: vi.fn(), onCreateTask: vi.fn(), onRenameTask: vi.fn(), onDeleteTask };
     const { rerender } = render(<MediaWorkspace models={models} tasks={history} activeTaskId="t1" onGenerate={vi.fn()} {...callbacks}/>);
     fireEvent.click(screen.getByRole('button', { name: '重试' })); expect(callbacks.onRetry).toHaveBeenCalledWith('b1', 'bad');
-    fireEvent.click(screen.getByRole('button', { name: '取消' })); expect(callbacks.onCancel).toHaveBeenCalledWith('b2', 'running');
+    fireEvent.click(screen.getByRole('button', { name: '取消生成' })); fireEvent.click(screen.getByRole('button', { name: '确认取消' })); expect(callbacks.onCancel).toHaveBeenCalledWith('b2', 'running');
     expect(screen.queryByRole('button', { name: /选用/ })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '重新生成结果 done' })); expect(callbacks.onRegenerate).toHaveBeenCalledWith('b1', 'done');
     fireEvent.click(screen.getByRole('button', { name: '收藏结果 done' })); expect(callbacks.onFavoriteChange).toHaveBeenCalledWith('b1', 'done', true);
@@ -416,9 +416,13 @@ describe('MediaWorkspace', () => {
     expect(screen.getByAltText('reference.png')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '添加首帧' })).toBeNull();
     prompt(); submit(); await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(2));
-    expect(onGenerate.mock.calls[1][0].references).toEqual({ images: [expect.any(File)] });
+    expect(onGenerate.mock.calls[1][0].references.images).toHaveLength(3);
     switchInput('首尾帧');
-    expect(screen.getByAltText('首帧')).toHaveAttribute('src', firstUrl);
+    expect(screen.getByRole('alert')).toHaveTextContent('请先删除多余图片');
+    fireEvent.click(screen.getByRole('button', { name: '移除参考图片 reference.png' }));
+    switchInput('首尾帧');
+    expect(screen.getByAltText('首帧')).toBeInTheDocument();
+    expect(screen.getByAltText('尾帧')).toBeInTheDocument();
   });
   it('复用首帧历史批次时图片归属首帧，移除后重新请求不携带旧首帧', async () => {
     const history: MediaTask[] = [{ ...tasks[0], batches: [{ id: 'frame-batch', modelId: 'video', prompt: '从首帧开始', options: { count: 1 }, references: { firstFrame: { id: 'first', url: '/first.png' } }, results: [] }] }];

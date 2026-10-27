@@ -76,6 +76,7 @@ export class MediaJobStore {
     return jobs;
   }
   put(job: MediaJob) {
+    if (job.status !== 'cancelled' && this.get(job.id)?.status === 'cancelled') return;
     job.updatedAt = now();
     this.db.prepare('INSERT INTO media_generation_jobs(id,model_id,status,updated_at,data) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at,data=excluded.data')
       .run(job.id, job.modelId, job.status, job.updatedAt, JSON.stringify(job));

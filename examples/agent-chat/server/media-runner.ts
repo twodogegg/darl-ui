@@ -63,6 +63,7 @@ export class MediaJobRunner {
           return undefined;
         };
         const result=job.protocolKey==='gemini-generate-content'?await generateGeminiImages(job,config.apiKey,localMedia):await generateImages(job,config.apiKey,localMedia);
+        if (this.store.get(job.id)?.status !== 'running') return;
         job.resultFileIds=[];
         for (const [index, image] of result.images.entries()) {
           let bytes: Buffer;
@@ -74,6 +75,7 @@ export class MediaJobRunner {
             bytes = Buffer.from(await response.arrayBuffer());
             mime = response.headers.get('content-type')?.split(';')[0] || 'image/png';
           }
+          if (this.store.get(job.id)?.status !== 'running') return;
           const file = await this.store.saveFile(bytes, mime, `generated-${index}.${mime.split('/')[1] || 'bin'}`);
           job.resultFileIds.push(file.id);
         }
@@ -94,7 +96,7 @@ export class MediaJobRunner {
       job.phase='error';
       this.onFailure(job, job.error, config?.apiKey || '');
     }
-    this.store.put(job);
+    if (this.store.get(job.id)?.status === 'running') this.store.put(job);
   }
   private async poll(job:MediaJob){
     try{
@@ -105,6 +107,7 @@ export class MediaJobRunner {
       if(result.state==='failed'){job.status='failed';job.error=result.error;this.onFailure(job,result.error||'远端任务失败',apiKey);}
       if(result.state==='completed'){
         if(!result.media)throw new Error('缺少视频内容');
+        if (this.store.get(job.id)?.status !== 'running') return;
         job.resultFileIds=[];
         const file = await this.store.saveFile(Buffer.from(result.media), 'video/mp4', `generated-${job.id}.mp4`);
         job.resultFileIds.push(file.id);
@@ -118,7 +121,7 @@ export class MediaJobRunner {
       job.nextPollAt=Date.now()+15000;
       this.onFailure(job, job.error, this.credentials(job)?.apiKey || '');
     }
-    this.store.put(job);
+    if (this.store.get(job.id)?.status === 'running') this.store.put(job);
   }
   async media(job:MediaJob,index=0):Promise<{bytes:Buffer;mime:string}|undefined>{
     if(job.status!=='completed')return undefined;

@@ -79,7 +79,7 @@ export function Studio({ startGeneration }: {
 | `onDeleteTask` | `(taskId) => void \| Promise<void>`；提供后任务项显示删除入口，删除确认由组件处理 |
 | `onGenerate` | `(request: GenerateRequest) => void \| Promise<void>`，必填 |
 | `onRetry` | `(batchId, resultId) => void`；仅失败结果显示重试 |
-| `onCancel` | `(batchId, resultId) => void`；仅等待 / 运行结果显示取消 |
+| `onCancel` | `(batchId, resultId) => void`；仅等待 / 运行结果显示取消；确认后由宿主处理本地取消，不能承诺终止上游任务 |
 | `onRegenerate` | `(batchId, resultId) => void`；重新生成当前这一张，宿主使用原批次快照发起一个结果的生成 |
 | `onFavoriteChange` | `(batchId, resultId, favorited) => void`；收藏 / 取消收藏，宿主回写结果的 `favorited` 字段 |
 | `accentColor` | 可选单组件主色覆盖 |
@@ -104,7 +104,7 @@ export function Studio({ startGeneration }: {
 
 一个提示词输入框用于所有创作，不提供文生图 / 图生图 / 编辑的独立模式。输入区顶部先选择生成类型：图片或视频，默认图片；模型列表只显示当前类型的模型，不会把图片模型和视频模型混在一起。切换类型时应用该类型首个模型的推荐默认值，宿主只提供单一类型时隐藏该选择。参考素材和首尾帧草稿在切换类型时保留，仍受新模型能力约束。点击「素材」、拖拽或粘贴图片添加参考；普通文本粘贴不被拦截。支持首尾帧的视频模型默认显示首帧、尾帧两个位置，可只填首帧、只填尾帧或两者都填。每个位置最多一张图，可点击选择、拖入对应位置、替换或移除；无效文件不会覆盖已有帧。
 
-同时支持普通参考素材的模型提供紧凑的「素材方式」选择：普通参考素材与首尾帧分别显示和提交。首尾帧方式只显示两个帧位，不出现额外参考图缩略图，也不携带 `images/videos/audios`；普通参考方式不携带 `firstFrame/lastFrame`。切换方式保留各自草稿，历史复用根据快照恢复方式。
+视频通过生成方式选择首尾帧或全能参考。切换首尾帧时，已有一张图片转为首帧，两张按顺序转为首尾帧；超过两张则提示先删除多余图片。切回参考方式时帧图片回到参考图片。上传未完成时暂不能切换。首尾帧请求不携带普通参考素材，历史复用根据快照恢复方式。
 
 `MediaInput` 为 `File | { id: string; url: string }`。本地文件仅作为 `File` 交给宿主，组件不上传。普通参考文件复用 FileUploader 的内部队列、类型校验、判重和 Blob URL 清理能力；移除、历史复用和卸载均释放本地缩略图 URL。
 
