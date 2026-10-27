@@ -184,6 +184,15 @@ const IMAGE_ASPECT_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'];
 export function upgradeModelConfiguration(configuration: ModelConfiguration): ModelConfiguration {
   if (!configuration || configuration.version !== 1 || !Array.isArray(configuration.templates) || !Array.isArray(configuration.models)) return configuration;
   const next = JSON.parse(JSON.stringify(configuration)) as ModelConfiguration;
+  // Text models always receive image attachments; discard the retired per-model switch.
+  for (const template of next.templates) {
+    if (template.type === 'text') delete (template.capabilities as unknown as Record<string, unknown>).vision;
+  }
+  for (const model of next.models) {
+    if (model.type === 'text') for (const binding of model.bindings) {
+      if (binding.capabilityOverrides) delete (binding.capabilityOverrides as Record<string, unknown>).vision;
+    }
+  }
   const gptImage = next.templates.find((template) => template.id === 'gpt-image-2');
   if (gptImage) {
     const capabilities = gptImage.capabilities as ImageCapabilities;

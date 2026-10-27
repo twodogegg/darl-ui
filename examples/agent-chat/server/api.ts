@@ -701,7 +701,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         const incoming = (await readBody(request))?.configuration;
         const errors = validateModelConfiguration(incoming as ModelConfiguration);
         if (errors.length) throw new Error(errors[0].message);
-        const next = incoming as ModelConfiguration;
+        const next = upgradeModelConfiguration(incoming as ModelConfiguration);
         storage.setConfig('modelConfiguration', next);
         return send(200, next);
       }

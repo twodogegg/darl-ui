@@ -2,6 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { defaultModelConfiguration, effectiveCapabilities, resolveCapabilities, toAgentModels, toMediaModels, upgradeModelConfiguration, validateModelConfiguration } from '../src/components/settings/model-config';
 
 describe('model configuration', () => {
+  it('removes legacy vision flags from text templates and bindings without changing other capabilities', () => {
+    const configuration = defaultModelConfiguration();
+    const template = configuration.templates.find(item => item.id === 'deepseek-thinking')!;
+    Object.assign(template.capabilities, { vision: false, tools: false });
+    const model = configuration.models.find(item => item.id === 'deepseek-v4.1-flash')!;
+    model.bindings[0].capabilityOverrides = { contextWindow: 128_000 };
+    Object.assign(model.bindings[0].capabilityOverrides, { vision: true });
+    const upgraded = upgradeModelConfiguration(configuration);
+    const capabilities = upgraded.templates.find(item => item.id === template.id)!.capabilities;
+    const overrides = upgraded.models.find(item => item.id === model.id)!.bindings[0].capabilityOverrides;
+    expect(capabilities).not.toHaveProperty('vision');
+    expect(capabilities).toMatchObject({ tools: false });
+    expect(overrides).toEqual({ contextWindow: 128_000 });
+    expect(template.capabilities).toHaveProperty('vision', false);
+    expect(upgradeModelConfiguration(upgraded)).toEqual(upgraded);
+  });
+
   it('keeps zero and false overrides and replaces arrays', () => {
     const configuration = defaultModelConfiguration();
     const model = configuration.models.find((item) => item.id === 'minimax-h3-flash')!;
