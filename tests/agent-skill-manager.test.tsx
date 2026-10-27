@@ -6,6 +6,18 @@ const markdownFile = (content: string, name = 'SKILL.md') => ({ name, type: 'tex
 const importedMarkdown = '---\nname: 审查\ndescription: 检查代码\n---\n\n逐项检查。';
 
 describe('SkillManager', () => {
+  it('confirms deletion, allows cancellation and reports success only after deletion', async () => {
+    const onDelete = vi.fn().mockResolvedValue(undefined);
+    render(<SkillManager open skills={[documentSkill]} onClose={vi.fn()} onSave={vi.fn()} onDelete={onDelete} onImport={vi.fn()} onFavoriteChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '删除' }));
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('确定删除');
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(onDelete).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '删除' }));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '删除' }));
+    await waitFor(() => expect(onDelete).toHaveBeenCalledWith(documentSkill.id));
+    expect(await screen.findByText('删除成功')).toBeInTheDocument();
+  });
   const documentSkill: AgentSkill = {
     id: 'documents', name: '文档技能', description: '阅读和编辑技能资源', scope: 'custom',
     instructions: '# 使用说明\n\n[阅读指南](references/guide.md)\n\n<script>alert(1)</script>\n\n[危险链接](javascript:alert(1))',

@@ -158,6 +158,7 @@
 .darl-agent-skill-conflict-error { margin: 0; color: var(--darl-danger, #dc2626); font-size: 11px; }
 .darl-agent-skill-conflict-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .darl-agent-skill-conflict-actions .darl-button { min-width: 84px; }
+.darl-agent-skill-toast { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); padding: 8px 16px; border: 1px solid var(--darl-agent-border); border-radius: 8px; background: var(--darl-agent-bg); color: var(--darl-agent-text); box-shadow: 0 8px 24px rgb(2 6 23 / 20%); font-size: 13px; }
 .darl-agent-manager-search svg { width: 14px; height: 14px; }
 .darl-agent-manager-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--darl-agent-text); font-size: 11px; }
 .darl-agent-skill-picker { left: 11px; right: auto; display: flex; flex-direction: column; overflow: hidden; }

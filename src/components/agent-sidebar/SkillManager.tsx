@@ -30,6 +30,9 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
   const [fileMode, setFileMode] = useState<'preview' | 'edit'>('preview');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteSuccess, setDeleteSuccess] = useState(false);
   const [importConflict, setImportConflict] = useState<ImportConflict | null>(null);
   const [importConflictError, setImportConflictError] = useState('');
   const [importConflictBusy, setImportConflictBusy] = useState(false);
@@ -38,7 +41,15 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
 
   const selected = skills.find((skill) => skill.id === selectedId);
   const dirty = selected
-    ? JSON.stringify(selected) !== JSON.stringify(draft)
+    ? Object.keys({ ...selected, ...draft }).some((key) => {
+        if (key === 'resources') return false;
+        const field = key as keyof AgentSkill;
+        return selected[field] !== draft[field];
+      }) || (selected.resources?.length || 0) !== (draft.resources?.length || 0)
+        || (selected.resources || []).some((resource, index) => {
+          const other = draft.resources?.[index];
+          return !other || resource.path !== other.path || resource.content !== other.content || resource.encoding !== other.encoding;
+        })
     : Boolean(draft.name?.trim() || draft.description?.trim() || draft.instructions?.trim() || draft.resources?.length);
   const visible = useMemo(() => {
     const text = query.trim().toLocaleLowerCase();
@@ -50,6 +61,12 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
       return !text || [skill.name, skill.slug].some((name) => name?.toLocaleLowerCase().includes(text));
     });
   }, [filter, query, skills]);
+
+  useEffect(() => {
+    if (!deleteSuccess) return;
+    const timer = window.setTimeout(() => setDeleteSuccess(false), 3000);
+    return () => window.clearTimeout(timer);
+  }, [deleteSuccess]);
 
   useEffect(() => {
     if (!open) return;
@@ -113,16 +130,21 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
     }
   };
   const remove = async () => {
-    if (!selected || !window.confirm(`确定删除“${selected.name}”？`)) return;
+    if (!selected || deleteBusy) return;
+    setDeleteBusy(true);
     try {
       await onDelete(selected.id);
       const next = skills.find((skill) => skill.id !== selected.id);
       setSelectedId(next?.id || null);
       setDraft(next ? { ...next, resources: next.resources?.map((resource) => ({ ...resource })) } : newSkillDraft());
-      setNotice('Skill 已删除。');
+      setDeleteOpen(false);
+      setDeleteSuccess(true);
       setError('');
     } catch (reason) {
+      setDeleteOpen(false);
       setError(reason instanceof Error ? reason.message : '删除 Skill 失败');
+    } finally {
+      setDeleteBusy(false);
     }
   };
   const commitImport = async (preview: AgentSkill, existing?: AgentSkill) => {
@@ -205,7 +227,7 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
           <div className="darl-agent-skill-list">{visible.map((skill) => <div key={skill.id} className={`darl-agent-skill-list-row${skill.id === selectedId ? ' is-selected' : ''}`}><button type="button" className="darl-agent-skill-list-main" onClick={() => select(skill)}><span className="darl-agent-skill-list-icon"><Sparkles /></span><span><strong>{skill.name || '未命名 Skill'}</strong><small>{skill.description || '暂无描述'}</small><em>{skill.scope === 'builtin' ? '内置' : '我的'}{skill.version ? ` · v${skill.version}` : ''}</em></span></button><button type="button" className="darl-agent-skill-favorite" aria-label={skill.favorite ? `取消收藏 ${skill.name}` : `收藏 ${skill.name}`} aria-pressed={skill.favorite ? 'true' : 'false'} onClick={() => void toggleFavorite(skill)}><Star fill={skill.favorite ? 'currentColor' : 'none'} /></button>{skill.id === selectedId && <Check className="darl-agent-skill-selected-check" />}</div>)}{!visible.length && <p className="darl-agent-empty">没有匹配的 Skill</p>}</div>
         </aside>
         <section className="darl-agent-skill-editor">
-          <div className="darl-agent-skill-editor-heading"><div><span className="darl-agent-manager-eyebrow">{selectedId ? 'EDIT SKILL' : 'NEW SKILL'}</span><h3>{draft.name || '新建 Skill'}</h3></div><div className="darl-agent-skill-editor-actions">{selected && !isBuiltin && <Button variant="ghost" size="sm" onClick={() => void remove()}><Trash2 data-icon="inline-start" />删除</Button>}</div></div>
+          <div className="darl-agent-skill-editor-heading"><div><span className="darl-agent-manager-eyebrow">{selectedId ? 'EDIT SKILL' : 'NEW SKILL'}</span><h3>{draft.name || '新建 Skill'}</h3></div><div className="darl-agent-skill-editor-actions">{selected && !isBuiltin && <Button variant="ghost" size="sm" onClick={() => setDeleteOpen(true)}><Trash2 data-icon="inline-start" />删除</Button>}</div></div>
           <div className="darl-agent-skill-form"><label><span>Skill 原名</span><input value={draft.slug || draft.name || ''} readOnly /></label><label><span>显示名称</span><input value={draft.name || ''} disabled={isBuiltin} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="例如：代码审查" /></label><label><span>描述</span><textarea value={draft.description || ''} disabled={isBuiltin} rows={2} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="说明什么时候使用这个 Skill" /></label><div className="darl-agent-skill-auto-invocation"><Switch aria-label="允许自动调用" checked={draft.allowImplicitInvocation !== false} onChange={(event) => setDraft({ ...draft, allowImplicitInvocation: event.target.checked })}>允许自动调用</Switch><small>关闭后，只有在聊天中手动 @ 引用时才会使用。</small></div></div>
           <div className="darl-agent-skill-files">
             <aside><div className="darl-agent-skill-files-heading"><strong>文件 <span>{resources.length + 1}</span></strong><Button variant="ghost" size="sm" disabled={isBuiltin} onClick={() => { let index = resources.length + 1; while (resources.some((resource) => resource.path === `references/resource-${index}.md`)) index += 1; const path = `references/resource-${index}.md`; setDraft({ ...draft, resources: [...resources, { path, content: '' }] }); setResourcePath(path); setFileMode('edit'); }}><Plus data-icon="inline-start" />资源</Button></div>
@@ -223,7 +245,19 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
           <footer className="darl-agent-skill-manager-footer"><span>{isBuiltin ? '内置 Skill 只能修改自动调用设置。' : '保存后会增加版本号。'}</span><div><Button variant="outline" onClick={close}>关闭</Button><Button disabled={!dirty} onClick={() => void save()}>保存修改</Button></div></footer>
         </section>
       </div>
+      {deleteSuccess && <div className="darl-agent-skill-toast" role="status">删除成功</div>}
       </DialogPrimitive.Content>
+      <DialogPrimitive.Root open={deleteOpen} onOpenChange={(nextOpen) => { if (!deleteBusy) setDeleteOpen(nextOpen); }}>
+        <DialogPrimitive.Overlay className="darl-agent-skill-conflict-overlay" />
+        <DialogPrimitive.Content className="darl-agent-skill-conflict" role="alertdialog">
+          <DialogPrimitive.Title className="darl-agent-skill-conflict-title">删除 Skill</DialogPrimitive.Title>
+          <DialogPrimitive.Description className="darl-agent-skill-conflict-text">确定删除“{selected?.name}”？此操作无法撤销。</DialogPrimitive.Description>
+          <div className="darl-agent-skill-conflict-actions">
+            <Button variant="outline" size="sm" disabled={deleteBusy} onClick={() => setDeleteOpen(false)}>取消</Button>
+            <Button variant="destructive" size="sm" disabled={deleteBusy} onClick={() => void remove()}>{deleteBusy ? '删除中…' : '删除'}</Button>
+          </div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Root>
       <DialogPrimitive.Root open={Boolean(importConflict)} onOpenChange={(nextOpen) => { if (!nextOpen && !importConflictBusy) cancelImport(); }}>
         <DialogPrimitive.Overlay className="darl-agent-skill-conflict-overlay" />
         <DialogPrimitive.Content className="darl-agent-skill-conflict" role="alertdialog" aria-describedby="darl-agent-skill-conflict-description">
