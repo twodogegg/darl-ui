@@ -21,10 +21,12 @@ import { useStore } from '../store'
 import { projectSteps } from '../data'
 
 const stepIcons = [IconNotebook, IconScript, IconLayoutList, IconPhoto, IconVideo]
+const redrawStepIcons = [IconScript, IconLayoutList, IconPhoto, IconVideo]
 // 项目级步骤：整个项目共用同一份内容，不按集拆分
 const projectLevelPaths = ['/source', '/outline', '/script', '/art', '/film']
+const isProjectPath = (path, project) => projectLevelPaths.includes(path) && !(project?.creationMode === 'video-redraw' && ['/source', '/film'].includes(path))
 // 分集步骤：进入后才选择具体剧集
-const episodeLevelPaths = ['/video']
+const episodeLevelPaths = ['/dialogue', '/video']
 
 const nav = [
   { to: '/', label: '工作台', mobile: '工作台', icon: IconHome },
@@ -56,14 +58,14 @@ export default function Shell({ children }) {
       ? activeEpisodeList.find((e) => e.id === requested)
       : activeEpisodeList[0]
   })()
-  const isProjectLevel = projectLevelPaths.includes(pathname) || pathname === '/media'
+  const isProjectLevel = isProjectPath(pathname, activeProject) || pathname === '/media'
   const flowLink = (path) =>
-    projectLevelPaths.includes(path) || !activeEpisode
+    isProjectPath(path, activeProject) || !activeEpisode
       ? `${path}?projectId=${encodeURIComponent(projectId)}`
       : `${path}?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(activeEpisode.id)}`
   const crumb =
     workflow?.label || (pathname === '/source' ? '原始素材' : nav.find((n) => n.to === pathname)?.label) || '工作台'
-  const showFlow = !!activeProject && (!!workflow || projectLevelPaths.includes(pathname) || pathname === '/media')
+  const showFlow = !!activeProject && (!!workflow || isProjectPath(pathname, activeProject) || pathname === '/media')
   const mediaLink = activeProject ? `/media?projectId=${encodeURIComponent(projectId)}` : '/media'
   return (
     <div className="app">
@@ -113,14 +115,14 @@ export default function Shell({ children }) {
             </div>
             <p className="br-group-title">创作流程</p>
             {flowSteps.map((s, i) => {
-              const Icon = stepIcons[i]
+              const Icon = (activeProject.creationMode === 'video-redraw' ? redrawStepIcons : stepIcons)[i]
               const active = pathname === s.path
               const done =
-                !projectLevelPaths.includes(s.path) &&
-                (activeEpisode?.stage || 0) > i + 1
+                !isProjectPath(s.path, activeProject) &&
+                (activeEpisode?.stage || 0) > i + (activeProject.creationMode === 'video-redraw' ? 2 : 1)
               const state = active
                 ? '进行中'
-                : projectLevelPaths.includes(s.path)
+                : isProjectPath(s.path, activeProject)
                   ? '全项目'
                   : done
                     ? '已完成'
@@ -151,13 +153,13 @@ export default function Shell({ children }) {
             <div className="br-flow-foot">
               <div className="br-menu-divider" />
               <p className="br-group-title">创作管理</p>
-              <NavLink
+              {activeProject.creationMode !== 'video-redraw' && <NavLink
                 className={({ isActive }) => `br-flow-step br-flow-step--plain ${isActive ? 'br-flow-step--active' : ''}`}
                 to={flowLink('/source')}
               >
                 <span className="br-flow-icon"><IconFileText size={17} stroke={1.7} /></span>
                 <span className="br-flow-label">原始素材</span>
-              </NavLink>
+              </NavLink>}
               <NavLink
                 className={({ isActive }) => `br-flow-step br-flow-step--plain ${isActive ? 'br-flow-step--active' : ''}`}
                 to={mediaLink}
@@ -282,13 +284,13 @@ export function Banner({ context, projectLevel = false }) {
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const stepLink = (path) =>
-    projectLevelPaths.includes(path) || !episode
+    isProjectPath(path, project) || !episode
       ? `${path}?projectId=${encodeURIComponent(projectId)}`
       : `${path}?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(episode.id)}`
   const stepState = (path, i) => {
     if (pathname === path) return '进行中'
-    if (projectLevelPaths.includes(path)) return '全项目'
-    return (episode?.stage || 0) > i + 1 ? '已完成' : '待创作'
+    if (isProjectPath(path, project)) return '全项目'
+    return (episode?.stage || 0) > i + (project?.creationMode === 'video-redraw' ? 2 : 1) ? '已完成' : '待创作'
   }
   return (
     <div className="workflow-banner">
@@ -321,7 +323,7 @@ export function Banner({ context, projectLevel = false }) {
           ))}
         </select>}
       </div>
-      <nav className="workflow-steps" aria-label="五步创作流程">
+      <nav className="workflow-steps" aria-label="创作流程">
         {projectSteps(project).map((s, i) => (
           <Link
             className={pathname === s.path ? 'active' : ''}

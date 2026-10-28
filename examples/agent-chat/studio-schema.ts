@@ -1,7 +1,8 @@
 /** Existing RN web fields. Version is transport metadata, not an editable field. */
 export const studioFields = {
   projects: 'title summary cover ratio style_catalog_id generationMode adaptation planned durationMin durationMax duration requirements outline sourceScript updated creationMode targetRegion targetLanguage sourceVideo',
-  episodes: 'projectId number title cover script scenes duration stage',
+  episodes: 'projectId number title cover script scenes duration stage sourceVideo',
+  dialogues: 'projectId episodeId idCode sourceText sourceSpeaker sourceStart sourceEnd targetText targetSpeaker tone timingStatus estimatedSeconds plannedSeconds note',
   assets: 'projectId episodeIds name type role alias description appearance costume voiceDescription image prompt variants history voiceId references dependencies imageDependencies source',
   shots: 'episodeId sceneId description scale camera transition dialogue effects duration source assetIds image imageHistory storyboardPrompt clipId',
   clips: 'episodeId sceneId title shotIds sourceSignature description duration prompt assetIds references disabledVoiceIds lastGenerationVoiceIds image imageHistory imageSource storyboardPrompt blocking blockingImage blockingHistory videos currentVideo model resolution ratio mode firstFrame lastFrame',
@@ -106,9 +107,10 @@ export function studioPositions(before: Array<{ id: string; _position?: number }
 export const studioDefaults: Partial<Record<StudioResource, Record<string, unknown>>> = {
   projects: { cover: '', generationMode: '故事版', adaptation: '抽核', planned: null, durationMin: 2, durationMax: 5, duration: 120, requirements: '', outline: { core: '', story: '', keep: '', remove: '', merge: '', risks: '', episodes: '', roles: [], scenes: [], props: [] }, sourceScript: '', creationMode: 'script' },
   episodes: { number: 1, title: '新剧集', cover: '', script: '', scenes: [], duration: 120, stage: 1 },
+  dialogues: { projectId: '', episodeId: '', idCode: '', sourceText: '', sourceSpeaker: '', sourceStart: 0, sourceEnd: 0, targetText: '', targetSpeaker: '', tone: '', timingStatus: 'estimate_not_measured', estimatedSeconds: 0, plannedSeconds: 0, note: '' },
   assets: { episodeIds: [], name: '', type: '角色', role: '', alias: '', description: '', appearance: '', costume: '', voiceDescription: '', image: '', prompt: '', variants: [], history: [], voiceId: '', references: [], dependencies: [], imageDependencies: {} },
   shots: { description: '', scale: '中景', camera: '固定', transition: '硬切', dialogue: [], effects: '', duration: 3, assetIds: [], image: '', imageHistory: [], storyboardPrompt: '', clipId: '' },
-  clips: { title: '新片段', shotIds: [], sourceSignature: '', description: '', duration: 0, prompt: '', assetIds: [], references: [], disabledVoiceIds: [], lastGenerationVoiceIds: [], image: '', imageHistory: [], imageSource: 'clip', storyboardPrompt: '', blocking: '', blockingImage: '', blockingHistory: [], videos: [], model: '', resolution: '', ratio: '9:16', mode: '参考生成', firstFrame: '', lastFrame: '' },
+  clips: { title: '新片段', shotIds: [], sourceSignature: '', description: '', duration: 5, prompt: '', assetIds: [], references: [], disabledVoiceIds: [], lastGenerationVoiceIds: [], image: '', imageHistory: [], imageSource: 'clip', storyboardPrompt: '', blocking: '', blockingImage: '', blockingHistory: [], videos: [], model: '', resolution: '', ratio: '9:16', mode: '参考生成', firstFrame: '', lastFrame: '' },
 };
 export function studioResource(value: unknown): StudioResource {
   if (typeof value !== 'string' || !Object.hasOwn(studioFields, value)) throw new Error('不支持的资源类型');
@@ -116,7 +118,7 @@ export function studioResource(value: unknown): StudioResource {
 }
 const idFields = new Set(['projectId', 'episodeId', 'sceneId', 'voiceId', 'folderId', 'clipId']);
 const arrayFields = new Set(['episodeIds', 'scenes', 'variants', 'history', 'references', 'dependencies', 'dialogue', 'shotIds', 'assetIds', 'disabledVoiceIds', 'lastGenerationVoiceIds', 'imageHistory', 'storyboardHistory', 'blockingHistory', 'videos']);
-const numericFields = new Set(['number', 'duration', 'stage', 'planned', 'durationMin', 'durationMax', 'updated', 'group', 'style_catalog_id']);
+const numericFields = new Set(['number', 'duration', 'stage', 'planned', 'durationMin', 'durationMax', 'updated', 'group', 'style_catalog_id', 'sourceStart', 'sourceEnd', 'estimatedSeconds', 'plannedSeconds']);
 const objectFields = new Set(['outline', 'sourceVideo', 'source', 'imageDependencies']);
 const frameSchema = { type: 'object', additionalProperties: false, properties: { fileId: { type: 'string' }, time: { type: 'number', minimum: 0 }, url: { type: 'string' } }, required: ['fileId', 'time', 'url'] };
 const segmentSchema = { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, start: { type: 'number', minimum: 0 }, end: { type: 'number', exclusiveMinimum: 0 }, frames: { type: 'array', items: frameSchema, maxItems: 12 } }, required: ['id', 'start', 'end', 'frames'] };
@@ -133,6 +135,7 @@ export const sourceSchema = {
   }, required: ['fileId', 'start', 'end', 'frames'],
 };
 export const studioRequiredOnCreate: Partial<Record<StudioResource, string[]>> = {
+  dialogues: ['projectId', 'episodeId', 'idCode', 'sourceText', 'targetText'],
   projects: ['title', 'ratio', 'style_catalog_id'], episodes: ['projectId'], assets: ['projectId', 'name'],
   shots: ['episodeId', 'sceneId'], clips: ['episodeId', 'sceneId'], films: ['projectId'], history: ['projectId'],
 };
@@ -157,7 +160,7 @@ const variantSchema = {
   type: 'object', additionalProperties: false,
   properties: {
     id: { type: 'string', minLength: 1 }, name: { type: 'string' }, description: { type: 'string' },
-    prompt: { type: 'string', description: '场景、道具衍生形态的完整生图提示词，生图时必填，不回退到描述或主资产 prompt。角色默认按主资产 appearance 与当前形态 description（服饰/视觉变化）生成，prompt 仅供自定义模式。' },
+    prompt: { type: 'string', description: '当前形态的完整生图提示词。场景、道具衍生形态生图时必填，不回退到描述或主资产 prompt。角色衍生形态填写后优先用于生成，留空则回退主资产 appearance 与当前形态 description（服饰/视觉变化）。缺失时不可回退叙事描述或声音。' },
     image: { type: 'string' }, history: { type: 'array', items: { type: 'string' } }, imageDependencies: dependencyImagesSchema,
   }, required: ['id', 'name'],
 };
@@ -177,11 +180,16 @@ export function studioValueSchema(resource: StudioResource): Record<string, unkn
     if (key === 'favorite') schema = { type: 'boolean' };
     if (key === 'projectId' || key === 'episodeId' || key === 'sceneId') schema = { type: 'string', minLength: 1, description: '关联记录的真实 ID；同批新建记录可用该记录的 ID。' };
     if (resource === 'shots' && key === 'clipId') schema = { type: 'string', minLength: 1, description: '镜头所属视频片段 ID；写入时把该镜头加入对应片段 shotIds，镜头因此只能属于一个片段。与 clips.shotIds 等价，留空表示不调整归属。' };
+    if (resource === 'clips' && key === 'duration') schema.description = '片段自身时长（秒，必须大于 0）。生成请求按模型支持时长向上取整；不改写本字段或来源镜头，不由 shotIds 求和覆盖。';
+    if (resource === 'clips' && key === 'duration') schema.exclusiveMinimum = 0;
+    if (resource === 'clips' && key === 'shotIds') schema.description = '可选的同剧集来源镜头 ID，仅供追溯，不参与生成时长、描述、图片或音色推导；无来源镜头时留空数组。';
+    if (resource === 'clips' && key === 'imageSource') schema = { type: 'string', enum: ['clip'], description: '分镜图方式仅使用片段当前选用图片。历史 shots 值不再参与生成。' };
+    if (resource === 'clips' && key === 'prompt') schema.description = '片段视频描述，是视频生成的直接依据；可手动编辑，也可用“从镜头生成描述”按关联镜头重建。修改它不会回写镜头。';
     if (key === 'dialogue') schema = { type: 'array', items: dialogueSchema };
     if (resource === 'assets' && key === 'dependencies') schema = dependenciesSchema;
     if (resource === 'assets' && key === 'imageDependencies') schema = dependencyImagesSchema;
     if (resource === 'assets' && key === 'variants') schema = { type: 'array', items: variantSchema };
-    if (resource === 'assets' && key === 'prompt') schema.description = '场景、道具主形象的完整生图提示词，生图时必填；衍生形态另存 variants[].prompt，不回退叙事描述。角色默认按 appearance 和当前 costume/形态 description 生成，prompt 仅供自定义模式。';
+    if (resource === 'assets' && key === 'prompt') schema.description = '生图提示词。场景、道具主形象生图时必填；衍生形态另存 variants[].prompt。角色填写后优先用于生成，留空则按 appearance 与当前 costume/形态 description 生成，均不回退叙事描述或声音。最终提示词由生图模板提示词与项目全局风格在生成时自动追加。';
     if (resource === 'episodes' && key === 'scenes') schema = { type: 'array', items: sceneSchema, description: '剧本页按此数组显示场次。每场 content 包含完整动作与对白；修改剧本时同步维护 scenes 与 script，保留已有场次 ID。' };
     if (resource === 'episodes' && key === 'script') schema.description = '整集完整文学剧本。仅修改 script 不会更新已有 scenes 的页面正文；须同时更新对应 scenes.content。';
     return [key, schema];
@@ -210,6 +218,7 @@ export function validateStudioValues(resource: StudioResource, values: unknown):
     if (objectFields.has(key) && (!value || typeof value !== 'object' || Array.isArray(value))) throw new Error(`${key} 必须是对象`);
     if (!idFields.has(key) && !arrayFields.has(key) && !numericFields.has(key) && !objectFields.has(key) && key !== 'favorite' && typeof value !== 'string') throw new Error(`${key} 必须是文本`);
     if (key === 'favorite' && typeof value !== 'boolean') throw new Error('收藏状态无效');
+    if (resource === 'clips' && key === 'imageSource' && value !== 'clip') throw new Error('视频分镜图来源只支持片段自己的分镜图');
     if (resource === 'assets' && key === 'dependencies' && Array.isArray(value)) {
       value.forEach((item, index) => {
         if (!item || typeof item !== 'object' || Array.isArray(item) || typeof item.assetId !== 'string' || !item.assetId.trim() || typeof item.purpose !== 'string' || !item.purpose.trim() || (item.variantId !== undefined && typeof item.variantId !== 'string') || Object.keys(item).some(key => !['assetId', 'variantId', 'purpose'].includes(key))) throw new Error(`assets.dependencies[${index}] 字段无效`);

@@ -45,6 +45,6 @@ export function unmatchedSentences(content, source) {
 // Remove episode-owned records in the same batch; assets remain shared by the project.
 export function removeEpisode(data, episodeId) {
   data.episodes = data.episodes.filter(item => item.id !== episodeId)
-  for (const resource of ['shots', 'clips', 'films', 'history']) data[resource] = data[resource].filter(item => item.episodeId !== episodeId)
+  for (const resource of ['shots', 'clips', 'films', 'history', 'dialogues']) data[resource] = data[resource].filter(item => item.episodeId !== episodeId)
   data.assets.forEach(asset => { asset.episodeIds = (asset.episodeIds || []).filter(id => id !== episodeId) })
 }

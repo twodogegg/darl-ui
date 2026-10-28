@@ -1,6 +1,4 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react'
-import actionPrompts from '../../prompts/studio-actions.json'
-import promptCatalog from '../../prompts/studio-prompt-catalog.json'
 import redrawPrompts from '../../prompts/video-redraw.json'
 import { emptyStudioData, studioFields, studioPositions } from '../../studio-schema'
 import { styleOptionsFromCatalog } from '../workspace-styles'
@@ -66,8 +64,8 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
     if (failed.current) { announce('请先重新加载最新数据，再继续编辑'); return Promise.resolve(false) }
     const before = state.current, next = structuredClone(before)
     fn(next)
-    // Derived durations and released shot links use the same rule as the server.
-    next.clips.forEach(clip => { clip.shotIds = clip.shotIds.filter(id => next.shots.some(shot => shot.id === id)); clip.duration = Math.round(clip.shotIds.reduce((sum, id) => sum + Number(next.shots.find(shot => shot.id === id).duration), 0) * 100) / 100 })
+    // 只清理已删除镜头留下的失效关联；片段时长由片段自身维护，不再由关联镜头求和覆盖。
+    next.clips.forEach(clip => { clip.shotIds = clip.shotIds.filter(id => next.shots.some(shot => shot.id === id)) })
     const changes = []
     for (const resource of Object.keys(studioFields)) {
       const previous = new Map(before[resource].map(item => [item.id, item]))
@@ -108,11 +106,8 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
   const requestAgent = async task => {
     await queue.current
     if (failed.current) throw new Error('数据尚未成功保存，请先处理保存错误')
-    const entry = promptCatalog.find(item => item.action === task.action)
-    const configured = entry && state.current.prompts.find(item => item.id === entry.id)
-    const prompt = configured?.mode === 'replace' ? configured.text : configured?.defaultText || actionPrompts[task.action]
     const project = state.current.projects.find(project => project.id === task.projectId)
-    await onAgentRequest({ ...task, prompt, agentId: agentSelection, modelSelections, ...(project?.creationMode === 'video-redraw' ? { skillSlugs: ['video-redraw', 'darl-studio'] } : {}) })
+    await onAgentRequest({ ...task, agentId: task.agentId || agentSelection || currentAgentId, modelSelections, projectMode: project?.creationMode })
   }
   const generateMedia = async ({ type = 'image', prompt, target, references = [], options = {}, modelId, applyStyle = true, styleId }) => {
     await queue.current

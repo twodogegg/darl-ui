@@ -1,7 +1,11 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 import { promptGroups } from '../data'
+import promptCatalog from '../../../prompts/studio-prompt-catalog.json'
+import agentButtons from '../../../prompts/studio-agent-buttons.json'
 import { Button, Field, Confirm } from '../components/ui'
+
+const buttonPromptIds = new Set(promptCatalog.filter(item => Object.hasOwn(agentButtons, item.action)).map(item => item.id))
 
 export default function Prompts() {
   const { data, patch, notify } = useStore()
@@ -44,13 +48,13 @@ export default function Prompts() {
               >
                 <span>
                   <strong>{p.name}</strong>
-                  <small>查看默认内容或自定义替换</small>
+                  <small>{buttonPromptIds.has(p.id) ? 'Agent 按钮使用本地配置' : '查看默认内容或自定义替换'}</small>
                 </span>
-                <em>{p.mode === 'default' ? '默认' : '替换'}</em>
+                <em>{buttonPromptIds.has(p.id) ? '本地配置' : p.mode === 'default' ? '默认' : '替换'}</em>
               </button>
             ))}
         </aside>
-        {item && <PromptEditor
+        {item && buttonPromptIds.has(item.id) ? <section className="prompt-editor"><h3>{item.name}</h3><p>此 Agent 按钮的可见消息、隐藏指令、参数和 Skills 在本地 JSON 文件中配置；此处保存的旧设置不再影响该按钮。</p><code>examples/agent-chat/prompts/studio-agent-buttons.json</code></section> : item && <PromptEditor
           key={item?.id || selected}
           item={item}
           onReset={() => setReset(true)}

@@ -11,7 +11,7 @@ import { defaultVoiceSettings, type VoiceSettings } from '../voice-config';
 export { defaultVoiceSettings, type VoiceSettings } from '../voice-config';
 type StoredVoiceSettings = VoiceSettings & { apiKey?: string };
 const MAX_AUDIO = 25 * 1024 * 1024;
-export type TimedTranscript = { text: string; language: string; segments: Array<{ text: string; start: number; end: number }> };
+export type TimedTranscript = { text: string; language: string; segments: Array<{ text: string; start: number; end: number }>; speakerTurns?: Array<{ speaker: string; text: string; start: number; end: number }> };
 
 /** Video analysis needs source-language timing; chat dictation keeps its existing text-only contract. */
 export async function transcribeVideoAudio(storage: LocalStorage, env: Record<string, string>, bytes: Buffer, language: string, signal: AbortSignal, records?: RequestRecordStore): Promise<TimedTranscript> {
@@ -34,7 +34,11 @@ export async function transcribeVideoAudio(storage: LocalStorage, env: Record<st
       if (typeof segment.text !== 'string' || !Number.isFinite(segment.start) || !Number.isFinite(segment.end) || Number(segment.start) < 0 || Number(segment.end) < Number(segment.start)) throw new Error('转写时间戳无效');
       return { text: segment.text, start: Number(segment.start), end: Number(segment.end) };
     });
-    const result = { text: data.text, language: String(data.language_code || data.language || language), segments };
+    const speakerTurns = Array.isArray(data.speaker_turns) ? data.speaker_turns.map((turn: Record<string, unknown>) => {
+      if (typeof turn.speaker !== 'string' || typeof turn.text !== 'string' || !Number.isFinite(turn.start) || !Number.isFinite(turn.end) || Number(turn.start) < 0 || Number(turn.end) < Number(turn.start)) throw new Error('说话人时间戳无效');
+      return { speaker: turn.speaker, text: turn.text, start: Number(turn.start), end: Number(turn.end) };
+    }) : undefined;
+    const result = { text: data.text, language: String(data.language_code || data.language || language), segments, ...(speakerTurns ? { speakerTurns } : {}) };
     if (record) records!.finish(record.id, { status: 'success', text: result.text, response: result });
     return result;
   } catch (error) {

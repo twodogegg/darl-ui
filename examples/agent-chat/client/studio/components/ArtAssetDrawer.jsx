@@ -1,7 +1,7 @@
 import { imageUrl } from '../../image-url'
 import { resolveAssetDependencies, assetDependenciesChanged, validateAssetDependencies } from '../../../asset-dependencies'
 import { useEffect, useRef, useState } from 'react'
-import { SourceEvidence } from './VideoRedraw'
+import { AssetSourceEvidence } from './VideoRedraw'
 import { useStore } from '../store'
 import { id } from '../data'
 import { download, readMedia } from '../files'
@@ -199,7 +199,7 @@ export default function ArtAssetDrawer({
           </header>
         }
       >
-        {form.source && <div className="redraw-drawer-source"><SourceEvidence source={form.source} /><label><input type="checkbox" checked={form.source.confirmed === true} onChange={event => change('source', { ...form.source, confirmed: event.target.checked })} />已核对原片主体与目标设定</label><Field label="原片主体描述"><textarea value={form.source.description || ''} onChange={event => change('source', { ...form.source, description: event.target.value })} /></Field></div>}
+        {form.source && <div className="redraw-drawer-source"><AssetSourceEvidence source={form.source} /></div>}
         {!liveAsset && <fieldset className="asset-drawer__fields" disabled={generating}>
           <div className="new-asset-fields">
             <Field label="资产名称">
@@ -372,6 +372,7 @@ export default function ArtAssetDrawer({
                   ['description', '主体人物（性别 / 年龄 / 身份 / 性格）'],
                   ['appearance', '外貌特征（五官 / 体型 / 发型 / 肤色）'],
                   ['costume', `服饰（${variant?.name || '主形象'}）`],
+                  ['prompt', `${variant?.name || '主形象'}生图提示词`],
                   ['voiceDescription', '声音描述（音色 / 语速 / 语气）'],
                 ]
               : [

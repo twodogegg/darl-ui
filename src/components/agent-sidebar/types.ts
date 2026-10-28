@@ -195,6 +195,10 @@ export interface AgentMessage {
   id: string;
   role: AgentMessageRole;
   content: string;
+  /** Optional host-provided context sent to the model but not rendered in the message bubble. */
+  modelContext?: string;
+  /** Skills explicitly requested for this message, retained for retries and follow-up turns. */
+  modelSkillIds?: string[];
   outputs?: AgentOutput[];
   createdAt?: string;
   streaming?: boolean;

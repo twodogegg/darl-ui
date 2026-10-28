@@ -335,7 +335,7 @@ export default function Home() {
             <Link
               className="br-project-card"
               key={p.id}
-              to={`/${p.creationMode === 'video-redraw' ? 'source' : 'outline'}?projectId=${encodeURIComponent(p.id)}`}
+              to={`/${p.creationMode === 'video-redraw' ? 'dialogue' : 'outline'}?projectId=${encodeURIComponent(p.id)}`}
             >
               <span className="br-cover">
                 <>{p.cover ? <img loading="lazy" src={imageUrl(p.cover, 320)} alt={p.title} /> : <div className="studio-cover-empty">未上传封面</div>}</>

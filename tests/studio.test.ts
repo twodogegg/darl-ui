@@ -12,10 +12,10 @@ import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv
 import { removeEpisode, sourceScenes, unmatchedSentences } from '../examples/agent-chat/client/studio/scenes';
 import { assetImageRequest, canBatchGenerate } from '../examples/agent-chat/client/studio/art';
 import { MediaJobStore } from '../examples/agent-chat/server/media-job-store';
-import { CLIP_DURATION_LIMIT, clipImagePrompt, clipMediaReferences, clipPrompt, clipShots, imageSourceOptions, moveShotId, shotPrompt, sourceImageReferences, totalDuration, videoDuration, videoImageReferences } from '../examples/agent-chat/client/studio/storyboard';
+import { CLIP_DURATION_LIMIT, clipImagePrompt, clipMediaReferences, clipPrompt, clipShots, clipVoices, imageSourceOptions, moveShotId, shotPrompt, sourceImageReferences, totalDuration, videoDuration, videoImageReferences } from '../examples/agent-chat/client/studio/storyboard';
 import { defaultModelConfiguration, toMediaModels } from '../src/components/settings/model-config';
 import { FIRST_SHOT_TRANSITION, freeShotFields, shotOptionValue, shotOptions, studioPositions, type StudioChange } from '../examples/agent-chat/studio-schema';
-import { studioAgentContent } from '../examples/agent-chat/client/studio/agent-task';
+import { studioAgentPayload } from '../examples/agent-chat/client/studio/agent-task';
 
 let directory: string, store: StudioStore, projectId: string, files: FileStore;
 beforeEach(() => {
@@ -172,10 +172,17 @@ describe('shared short drama business service', () => {
     for (const key of ['targetRegion', 'targetLanguage', 'sourceVideo']) expect(store.snapshot().projects[0]).not.toHaveProperty(key);
   });
 
-  it('keeps agent tasks human-readable and lets tools read project context', () => {
-    expect(studioAgentContent({ action: 'outline', projectId: '6', modelPreferences: { text: 'model' }, prompt: '生成项目大纲' })).toBe('生成项目大纲');
-    expect(studioAgentContent({ action: 'rewrite-script', projectId: '6', notes: '加强冲突', prompt: '改写剧本' })).toBe('改写剧本\n\n补充要求：加强冲突');
-    expect(studioAgentContent({ action: 'voice', projectId: '6', assetId: 'character', assetName: '萧炎', description: '少年音', prompt: '配置音色' })).toBe('配置音色\n\n描述：少年音\n目标资产：萧炎');
+  it('separates the visible button request from its model parameters', () => {
+    const payload = studioAgentPayload({ action: 'rewrite-script', projectId, notes: '加强冲突', ignored: '不传递' }, []);
+    expect(payload.content).toBe('请按我的要求改写这集剧本。');
+    expect(payload.context.modelContext).toContain(`"projectId":"${projectId}"`);
+    expect(payload.context.modelContext).toContain('加强冲突');
+    expect(payload.content).not.toContain('加强冲突');
+    expect(payload.context.modelContext).not.toContain('不传递');
+    expect(() => studioAgentPayload({ action: 'redraw-analyze', projectId }, [])).toThrow('short-drama-video-breakdown');
+    const skills = [{ id: 'redraw', name: '视频转绘', slug: 'video-redraw' }, { id: 'studio', name: '网站操作', slug: 'darl-studio' }];
+    expect(studioAgentPayload({ action: 'storyboard', projectId, projectMode: 'video-redraw' }, skills).context.modelSkillIds).toEqual(['redraw', 'studio']);
+    expect(studioAgentPayload({ action: 'storyboard', projectId, projectMode: 'script' }, skills).context.modelSkillIds).toEqual([]);
   });
   it('refreshes default prompt text without overwriting a custom prompt', () => {
     store.apply('custom-prompt', [{ resource: 'prompts', op: 'update', id: '0-0', version: 1, values: { mode: 'replace', text: '我的大纲提示词' } }]);
@@ -183,14 +190,14 @@ describe('shared short drama business service', () => {
     expect(restored).toMatchObject({ mode: 'replace', text: '我的大纲提示词' });
     expect(restored?.defaultText).toContain('网站上下文');
   });
-  it('rounds shot duration up to supported whole seconds without shortening an overlong clip', () => {
+  it('rounds the authored clip duration up to supported whole seconds without shortening an overlong clip', () => {
     const model = toMediaModels(defaultModelConfiguration()).find(model => model.type === 'video');
     expect(videoDuration(11.1, model)).toBe(12);
     expect(videoDuration(14.8, model)).toBe(15);
     expect(videoDuration(11, model)).toBe(11);
     expect(videoDuration(2.5, model)).toBe(4);
     expect(() => videoDuration(15.1, model)).toThrow('上限 15 秒');
-    expect(() => videoDuration(0, model)).toThrow('有效时长');
+    expect(() => videoDuration(0, model)).toThrow('片段时长');
   });
   it('normalizes URL references, excludes missing pictures and removes copies of linked assets', () => {
     const data = { assets: [{ id: 'character', name: '角色', image: '/api/files/main' }, { id: 'scene', name: '场景', image: '' }] };
@@ -292,25 +299,70 @@ describe('shared short drama business service', () => {
     expect(store.snapshot().shots[0].duration).toBe(3);
     expect(() => store.apply('forbidden', [{ resource: 'shots', id: 'shot-0', op: 'update', version: 1, values: { apiKey: 'invalid' } }])).toThrow('不允许');
   });
-  it('places a shot in its segment through shots.clipId and accepts shot images as media targets', () => {
-    store.apply('clip-for-shot', [{ resource: 'clips', op: 'create', id: 'clip-1', values: { episodeId: 'episode-1', sceneId: 'scene-1', title: '片段 01', shotIds: [] } }]);
+  it('places a shot in its segment through shots.clipId without deriving clip duration', () => {
+    store.apply('clip-for-shot', [{ resource: 'clips', op: 'create', id: 'clip-1', values: { episodeId: 'episode-1', sceneId: 'scene-1', title: '片段 01', shotIds: [], duration: 3 } }]);
     store.apply('shot-clip', [{ resource: 'shots', op: 'create', id: 'shot-1', values: { episodeId: 'episode-1', sceneId: 'scene-1', description: '推门', clipId: 'clip-1' } }]);
+    // shotIds 只是可追溯参考，片段时长保持自身设定，不被镜头时长覆盖。
     expect(store.snapshot().clips[0]).toMatchObject({ shotIds: ['shot-1'], duration: 3 });
     expect(store.snapshot().shots[0].clipId).toBeUndefined();
-    expect(() => store.apply('other-scene', [{ resource: 'shots', op: 'create', id: 'shot-2', values: { episodeId: 'episode-1', sceneId: 'scene-2', description: '走廊', clipId: 'clip-1' } }])).toThrow();
     const shot = store.snapshot().shots.find(item => item.id === 'shot-1')!;
     expect(store.mediaTarget({ resource: 'shots', id: 'shot-1', version: shot._version, field: 'image' }, 'image')).toMatchObject({ resource: 'shots', field: 'image' });
     expect(() => store.mediaTarget({ resource: 'shots', id: 'shot-1', version: shot._version, field: 'videos' }, 'video')).toThrow();
   });
-  it('persists sort order, derives clip duration, releases deleted shots and protects cross-scene associations', () => {
+  it('persists sort order, keeps the authored clip duration, and releases deleted shots only in shotIds', () => {
     store.apply('shots', shots(3));
-    store.apply('clip', [{ resource: 'clips', op: 'create', id: 'clip-1', values: { episodeId: 'episode-1', sceneId: 'scene-1', shotIds: ['shot-0', 'shot-1'], duration: 6 } }]);
+    store.apply('clip', [{ resource: 'clips', op: 'create', id: 'clip-1', values: { episodeId: 'episode-1', sceneId: 'scene-1', shotIds: ['shot-0', 'shot-1'], duration: 14 } }]);
     store.apply('time', [{ resource: 'shots', op: 'update', id: 'shot-0', version: 1, values: { duration: 7 }, position: 9 }]);
-    expect(store.snapshot().clips[0].duration).toBe(10);
+    // 片段时长由片段自身维护，不随镜头时长变化被求和覆盖。
+    expect(store.snapshot().clips[0].duration).toBe(14);
     expect(store.snapshot().shots.at(-1)?.id).toBe('shot-0');
-    expect(() => store.apply('cross-scene', [{ resource: 'clips', op: 'update', id: 'clip-1', version: 2, values: { sceneId: 'scene-2' } }])).toThrow('本场');
     store.apply('delete-shot', [{ resource: 'shots', op: 'delete', id: 'shot-0', version: 2 }]);
-    expect(store.snapshot().clips[0]).toMatchObject({ shotIds: ['shot-1'], duration: 3 });
+    // 删除镜头只清理失效关联，片段时长保持不变。
+    expect(store.snapshot().clips[0]).toMatchObject({ shotIds: ['shot-1'], duration: 14 });
+  });
+  it('creates and edits redraw clips without requiring shots and persists authored values', () => {
+    store.apply('redraw-mode', [{ resource: 'projects', id: projectId, op: 'update', version: 1, values: { creationMode: 'video-redraw' } }]);
+    store.apply('authored-clip', [{ resource: 'clips', id: 'independent', op: 'create', values: { episodeId: 'episode-1', sceneId: 'scene-1', prompt: '她推门走进房间，说：我回来了。', duration: 13.46 } }]);
+    expect(store.snapshot().clips[0]).toMatchObject({ shotIds: [], duration: 13.46 });
+    store.apply('clip-edit', [{ resource: 'clips', id: 'independent', op: 'update', version: 1, values: { duration: 10.5, prompt: '改为停在门口。' } }]);
+    expect(store.snapshot().shots).toEqual([]);
+    expect(new StudioStore(store.projects).snapshot().clips[0]).toMatchObject({ duration: 10.5, prompt: '改为停在门口。' });
+    for (const duration of [0, -1]) {
+      expect(() => store.apply(`invalid-${duration}`, [{ resource: 'clips', id: 'independent', op: 'update', version: 2, values: { duration } }])).toThrow('片段时长');
+    }
+    expect(store.snapshot().clips[0].duration).toBe(10.5);
+  });
+  it('uses the visible video description for redraw images and ignores hidden blocking text', () => {
+    const clip = { prompt: '女主在餐桌边抬头微笑。', blocking: '过期站位', storyboardPrompt: '过期图片描述' };
+    for (const label of ['分镜图', '故事板', '站位图']) {
+      const prompt = clipImagePrompt(clip, [], [], label);
+      expect(prompt).toContain(clip.prompt);
+      expect(prompt).not.toContain('过期');
+    }
+  });
+  it('keeps legacy unfinished clips from blocking unrelated authoring', () => {
+    store.apply('legacy-clip', [{ resource: 'clips', id: 'legacy', op: 'create', values: { episodeId: 'episode-1', sceneId: 'scene-1' } }]);
+    const legacy = store.snapshot().clips[0];
+    const { id: _id, _version: _version, _position: _position, ...values } = legacy;
+    store.projects.db.prepare("UPDATE studio_records SET data=? WHERE resource='clips' AND id='legacy'").run(JSON.stringify({ ...values, duration: 0, imageSource: 'shots' }));
+    store.apply('new-clip-next-to-legacy', [{ resource: 'clips', id: 'new', op: 'create', values: { episodeId: 'episode-1', sceneId: 'scene-1', duration: 5.5, prompt: '新的可见视频描述' } }]);
+    expect(store.snapshot().clips.find(item => item.id === 'new')).toMatchObject({ duration: 5.5, shotIds: [] });
+    expect(() => store.apply('invalid-new-source', [{ resource: 'clips', id: 'new', op: 'update', version: 1, values: { imageSource: 'shots' } }])).toThrow();
+  });
+  it('only selects voices from visible clip characters, prompt mentions and explicit references', () => {
+    const data = {
+      episodes: [{ id: 'ep', projectId: 'p' }],
+      assets: [
+        { id: 'old', projectId: 'p', name: '旧角色', type: '角色', voiceId: 'old-voice' },
+        { id: 'visible', projectId: 'p', name: '女主', type: '角色', voiceId: 'visible-voice' },
+      ],
+      shots: [{ id: 'source', dialogue: [{ assetId: 'old' }] }],
+      voices: [{ id: 'old-voice' }, { id: 'visible-voice' }, { id: 'explicit' }],
+    };
+    const clip = { episodeId: 'ep', shotIds: ['source'], prompt: '<女主>抬头。', assetIds: [], references: [{ id: 'explicit', kind: 'audio', url: '/voice.mp3' }], disabledVoiceIds: ['explicit'] };
+    expect(clipVoices(clip, data).map((voice: { id: string; enabled: boolean }) => [voice.id, voice.enabled])).toEqual([['visible-voice', true], ['explicit', false]]);
+    expect(clipVoices({ ...clip, prompt: '', references: [] }, data)).toEqual([]);
+    expect(clipVoices({ ...clip, prompt: '', assetIds: ['visible'], references: [] }, data).map((voice: { id: string }) => voice.id)).toEqual(['visible-voice']);
   });
   it('splits source material into scenes by its own headings and flags non-verbatim sentences', () => {
     const source = ['主要人物', 'Chloe：摄影师。', '', '01｜内景｜超市生鲜区｜日', '出场人物：Chloe', '', 'Chloe 推着购物车走走停停。', '', '02｜外景｜校园草坪｜日（七年前回忆）', '', 'May 抬头直视着她。'].join('\n');
@@ -336,7 +388,7 @@ describe('shared short drama business service', () => {
       ...shots(1),
       { resource: 'episodes', op: 'create', id: 'episode-2', values: { projectId, number: 2 } },
       { resource: 'assets', op: 'create', id: 'shared-asset', values: { projectId, name: '纸船', type: '道具', episodeIds: ['episode-1', 'episode-2'] } },
-      { resource: 'clips', op: 'create', id: 'clip-1', values: { episodeId: 'episode-1', sceneId: 'scene-1', shotIds: ['shot-0'], assetIds: ['shared-asset'] } },
+      { resource: 'clips', op: 'create', id: 'clip-1', values: { episodeId: 'episode-1', sceneId: 'scene-1', shotIds: ['shot-0'], duration: 3, assetIds: ['shared-asset'] } },
       { resource: 'films', op: 'create', id: 'film-1', values: { projectId, episodeId: 'episode-1', title: '成片记录', url: '' } },
     ]);
     const before = store.snapshot(), next = structuredClone(before);
@@ -393,21 +445,28 @@ describe('shared short drama business service', () => {
     expect(schema({ requestId: 'invalid-state', changes: [invalid] }).valid).toBe(false);
     expect(() => store.apply('invalid-state', [invalid])).toThrow('assets.variants[0].prompt 类型无效');
   });
-  it('generates characters from visible appearance and selected clothing without narrative, voice or hidden prompts', () => {
-    const asset = { type: '角色', description: 'Sasha 与旧人争执的叙事说明', appearance: '碧绿眼睛，金色短发', costume: '白色卫衣', voiceDescription: '低沉声音', prompt: '旧的隐藏提示词', image: '', variants: [{ id: 'young', description: '19岁，高马尾，灰色卫衣', prompt: '旧的衍生提示词' }] };
+  it('generates characters from the explicit prompt first, falling back to visible appearance and clothing without narrative or voice', () => {
+    const asset = { type: '角色', description: 'Sasha 与旧人争执的叙事说明', appearance: '碧绿眼睛，金色短发', costume: '白色卫衣', voiceDescription: '低沉声音', prompt: '生图提示词：半身镜头，柔和侧光', image: '', variants: [{ id: 'young', description: '19岁，高马尾，灰色卫衣', prompt: '衍生生图提示词：全身，顶光' }] };
     const main = assetImageRequest(asset).prompt;
     const variant = assetImageRequest(asset, { variantId: 'young' }).prompt;
-    expect(main).toContain(asset.appearance);
-    expect(main).toContain(asset.costume);
-    expect(variant).toContain(asset.variants[0].description);
-    expect(variant).not.toContain(asset.costume);
+    // 生图提示词有值时优先，且与视图模板提示词叠加
+    expect(main).toContain(asset.prompt);
+    expect(main).not.toContain(asset.appearance);
+    expect(variant).toContain(asset.variants[0].prompt);
+    expect(variant).not.toContain(asset.prompt);
     for (const prompt of [main, variant]) {
       expect(prompt).not.toContain(asset.description);
       expect(prompt).not.toContain(asset.voiceDescription);
-      expect(prompt).not.toContain(asset.prompt);
-      expect(prompt).not.toContain(asset.variants[0].prompt);
     }
-    expect(() => assetImageRequest({ ...asset, appearance: '', costume: '' })).toThrow('角色外貌');
+    // 生图提示词留空时回退可见的 appearance 与当前服饰
+    const fallbackAsset = { ...asset, prompt: '', variants: [{ ...asset.variants[0], prompt: '' }] };
+    const fallbackMain = assetImageRequest(fallbackAsset).prompt;
+    const fallbackVariant = assetImageRequest(fallbackAsset, { variantId: 'young' }).prompt;
+    expect(fallbackMain).toContain(asset.appearance);
+    expect(fallbackMain).toContain(asset.costume);
+    expect(fallbackVariant).toContain(asset.variants[0].description);
+    expect(fallbackVariant).not.toContain(asset.costume);
+    expect(() => assetImageRequest({ ...fallbackAsset, appearance: '', costume: '' })).toThrow('角色生图提示词');
   });
   it('continues variants after an active main job without duplicating active variants or standalone images', () => {
     const jobs = new MediaJobStore(join(directory, 'data.sqlite'), files);

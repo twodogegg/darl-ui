@@ -21,11 +21,11 @@ export const totalDuration = (shots) => Math.round(shots.reduce((sum, shot) => s
 export const hasScene = (sceneId) => Boolean(sceneId)
 export function videoDuration(seconds, model) {
   const rounded = Math.ceil(seconds)
-  if (!Number.isFinite(rounded) || rounded <= 0) throw new Error('请关联有效时长的分镜')
+  if (!Number.isFinite(rounded) || rounded <= 0) throw new Error('请填写大于 0 的片段时长')
   const choices = model ? durations(model).filter(Number.isInteger).sort((a, b) => a - b) : []
   if (!choices.length) return rounded
   const supported = choices.find(value => value >= rounded)
-  if (supported === undefined) throw new Error(`片段时长超过模型上限 ${choices.at(-1)} 秒，请调整分镜组合`)
+  if (supported === undefined) throw new Error(`片段时长超过模型上限 ${choices.at(-1)} 秒，请缩短片段或拆分`)
   return supported
 }
 export { referenceKey, assetMentionCandidates }
@@ -52,7 +52,7 @@ export function clipMediaReferences(clip, data) {
   const images = [...new Map([...imageRefs, ...additional.filter(ref => ref.kind === 'image')].map(ref => [referenceKey(ref), ref])).values()]
   return { assets, additional, images, frames: frames.filter(frame => !assets.some(asset => asset.image && referenceKey(asset.image) === referenceKey(frame))) }
 }
-/** 视频制作使用片段自己的分镜图，或直接使用本片段镜头分镜图。 */
+/** 视频制作使用片段当前分镜图或页面所选参考素材。 */
 export function videoImageReferences(clip, references, mode, shots = []) {
   if (mode === '分镜图') return clip?.image ? [{ id: `${clip.id}:storyboard`, name: '分镜图', kind: 'image', url: clip.image }] : []
   return references?.images || []
@@ -96,7 +96,6 @@ export function clipVoices(clip, data) {
   const characterIds = new Set([
     ...(clip.assetIds || []),
     ...mentioned.filter(asset => asset.type === '角色').map(asset => asset.assetId),
-    ...data.shots.filter((shot) => (clip.shotIds || []).includes(shot.id)).flatMap((shot) => (shot.dialogue || []).map((line) => line.assetId)),
   ])
   const characters = data.assets.filter((asset) => characterIds.has(asset.id) && asset.type === '角色')
   return data.voices.filter((voice) => characters.some((asset) => asset.voiceId === voice.id) || references.some((ref) => ref.id === voice.id)).map((voice) => ({
@@ -130,6 +129,7 @@ export function clipPromptFromDescription(clip) {
 }
 /** 片段层图片提示词：参考片段内镜头内容整理，但不依赖镜头是否已经出图。 */
 export function clipImagePrompt(clip, shots, scenes = [], label = '') {
+  if (!shots.length) return [label, clip?.prompt?.trim()].filter(Boolean).join('\n\n')
   return [
     ...(label ? [label] : []),
     clip?.blocking && `初始站位与状态：${clip.blocking}`,

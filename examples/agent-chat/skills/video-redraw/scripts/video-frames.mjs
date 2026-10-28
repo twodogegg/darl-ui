@@ -12,7 +12,7 @@ try { sharp = createRequire(import.meta.url)('sharp'); }
 catch { sharp = createRequire(resolve(process.cwd(), 'package.json'))('sharp'); }
 const execute = promisify(execFile);
 export const FRAMES_PER_SHEET = 12;
-export const REDRAW_LIMITS = { maxBytes: 50 * 1024 * 1024, maxDuration: 120, maxShots: 40 };
+export const REDRAW_LIMITS = { maxBytes: 300 * 1024 * 1024, maxDuration: 300, maxShots: 160 };
 
 export async function probeVideoFile(input, signal) {
   const { stdout } = await execute('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', input], { signal, timeout: 180_000, maxBuffer: 2_000_000 });
@@ -24,15 +24,15 @@ export async function probeVideoFile(input, signal) {
 
 /** Shared website / standalone preparation: cuts, one-second samples and short-shot evidence. */
 export async function prepareVideoFrames(input, outputDirectory, signal) {
-  if ((await stat(input)).size > REDRAW_LIMITS.maxBytes) throw new Error('原视频不能超过 50 MB');
+  if ((await stat(input)).size > REDRAW_LIMITS.maxBytes) throw new Error('原视频不能超过 300 MB');
   const info = await probeVideoFile(input, signal);
-  if (info.duration > REDRAW_LIMITS.maxDuration) throw new Error('第一版原视频最长 120 秒');
+  if (info.duration > REDRAW_LIMITS.maxDuration) throw new Error('第一版原视频最长 300 秒');
   const { stderr } = await execute('ffmpeg', ['-hide_banner', '-i', input, '-an', '-vf', 'scdet=threshold=10', '-f', 'null', '-'], { signal, timeout: 180_000, maxBuffer: 2_000_000 });
   const candidates = [...stderr.matchAll(/lavfi\.scd\.time:\s*([\d.]+)/g)].map(match => Number(match[1]));
   const points = [0];
   for (const time of candidates) if (time - points.at(-1) >= 0.15 && info.duration - time >= 0.15) points.push(time);
   points.push(info.duration);
-  if (points.length - 1 > REDRAW_LIMITS.maxShots) throw new Error('检测到超过 40 个镜头，请先裁剪原视频');
+  if (points.length - 1 > REDRAW_LIMITS.maxShots) throw new Error(`检测到超过 ${REDRAW_LIMITS.maxShots} 个镜头，请先裁剪原视频`);
   const intervals = points.slice(0, -1).map((start, index) => ({ start, end: points[index + 1] }));
   const frameInterval = 1 / (info.fps || 24);
   const times = Array.from({ length: Math.floor(Math.max(0, info.duration - frameInterval)) + 1 }, (_, second) => second);
@@ -56,7 +56,7 @@ export async function prepareVideoFrames(input, outputDirectory, signal) {
  */
 export async function extractVideoFrames(input, outputDirectory, times, signal) {
   signal.throwIfAborted();
-  if (!Array.isArray(times) || !times.length || times.length > 160 || times.some(time => !Number.isFinite(time) || time < 0)) throw new Error('抽帧时间须为 1–160 个非负秒数');
+  if (!Array.isArray(times) || !times.length || times.length > 400 || times.some(time => !Number.isFinite(time) || time < 0)) throw new Error('抽帧时间须为 1–400 个非负秒数');
   await mkdir(outputDirectory, { recursive: true });
   const root = await mkdtemp(join(outputDirectory, 'frames-'));
   const ordered = [...new Set(times)].sort((a, b) => a - b);

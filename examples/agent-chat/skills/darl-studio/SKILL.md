@@ -16,11 +16,11 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 | 1. 小说/原文 → 改编大纲 | `short-drama-outline`（AI 短剧改编大纲） | `projects.outline`（含 `adaptation` 改编幅度、`props` 关键叙事道具）、`projects.requirements` |
 | 2. 大纲 → 影视剧本 | `short-drama-screenplay`（AI 短剧影视剧本） | `episodes.script` 与 `episodes.scenes[].content`（见“剧本与场次写入”） |
 | 3. 大纲+剧本 → 美术资产 | `short-drama-asset-extraction`（AI 短剧影视资产提取） | `assets`：角色、场景、道具的 description、appearance、costume、prompt 与 `variants` |
-| 4. 分镜与视频制作 | `video-prompt-writer`（通用视频提示词编写） | `shots`（景别、运镜、切镜、画面、对白、时长、分镜图）、`clips.blocking` 片段站位描述、`clips.storyboardPrompt`、`clips.blockingPrompt`、`clips.prompt`，并生成站位图、分镜图与视频 |
+| 4. 分镜与视频制作 | `video-prompt-writer`（通用视频提示词编写） | `clips.prompt`（完整视频描述）、`clips.duration`、`assetIds`、`references`，按需生成片段图片与视频 |
 
 流程约束：
 
-- **上游确认后进下一阶段**：改编骨架与分集梗概经用户确认后才写剧本；已确认的大纲和剧本共同作为资产提取依据；资产就绪后在“视频制作”页编写镜头并组成片段。
+- **上游确认后进下一阶段**：改编骨架与分集梗概经用户确认后才写剧本；已确认的大纲和剧本共同作为资产提取依据；资产就绪后在“视频制作”页编写片段视频描述。
 - **阶段产物落库才算完成**：每阶段用编辑工具把正文写入对应资源，只在聊天输出不算写入；保存后按 ID 回读核对再报告完成。
 - **创作与操作分工**：站内创作 Skill 决定各阶段正文写法；本 Skill 只负责把内容完整写入网站并维持字段分工（见下文各章节）。
 - 视频转绘项目（`creationMode=video-redraw`）不走此流程，按“视频转绘”章节和 `video-redraw` Skill 操作。
@@ -35,7 +35,7 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 | 剧本与场次 | `episodes` | 剧集、`script`、嵌套 `scenes` |
 | 美术资产 | `assets` | 角色、场景、道具、`variants`、单项资产 `prompt` |
 | 镜头（分镜） | `shots` | 景别、运镜、切镜方式、画面、对白、音效、时长、镜头分镜图、`clipId` |
-| 视频片段 | `clips` | `shotIds`、初始站位 `blocking`、分镜图/故事板/站位图及历史、片段 `prompt`、视频历史 |
+| 视频片段 | `clips` | 视频描述 `prompt`、独立时长 `duration`、资产和参考、片段图片及视频历史 |
 | 成片 | `films` | 成片记录 |
 | 操作记录 | `history` | 项目操作记录 |
 | 素材库 | `library`、`folders` | 素材和目录 |
@@ -45,17 +45,15 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 剧本项目的 `projects.adaptation` 保存改编幅度（`忠实` / `抽核` / `借壳`）；项目 `outline` 另外包含 `props:[{id,name,purpose,involvement}]`，只记录确实影响剧情的关键叙事道具。
 
-分镜与视频制作已合并到“视频制作”页面：没有独立分镜表，镜头（`shots`）作为片段内的分镜记录，通过 `clips.shotIds` 组合成一条视频片段，同页完成镜头编辑、镜头/片段分镜图与整段视频生成。内容层级为 剧本 → 场次 → 视频片段 → 镜头。
+视频制作以视频片段为单位。每段的镜头顺序、初始站位、动作、运镜、切镜、对白、音效和时间安排统一写在页面可见的 `clips.prompt`（视频描述）中。
 
-- `clips.blocking`：片段开始时的人物位置、朝向、道具与相机状态文本，可据此整理 `clips.storyboardPrompt` 与 `clips.prompt`。
-- 片段视频描述 `clips.prompt`、片段分镜图提示词 `clips.storyboardPrompt`、镜头分镜图提示词 `shots.storyboardPrompt` 分别维护，互不覆盖。
-- 片段自己的图片分三类，各自独立保存与切换：分镜图 `clips.image`/`imageHistory`、故事板 `clips.storyboardImage`/`storyboardHistory`、站位图 `clips.blockingImage`/`blockingHistory`；提示词字段分别为 `clips.storyboardPrompt`（分镜图与故事板）、`clips.blockingPrompt`（站位图），留空时按片段镜头与站位内容整理。镜头分镜图归属镜头（`shots.image`/`imageHistory`）。视频制作时用 `clips.imageSource` 选择图片来源：`clip`（片段自己的分镜图）或 `shots`（直接使用片段内各镜头分镜图，按镜头顺序）。
-- 片段时长由所属镜头时长合计派生，单条视频片段最多 15 秒（12 秒不是硬性下限）。不要为了凑时长改写镜头原始时长；超过上限时提示调整镜头或拆分片段。
-- 同一镜头只能属于一个片段。写入镜头时可传 `clipId` 把它加入对应片段（等价于维护 `clips.shotIds`），保持 `clipId` 不变不会调整现有组合。
-- 景别、运镜、切镜方式是三个独立镜头字段，不合并进 `description`；首镜切镜为“—”。
-- 景别与切镜使用固定选项：景别 `远景/全景/中远景/中景/中近景/近景/特写/大特写/空镜`；切镜 `—/硬切/叠化/淡入/淡出/闪白/划像/匹配剪辑/跳切`。运镜 `camera` 是自由文本框，不受选项限制：可写单个标准写法（`固定/推近/拉远/摇镜/移镜/跟拍/升降/环绕/手持/变焦`），也可写带方向、速度、起止点的复合描述，例如“缓慢推近，最后停在手背特写”“手持跟随，轻微晃动”。景别、切镜写入时从对应选项中选择；浅景深、过肩等构图细节写进画面描述。旧数据中的自由描述保留原值，页面照常显示。
+- `clips.prompt` 是视频生成的内容依据；`clips.duration` 是独立维护的计划秒数，必须大于 0，单条片段最多 15 秒。生成请求按模型支持的时长向上取整；不改写片段和来源镜头凑整秒，超过上限先缩短或拆分。
+- `clips.assetIds`、描述中的 `<资产名称>` / `<资产名称|形态名称>` 与 `clips.references` 决定参考素材。音色来自片段关联角色、描述中引用的角色和显式音色引用，`disabledVoiceIds` 保存取消勾选项；不从历史 shot 对白补入角色音色。
+- `shots`、`clips.shotIds`、`blocking`、`sourceSignature` 仅保留历史资料。已有 `shotIds` 不参与时长、描述、图片或音色推导；创建或编辑片段不需要新增、同步或修改 shots，不能用隐藏镜头覆盖用户的视频描述。
+- 片段图片分为分镜图 `image/imageHistory`、故事板 `storyboardImage/storyboardHistory`、站位图 `blockingImage/blockingHistory`。转绘图片统一依据当前视频描述生成，旧 `storyboardPrompt`、隐藏站位文本不覆盖它；原图和各自历史继续保留。视频的“分镜图”方式使用片段当前分镜图，“参考生成”方式使用页面所选的参考素材。
+- 来源镜头仍可通过查询工具读取，其来源时间和原片证据用于追溯。不要为了制作目标片段把它们再写成一套隐藏的目标分镜。
 
-视频转绘项目与剧本项目共用这些资源。`projects.creationMode` 为 `script`（默认）或 `video-redraw`。`targetRegion`（`japan` / `western`）、`targetLanguage`（`ja` / `en`）、`sourceVideo` 仅属于视频转绘项目；剧本项目查询不返回这些字段，也不接受写入，不得据此推断改编地区或语言。转绘项目才使用默认 `japan / ja`，或显式选择 `western / en`。`sourceVideo` 保存原视频 `fileId/url/name`、真实 `duration/width/height/fps/hasAudio`、`segments`（每项 `id/start/end/frames`）；每帧是 `fileId/time/url`。先上传 MP4，再保存项目引用，用转绘工具取得真实元数据，不能编造时长或抽帧结果。
+视频转绘项目与剧本项目共用这些资源。资产属于项目并跨集共用；分析新集前读取已有资产，优先引用真实 ID，不覆盖已有资产设定。`projects.creationMode` 为 `script`（默认）或 `video-redraw`。`targetRegion`（`japan` / `western`）、`targetLanguage`（`ja` / `en`）属于视频转绘项目，原片优先保存在 `episodes.sourceVideo`，旧项目的第一集兼容读取 `projects.sourceVideo`；剧本项目查询不返回这些字段，也不接受写入，不得据此推断改编地区或语言。转绘项目才使用默认 `japan / ja`，或显式选择 `western / en`。`sourceVideo` 保存原视频 `fileId/url/name`、真实 `duration/width/height/fps/hasAudio`、`segments`（每项 `id/start/end/frames`）；每帧是 `fileId/time/url`。先上传 MP4，再保存对应剧集引用，用转绘工具取得真实元数据，不能编造时长或抽帧结果。
 
 `assets.source` 与 `shots.source` 保存原片 `fileId/start/end/frames`，可含原始 `name/description/dialogue/notes/confirmed`；镜头的 `source.segmentId` 指向原片候选镜头 ID，业务镜头 ID 按项目隔离，不与 segment ID 混用。目标设定继续使用现有资产与镜头字段。`shots.assetIds` 为本镜人物、场景、道具的稳定关联。原片与目标版本分别保留；资产必须有原片依据。完整字段和嵌套类型仍以 describe 为准。
 
@@ -117,19 +115,19 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 项目创建后返回实际编号，后续查询和编辑使用返回值。角色对白的 `assetId` 引用角色资产；镜头与片段引用真实剧集和场次。
 
-### 镜头与视频片段
+### 视频片段
 
-镜头按场次编写，再组合为片段：新建片段时传 `episodeId`、`sceneId`、`title`、`shotIds`（同一场次、未被其他片段占用的镜头）和派生 `duration`（镜头时长合计）。编写或修改镜头时保持景别、运镜、切镜独立，对白按发声顺序写入 `dialogue`；镜头分镜图写入 `shots.image`，片段自己的分镜图写入 `clips.image` 与 `imageHistory`。只更新镜头时不需要动片段；只有需要把镜头加入某片段时才写 `shots.clipId`。保存后用 `builtin_read_studio` 按 ID 查询结果；版本冲突时重读当前记录。
+创建 `clips` 时传真实的 `episodeId`、`sceneId`、`title`、`prompt`、`duration`，并填写所需 `assetIds` 和 `references`；`shotIds` 可省略或留空。更新仅提交改变字段并传最新版本。镜头画面、动作、切镜与对白直接编辑视频描述，不另建或同步隐藏分镜。修改 `duration` 会真实保存，来源镜头改变或删除不会重算片段时长。
 
-片段制作顺序（第四阶段，按 `video-prompt-writer` 整理文字、按本 Skill 落库）：先逐镜编写 `shots`，再据片段首帧状态整理站位描述 `clips.blocking`，据此生成站位图（`clips.blockingPrompt` → `blockingImage`）与分镜图（`clips.storyboardPrompt` → `image`，或逐镜 `shots.storyboardPrompt` → `shots.image`），最后按镜头顺序整理片段视频描述 `clips.prompt` 并提交视频任务；用 `clips.imageSource` 决定视频生成引用片段分镜图还是各镜头分镜图。
+先编写视频描述和计划时长、准备目标资产与参考，再按需生成片段图片与视频。保存后按 ID 回读 prompt、duration、素材引用，确认没有覆盖用户最新内容；生成任务使用最新片段版本作为 studioTarget。不要把任务提交当成生成完成。
 
 ### 美术资产与衍生形态
 
 角色、场景、道具共用 `assets`。`description` 是身份/用途/剧情说明，不参与生图。
 
-场景、道具的主形象完整生图提示词保存在 `prompt`，各衍生形态保存在 `variants[].prompt`，切换后页面显示并编辑该形态的提示词。生图必须填写当前形态的 prompt；留空会报错，不回退到 description、appearance、costume 或主形象 prompt。提示词不叠加其他形态设定，须写全材质、空间等一致性要求。
+角色、场景、道具的主形象完整生图提示词保存在 `prompt`，各衍生形态保存在 `variants[].prompt`，切换后页面显示并编辑该形态的提示词。场景、道具生图必须填写当前形态的 prompt；留空会报错，不回退到 description、appearance、costume 或主形象 prompt。角色填写 `prompt` 后优先用于生成；未填则回退可见的 appearance 与当前服饰（主形象 costume、衍生形态 description）。角色的 description 和 voiceDescription 始终不参与生图。提示词不叠加其他形态设定，须写全材质、空间等一致性要求。
 
-角色页不展示常规“角色生图提示词”输入框。默认按可见的 appearance 与当前服饰（主形象 costume、衍生形态 description）拼装请求，排除人物剧情说明 description 和声音 voiceDescription；隐藏的已有 prompt 不覆盖这些可见设定。需要特殊指令时选“自定义”视图，使用用户明确填写的自定义提示词。修改角色默认形象时更新外貌与服饰字段，不能只改 prompt。
+最终生图提示词由“项目全局风格 + 生图模板提示词（当前视图方案）+ 生图提示词”在生成时自动拼装，无需把风格或视图模板写进 `prompt`。修改角色默认形象时优先更新外貌与服饰字段，prompt 用于补充镜头/打光/构图等额外生图指令。
 
 
 更新 variants 时保留其他形态及原有 id、image、history，仅修改目标形态所需字段；保存后按 ID 回读并核对目标形态的 prompt。主形象与衍生图仍通过各自的 image、history 和生成目标 variantId 关联。
@@ -167,8 +165,8 @@ H3 视频模型支持 `minimax-h3-flash` 与 `minimax-h3-standard`；视频清�
 
 | Tool | 用法 |
 | --- | --- |
-| `builtin_read_video_redraw` | `describe=true` 查询能力、地区与限制；否则以 `projectId` 查询原片、持久化任务、草稿和错误 |
-| `builtin_edit_video_redraw` | `projectId`、`action`，其他参数依操作及当前 schema |
+| `builtin_read_video_redraw` | `describe=true` 查询能力、地区与限制；否则以 `projectId` 和 `episodeId` 查询本集原片、持久化任务、草稿和错误 |
+| `builtin_edit_video_redraw` | `projectId`、`episodeId`、`action`，其他参数依操作及当前 schema；省略 episodeId 兼容第一集 |
 
 | action | 参数与行为 |
 | --- | --- |
@@ -184,7 +182,7 @@ H3 视频模型支持 `minimax-h3-flash` 与 `minimax-h3-standard`；视频清�
 
 提交后读取任务真实状态：`queued/running/completed/failed/cancelled/interrupted`；`draft`、`segments`、`transcript` 为已完成阶段。提交返回任务不代表完成。原样重试沿用 requestId；继续失败/取消/中断任务用新 requestId 和 `resumeJobId`，项目设置、模型和区间须匹配，已完成分析与转写可复用。项目内同时一个转绘任务，全站同时两个。
 
-视频转绘创建页合并选择地区/语言，项目创建后自动提交 prepare，先查询当前任务和segments再决定是否操作；原片页只读展示目标地区/语言。首版原片仅 MP4、50 MB、120 秒、自动检测最多40镜头。无声视频跳过转写；有声视频默认用现有 Fish 配置获取真实时间戳，缺配置/调用失败如实报告。仅画面分析不会推断对白。H3视频生成已接入图片、视频和音频参考；原片片段只有实际放入 referenceVideos 才参与生成，音色试听使用 referenceAudios。输入支持不等于连续动作逐帧还原或精确口型，需检查实际结果。
+视频转绘创建页选择地区/语言后直接启动拉片与对白整理，并进入对白对照页；先查询当前任务和 segments 复用已有结果，失败在对白页重试。首版原片仅 MP4、300 MB、300 秒、自动检测最多160镜头。无声视频跳过转写；有声视频默认用现有 Fish 配置获取真实时间戳，缺配置/调用失败如实报告。仅画面分析不会推断对白。H3视频生成已接入图片、视频和音频参考；原片片段只有实际放入 referenceVideos 才参与生成，音色试听使用 referenceAudios。输入支持不等于连续动作逐帧还原或精确口型，需检查实际结果。
 
 `prepare` 已使用脚本一次解码全片画面，每秒抽一帧并按切镜归组；没有命中采样点的短镜头会补一张镜头内参考帧。`analyze` 每批最多4镜头，将所有参考帧每12张拼成一页带帧号和时间的联系表，多页可一起发给模型，并传入稳定的真实镜头映射和相交转写，无需另传拼图参数或重复运行脚本。离线使用随 `video-redraw` 打包的抽帧脚本时，先加载该 Skill 并读取 `references/source-analysis.md`；本地 `sample-N` 分组不是网站真实镜头 ID。
 

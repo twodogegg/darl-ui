@@ -467,3 +467,60 @@
   .segment-history article { flex: 0 0 150px; }
   .production-unassigned-list article { flex: 0 0 200px; }
 }
+
+.dialogue-list { display: grid; gap: 16px; padding: 20px; }
+.dialogue-card { padding: 18px; border: 1px solid var(--br-border); border-radius: 8px; background: var(--br-surface); }
+.dialogue-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--br-text-secondary); font-size: 12px; }
+.dialogue-meta strong { color: var(--br-accent); font-size: 16px; }
+.dialogue-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 12px; }
+.dialogue-columns h3 { font-size: 14px; margin: 0 0 8px; }
+.dialogue-field { display: grid; gap: 4px; margin-bottom: 8px; color: var(--br-text-secondary); font-size: 12px; }
+.dialogue-field input, .dialogue-field textarea { width: 100%; }
+.dialogue-field textarea { min-height: 70px; resize: vertical; }
+@media (max-width: 700px) { .dialogue-columns { grid-template-columns: 1fr; } }
+
+@scope (.rn-studio) {
+/* Video workbench: edit in the center, preview on the right, select clips below. */
+.production-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; align-items: start; padding-bottom: 165px; }
+.production-mobile-picker { display: none; }
+.production-list { position: fixed; top: auto; z-index: 5; left: 215px; right: 0; bottom: 0; display: flex; align-items: stretch; gap: 12px; max-height: 150px; overflow: auto; padding: 10px 16px; border: 0; border-top: 1px solid var(--br-border); background: var(--br-surface); }
+.production-list h3 { flex: 0 0 auto; margin: 4px 4px 0 0; }
+.production-scene-group { display: flex; flex: 0 0 auto; align-items: stretch; gap: 8px; min-width: 0; }
+.production-scene-group + .production-scene-group { margin: 0; padding: 0 0 0 12px; border: 0; border-left: 1px solid var(--br-border); }
+.production-scene-title { justify-content: center; width: 110px; margin: 0; }
+.production-list-items { flex-direction: row; gap: 8px; margin: 0; overflow: visible; }
+.production-clip { width: 145px; flex: 0 0 145px; gap: 4px; padding: 8px 10px; }
+.production-clip strong { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.production-scene-group > .btn { width: auto; min-width: 90px; }
+.production-center { grid-column: 1; grid-row: 1; }
+.production-settings { grid-column: 2; grid-row: 1; position: sticky; top: 60px; max-height: calc(100dvh - 225px); overflow-y: auto; margin: 0; border: 0; border-left: 1px solid var(--br-border); border-radius: 0; }
+.production-video { max-height: 280px; }
+.production-video-empty { aspect-ratio: auto; min-height: 70px; border: 1px dashed var(--br-border); border-radius: 6px; }
+.production-preview-media .toolbar { gap: 6px; }
+.production-preview-media .toolbar small { display: none; }
+.production-preview-media .btn, .production-preview-media .file-btn { min-height: 30px; padding: 5px 8px; font-size: 11px; }
+.production-generate { margin: 16px 0; }
+.production-advanced { border-top: 1px solid var(--br-border); padding-top: 12px; }
+.production-advanced > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.production-advanced > summary span { display: block; padding: 5px 0 12px; color: var(--br-text-secondary); font-size: 11px; font-weight: 400; }
+.production-center .production-description { margin-bottom: 20px; }
+.production-center .production-description > .asset-mention-text { max-height: 160px; }
+.production-media-actions { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+.production-media-actions details { position: relative; }
+.production-media-actions summary { min-height: 30px; padding: 7px 9px; border: 1px solid var(--br-border); border-radius: 6px; cursor: pointer; font-size: 11px; list-style: none; }
+.production-media-actions details .toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+@media (max-width: 1000px) {
+  .production-layout { grid-template-columns: minmax(0, 1fr) 300px; }
+}
+@media (max-width: 760px) {
+  .production-layout { display: flex; flex-direction: column; padding-bottom: 0; }
+  .production-list { position: static; order: -1; display: flex; width: 100%; max-height: none; overflow-x: auto; border-top: 0; border-bottom: 1px solid var(--br-border); }
+  .production-list h3 { display: none; }
+  .production-scene-title { width: 90px; }
+  .production-center, .production-settings { width: 100%; }
+  .production-settings { position: static; max-height: none; margin: 0; border-left: 0; }
+}
+
+}
+
+@media (min-width: 761px) { .with-agent .rn-studio .production-list { right: 450px; } }

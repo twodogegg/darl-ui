@@ -30,7 +30,7 @@ export function Projects() {
         .filter((e) => e.projectId === deleting.id)
         .map((e) => e.id)
       d.projects = d.projects.filter((p) => p.id !== deleting.id)
-      for (const key of ['episodes', 'assets', 'films', 'history'])
+      for (const key of ['episodes', 'assets', 'films', 'history', 'dialogues'])
         d[key] = d[key].filter((x) => x.projectId !== deleting.id)
       d.clips = d.clips.filter((s) => !episodes.includes(s.episodeId))
       d.shots = d.shots.filter((s) => !episodes.includes(s.episodeId))
@@ -67,7 +67,7 @@ export function Projects() {
       <div className="projects-grid">
         {projects.map((p) => (
           <article className="project-card" key={p.id}>
-            <Link to={`/${p.creationMode === 'video-redraw' ? 'source' : 'outline'}?projectId=${encodeURIComponent(p.id)}`}>
+            <Link to={`/${p.creationMode === 'video-redraw' ? 'dialogue' : 'outline'}?projectId=${encodeURIComponent(p.id)}`}>
               <>{p.cover ? <img loading="lazy" className="project-card-cover" src={imageUrl(p.cover, 320)} alt={p.title} /> : <div className="studio-cover-empty">未上传封面</div>}</>
               <div className="project-card-body">
                 <h2>{p.title}</h2>

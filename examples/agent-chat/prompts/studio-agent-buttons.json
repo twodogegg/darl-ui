@@ -1,0 +1,115 @@
+{
+  "outline": {
+    "visibleMessage": "请帮我生成或完善项目大纲。",
+    "hiddenMessage": "结合当前工作台正在查看的项目和用户要求生成或完善项目大纲。项目编号从当前页面的网站上下文获取，不要猜测。先通过工作台工具读取项目、已有大纲和相关剧集。读取项目的 adaptation 作为改编幅度（忠实、抽核或借壳）并据此控制取舍。sourceScript 是用户提交的原始素材，不是任何一集的剧本，不得直接复制为剧集正文；按大纲规划分集后再创建剧集。保留原文已有的人物关系与关键情节，不凭空增加线索；在 outline.props 中只记录确实影响剧情的关键叙事道具，使用 {id,name,purpose,involvement} 结构；检查冲突后实际保存。",
+    "parameters": [
+      "projectId"
+    ],
+    "skills": [],
+    "skillsByProjectMode": {
+      "video-redraw": [
+        "video-redraw",
+        "darl-studio"
+      ]
+    }
+  },
+  "build-episodes": {
+    "visibleMessage": "请按原文创建剧集并写入网站。",
+    "hiddenMessage": "先读取项目、原始素材、项目大纲与现有剧集。按计划集数和分集要求把原始素材划成对应集数，每集按原文场景标题拆成场次：地点、内外景、时间沿用原文，正文保留原文叙事与对白，不做未要求的改写与缩写；原文未覆盖的部分留空或明确标注，不编造。用查询工具 describe 核对剧集字段后一次性保存全部剧集，保存后回读集数、场次和字数并如实汇报。",
+    "parameters": [
+      "projectId",
+      "episodes",
+      "notes"
+    ],
+    "skills": [],
+    "skillsByProjectMode": {
+      "video-redraw": [
+        "video-redraw",
+        "darl-studio"
+      ]
+    }
+  },
+  "rewrite-script": {
+    "visibleMessage": "请按我的要求改写这集剧本。",
+    "hiddenMessage": "按用户调整要求改写指定剧集的剧本与场次。先读取最新数据和大纲，保留场次标识及关联；只修改授权范围，实际保存，不改项目大纲。",
+    "parameters": [
+      "projectId",
+      "episodeId",
+      "notes"
+    ],
+    "skills": [],
+    "skillsByProjectMode": {
+      "video-redraw": [
+        "video-redraw",
+        "darl-studio"
+      ]
+    }
+  },
+  "storyboard": {
+    "visibleMessage": "请帮我编写或完善这集的视频片段描述。",
+    "hiddenMessage": "读取指定项目、剧集、场次、已有视频片段和资产；视频制作直接维护 clips.prompt（完整视频描述）、clips.duration（片段时长）、assetIds 与 references。把初始站位、逐镜画面与动作、景别运镜切镜、对白音效和时间安排统一写进 clips.prompt，不再另建或同步隐藏的 shots、blocking 或 sourceSignature。历史 shots 仅供查阅原片依据，不修改来源镜头凑时长。片段时长大于 0 且最多 15 秒，可含小数；生成请求按模型支持的时长向上取整，不能为整秒改写镜头时长。创建片段无需 shotIds，保留已有片段 ID、选用图片视频、历史版本和参考素材。先 describe 确认字段，按最新版本保存并回读验证。视频转绘按目标地区语言整理，保留用户最新描述与改编要求，不自动用原片镜头覆盖。\n\n资产引用协议：模型读取和保存资产引用时必须使用规范尖括号标记。基础资产使用 <资产名称>，具体变装、年龄或衍生形态使用 <资产名称|形态名称>；竖线左侧保持主体名称，右侧保持形态名称。不要只写页面显示的 @ 标签，不要把形态降级成基础资产。分镜和视频提示词中的角色、场景、道具、已启用参考图都要引用真实项目资产；无法确认资产时保留普通文字并提示确认。",
+    "parameters": [
+      "projectId",
+      "episodeId"
+    ],
+    "skills": [],
+    "skillsByProjectMode": {
+      "video-redraw": [
+        "video-redraw",
+        "darl-studio"
+      ]
+    }
+  },
+  "audio": {
+    "visibleMessage": "请帮我处理音频需求。",
+    "hiddenMessage": "根据描述生成所需音乐或音效。先确认当前工具是否提供真实的音频生成能力；若没有，明确说明尚未接入并停止，不能用示例文件代替。仅在取得真实结果后保存到音频库。",
+    "parameters": [
+      "projectId",
+      "type",
+      "notes"
+    ],
+    "skills": [],
+    "skillsByProjectMode": {
+      "video-redraw": [
+        "video-redraw",
+        "darl-studio"
+      ]
+    }
+  },
+  "voice": {
+    "visibleMessage": "请帮我配置这个角色的音色。",
+    "hiddenMessage": "根据用户选定方式配置角色音色。上传音频仅作为参考，不得冒充完成音色克隆；先确认工具是否具备真实设计或克隆能力，没有则明确说明。已有音色关联通过业务工具保存。",
+    "parameters": [
+      "projectId",
+      "assetId",
+      "assetName",
+      "provider",
+      "mode",
+      "name",
+      "description",
+      "referenceAudio"
+    ],
+    "skills": [],
+    "skillsByProjectMode": {
+      "video-redraw": [
+        "video-redraw",
+        "darl-studio"
+      ]
+    }
+  },
+  "redraw-analyze": {
+    "visibleMessage": "请根据原片拉片并整理原声对白。",
+    "hiddenMessage": "先加载 short-drama-video-breakdown、fish-audio-api 和 darl-studio。按按钮的 projectId、episodeId 读取现有任务与项目设置。用视频转绘工具的 breakdown 只做 PySceneDetect 切镜和拼图，transcribe 只调用 Fish 转写；先复用已完成结果，分别分页读取结果。由你查看实际拼图并根据 short-drama-video-breakdown 进行必要补证、记录中文原片镜头；根据 Fish 原声转写结合上下文校订、标记说话人疑点并翻译为目标语言。通过工作台现有业务工具保存结果，不能把背景操作或仅提交任务说成完成。不要生成目标语言的画面描述。失败时保留结果并报告。",
+    "parameters": [
+      "projectId",
+      "episodeId",
+      "sourceLanguage",
+      "requestId"
+    ],
+    "skills": [
+      "short-drama-video-breakdown",
+      "fish-audio-api",
+      "darl-studio"
+    ]
+  }
+}

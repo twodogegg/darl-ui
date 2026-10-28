@@ -6,6 +6,7 @@ import Home from './pages/Home'
 import { Projects } from './pages/Projects'
 import Script, { Outline } from './pages/Script'
 import Source from './pages/Source'
+import Dialogue from './pages/Dialogue'
 import Art from './pages/Art'
 import VideoProduction from './pages/VideoProduction'
 import Assets from './pages/Assets'
@@ -57,6 +58,7 @@ function Pages({ onContextChange }) {
     <Route path="/projects/:id" element={<Navigate to="/projects" replace />} />
     <Route path="/outline" element={<Outline key={data.projects.map(item => item.id).join(',')} />} />
     <Route path="/source" element={<Source key={data.projects.map(item => item.id).join(',')} />} />
+    <Route path="/dialogue" element={<Dialogue />} />
     <Route path="/script" element={<Script />} />
     <Route path="/art" element={<Art />} />
     <Route path="/video" element={<VideoProduction />} />

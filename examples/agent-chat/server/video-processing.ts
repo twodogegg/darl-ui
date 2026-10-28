@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { FileStore } from './file-storage';
 import { createFrameSheet, extractVideoFrames, prepareVideoFrames, probeVideoFile, FRAMES_PER_SHEET, REDRAW_LIMITS } from '../../../scripts/video-frames.mjs';
 
@@ -33,7 +35,7 @@ export async function withVideoFiles<T>(files: FileStore, fileIds: string[], fn:
     const paths = [];
     for (const [index, id] of fileIds.entries()) {
       const file = files.get(id);
-      if (!file || file.mimeType !== 'video/mp4' || file.size > 200 * 1024 * 1024) throw new Error('视频文件不存在、类型错误或过大');
+      if (!file || file.mimeType !== 'video/mp4' || file.size > REDRAW_LIMITS.maxBytes) throw new Error('视频文件不存在、类型错误或过大');
       const value = await files.getBytes(id);
       if (!value) throw new Error('视频文件读取失败');
       const path = join(root, `${index}.mp4`);
@@ -70,7 +72,7 @@ export async function analysisFrameSheets(files: FileStore, segments: SourceSegm
 
 export async function prepareVideo(files: FileStore, fileId: string, signal: AbortSignal, onSegment: (segment: SourceSegment) => void) {
   const file = files.get(fileId);
-  if (!file || file.size > REDRAW_LIMITS.maxBytes) throw new Error('原视频不能超过 50 MB');
+  if (!file || file.size > REDRAW_LIMITS.maxBytes) throw new Error('原视频不能超过 300 MB');
   return withVideoFiles(files, [fileId], async ([path], root) => {
     const { segments: sourceSegments, ...info } = await prepareVideoFrames(path, root, signal);
     const segments: SourceSegment[] = [];
@@ -85,6 +87,34 @@ export async function prepareVideo(files: FileStore, fileId: string, signal: Abo
       segments.push(stored); onSegment(stored);
     }
     return { ...info, fileId, url: files.originalUrl(fileId)!, segments };
+  });
+}
+
+/** Original-shot evidence only: PySceneDetect boundaries and one midpoint per shot. */
+export async function prepareBreakdown(files: FileStore, fileId: string, signal: AbortSignal) {
+  return withVideoFiles(files, [fileId], async ([path], root) => {
+    const info = await probeVideo(path, signal);
+    if (info.duration > REDRAW_LIMITS.maxDuration) throw new Error('原视频不能超过 300 秒');
+    await promisify(execFile)('scenedetect', ['-i', path, '-o', root, 'detect-adaptive', 'list-scenes', '--filename', 'shots.csv', '--skip-cuts', '--quiet'], { signal, timeout: 180_000, maxBuffer: 2_000_000 });
+    const rows = (await readFile(join(root, 'shots.csv'), 'utf8')).trim().split(/\r?\n/).slice(1);
+    if (!rows.length || rows.length > REDRAW_LIMITS.maxShots) throw new Error('切镜数量超出支持范围');
+    const shots = rows.map((row, index) => {
+      const columns = row.split(',');
+      const startFrame = Number(columns[1]) - 1, endFrame = Number(columns[4]);
+      const start = Number(columns[3]), end = Number(columns[6]);
+      if (![startFrame, endFrame, start, end].every(Number.isFinite) || startFrame < 0 || endFrame <= startFrame || end <= start) throw new Error('PySceneDetect 输出无效');
+      return { id: `SHOT_${String(index + 1).padStart(4, '0')}`, start, end, startFrame, endFrameExclusive: endFrame, midpointFrame: startFrame + Math.floor((endFrame - startFrame) / 2) };
+    });
+    const extracted = await extractVideoFrames(path, root, shots.map(shot => Math.max(0, (shot.midpointFrame - 0.00001) / info.fps)), signal);
+    const sheets = [];
+    for (let start = 0; start < shots.length; start += 9) {
+      const batch = shots.slice(start, start + 9);
+      const frames = await Promise.all(batch.map(async (shot, i) => ({ image: await readFile(extracted[start + i].path), segmentId: shot.id, frameIndex: 0, time: extracted[start + i].time })));
+      const sheet = await createFrameSheet(frames, signal, shots.map(shot => shot.id));
+      const image = await files.put(sheet.bytes, 'image/jpeg', `拉片总览-${start + 1}.jpg`);
+      sheets.push({ fileId: image.id, url: files.originalUrl(image)!, frames: sheet.frames });
+    }
+    return { sourceFileId: fileId, ...info, detector: 'pyscenedetect-adaptive', timebaseNote: '基于视频帧率计算；可变帧率素材需另核对时间戳', shots, sheets };
   });
 }
 

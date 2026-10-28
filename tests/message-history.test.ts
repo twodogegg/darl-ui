@@ -4,6 +4,14 @@ import { serializable } from '../examples/agent-chat/client/use-chat-sessions';
 import type { AgentSession } from '../src';
 
 describe('tool history sent to the model', () => {
+  it('retains button context and selected skills across a saved conversation', () => {
+    const session: AgentSession = JSON.parse(JSON.stringify(serializable({ id: 'context', title: '原片分析', messages: [{
+      id: 'message', role: 'user', content: '请分析我的原片。', modelContext: '项目参数和执行说明', modelSkillIds: ['video-redraw'],
+    }] })));
+    expect(session.messages[0].content).toBe('请分析我的原片。');
+    expect(messageTextForModel(session.messages[0])).toContain('项目参数和执行说明');
+    expect(session.messages[0].modelSkillIds).toEqual(['video-redraw']);
+  });
   it('keeps selected answers in saved history and follow-up context while omitting ordinary tool payloads', () => {
     const saved: AgentSession = JSON.parse(JSON.stringify(serializable({ id: 'choice', title: '选择功能', messages: [{ id: 'answer', role: 'assistant', content: '', toolCalls: [
       { id: 'choice', appId: 'interaction', appName: '用户交互', toolName: 'question', status: 'success', userInput: { title: '选择功能', questions: [{ id: 'features', label: '功能', type: 'multiple', options: [{ value: 'upload', label: '上传' }] }] }, output: { status: 'answered', answers: { features: ['upload'] } } },

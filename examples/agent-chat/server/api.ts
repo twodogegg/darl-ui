@@ -386,7 +386,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       for await (const chunk of request) {
         const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         size += bytes.length;
-        if (size > 80 * 1024 * 1024) return send(413, { error: '上传内容超过 80MB' });
+        if (size > 320 * 1024 * 1024) return send(413, { error: '上传内容超过 320MB' });
         chunks.push(bytes);
       }
       const form = await new Request('http://localhost/upload', { method: 'POST', headers: { 'Content-Type': type }, body: Uint8Array.from(Buffer.concat(chunks)).buffer as ArrayBuffer }).formData();

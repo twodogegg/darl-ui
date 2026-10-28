@@ -14,12 +14,15 @@ export function assetImageRequest(asset, { variantId = '', view = '', customProm
   }
   const selectedView = !view || view === '按资产默认方案' ? assetViews(asset.type)[0] : view
   if (selectedView === '自定义' && !customPrompt.trim()) throw new Error('请输入自定义提示词')
-  // Narrative descriptions never enter an image request. Characters use their visible visual settings.
+  // 最终生图提示词 = 生图提示词（角色有值优先）+ 生图模板提示词；全局风格由服务端追加。
+  // 角色未填写生图提示词时回退可见的 appearance 与当前服饰（主形象 costume、衍生形态 description），
+  // 叙事描述 description 与声音 voiceDescription 始终不进入生图请求。
+  const characterPrompt = (variant || asset).prompt?.trim() || ''
   const prompt = selectedView === '自定义' ? customPrompt.trim()
     : asset.type === '角色'
-      ? [asset.appearance, variant ? variant.description : asset.costume].filter(value => value?.trim()).join('\n')
+      ? characterPrompt || [asset.appearance, variant ? variant.description : asset.costume].filter(value => value?.trim()).join('\n')
       : (variant || asset).prompt?.trim() || ''
-  if (!prompt.trim()) throw new Error(asset.type === '角色' ? '请填写角色外貌或当前服饰设定' : `请填写${asset.type}生图提示词`)
+  if (!prompt.trim()) throw new Error(asset.type === '角色' ? '请填写角色生图提示词，或至少填写外貌与当前服饰设定' : `请填写${asset.type}生图提示词`)
   return {
     prompt: [prompt, selectedView === '自定义' ? '' : prompts['asset-image-views'][selectedView]].filter(Boolean).join('\n'),
     references: [...new Set([...(asset.dependencies?.length ? [] : [asset.image]), ...(!asset.image ? asset.source?.frames?.map(frame => frame.url) || [] : []), ...(asset.references || []).map(item => typeof item === 'string' ? item : item.url)].filter(Boolean))],

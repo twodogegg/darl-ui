@@ -9,7 +9,8 @@ import { LocalStorage } from '../examples/agent-chat/server/storage';
 import { FileStore } from '../examples/agent-chat/server/file-storage';
 import { ProjectStore } from '../examples/agent-chat/server/project-store';
 import { StudioStore } from '../examples/agent-chat/server/studio';
-import { VideoRedraw, validateRedrawDraft } from '../examples/agent-chat/server/video-redraw';
+import { VideoRedraw, parseModelJson, validateRedrawDraft } from '../examples/agent-chat/server/video-redraw';
+import { AgentFailure } from '../examples/agent-chat/server/errors';
 import { analysisFrameSheets, composeVideo, prepareVideo, probeVideo, videoCommand, withVideoFiles, type SourceSegment } from '../examples/agent-chat/server/video-processing';
 
 let directory: string, files: FileStore, studio: StudioStore, service: VideoRedraw, projectId: string;
@@ -164,6 +165,21 @@ it('rejects fabricated evidence and out-of-project speaker keys in structured an
   expect(() => validateRedrawDraft({ assets: [], shots: [{ segmentId: 's', sceneKey: 'unknown', assetKeys: [], targetDialogue: [] }] }, [segment], [])).toThrow('关联无效');
 });
 
+it('accepts model output wrapped in fences or prose and reports invalid JSON as a retryable failure with context', () => {
+  expect(parseModelJson('```json\n{"assets":[],"shots":[]}\n```')).toEqual({ assets: [], shots: [] });
+  expect(parseModelJson('分析结果如下：{"assets":[],"shots":[]} 以上。')).toEqual({ assets: [], shots: [] });
+  const error = (() => { try { parseModelJson('{"assets":[{"key":"人物A", "type":"角色"}]'); } catch (reason) { return reason; } })();
+  expect(error).toBeInstanceOf(AgentFailure);
+  expect((error as InstanceType<typeof AgentFailure>).retryable).toBe(true);
+  expect((error as InstanceType<typeof AgentFailure>).suggestion).toContain('重试');
+  expect((error as Error).message).toContain('不是有效 JSON');
+  expect(String((error as Error).cause)).toContain('{"assets"');
+  // The raw V8 wording is what reached users before; keep it inside the cause, not the message.
+  expect((error as Error).message).not.toContain('after property value');
+  expect((error as Error).message).not.toContain('at position');
+  expect(String((error as Error).cause)).toContain('at position');
+});
+
 it('isolates shot IDs when two regional projects share the same prepared source segments', async () => {
   const source = await projectWithSource(), firstProject = projectId;
   const secondProject = String(studio.projects.create({ name: '同原片另一地区', description: null, aspect_ratio: '16:9', style_catalog_id: 4 }).project_id);
@@ -203,4 +219,27 @@ it('recovers acknowledged running tasks as interrupted and reuses request IDs wi
   const restored = new VideoRedraw(studio, { model: () => { throw new Error(); }, instructions: async () => '', transcribe: async () => { throw new Error(); } });
   expect(restored.jobs(projectId).find(job => job.id === 'interrupted')?.status).toBe('interrupted');
   restored.dispose();
+});
+
+it('keeps each episode source separate and reuses project assets when applying a second episode', async () => {
+  const source = await projectWithSource();
+  studio.apply('second-episode', [{ resource: 'episodes', id: 'episode-two', op: 'create', values: { projectId, number: 2, sourceVideo: source, scenes: [] } }]);
+  const seed = (episodeId: string, id: string) => {
+    const state = studio.snapshot(), project = state.projects.find(item => item.id === projectId)!;
+    const draft = { assets: [{ key: 'scene', type: '场景', name: '色卡', description: '色卡', targetName: '共享场景', targetDescription: '场景', evidenceSegmentId: source.segments[0].id, frameIndex: 0 }],
+      shots: source.segments.map(segment => ({ segmentId: segment.id, sceneKey: 'scene', assetKeys: ['scene'], targetDialogue: [], description: '画面', dialogue: '', scale: '全景', camera: '固定', transition: '硬切', effects: '', targetDescription: '画面', notes: '' })) };
+    const job = { id, projectId, episodeId, sourceFileId: source.fileId, projectVersion: project._version, kind: 'analyze', status: 'completed', phase: '完成', input: {}, fingerprint: '', createdAt: new Date().toISOString(), segments: source.segments, draft, versions: Object.fromEntries(state.episodes.map(item => [`episodes:${item.id}`, item._version])) };
+    studio.projects.db.prepare('INSERT INTO video_redraw_jobs(id,project_id,data) VALUES(?,?,?)').run(id, projectId, JSON.stringify(job));
+  };
+  seed('episode', 'episode-one-analysis');
+  await service.edit({ projectId, episodeId: 'episode', action: 'apply', jobId: 'episode-one-analysis' });
+  seed('episode-two', 'episode-two-analysis');
+  await service.edit({ projectId, episodeId: 'episode-two', action: 'apply', jobId: 'episode-two-analysis' });
+  const state = studio.snapshot();
+  expect(state.assets).toHaveLength(1);
+  expect(state.assets[0].episodeIds).toEqual(['episode', 'episode-two']);
+  expect(state.shots.filter(shot => shot.episodeId === 'episode-two')).toHaveLength(source.segments.length);
+  expect(new Set(state.shots.map(shot => shot.id)).size).toBe(source.segments.length * 2);
+  expect((service.read({ projectId, episodeId: 'episode-two' }) as { jobs: Array<{ id: string }> }).jobs.map(job => job.id)).toEqual(['episode-two-analysis']);
+  await expect(service.edit({ projectId, episodeId: 'episode', action: 'apply', jobId: 'episode-two-analysis' })).rejects.toThrow();
 });

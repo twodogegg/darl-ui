@@ -15,7 +15,7 @@ import { ToolsSettings } from './ToolsSettings';
 import { StorageSettings } from './StorageSettings';
 import { RequestRecordsPage } from './RequestRecordsPage';
 import { finishToolCalls, messageTextForModel } from './message-history';
-import { studioAgentContent } from './studio/agent-task';
+import { studioAgentPayload, type StudioAgentContext } from './studio/agent-task';
 import { useChatSessions } from './use-chat-sessions';
 
 const interruptedExecutionStatuses = new Set<AgentExecutionEvent['status']>(['pending', 'started', 'running', 'retrying', 'confirmation']);
@@ -69,6 +69,8 @@ export function App() {
   const fishVoice = useFishVoice();
   const { sessions, setSessions, activeId, setActiveId, selectSession, renameSession, removeSession, flush, ready: hydrated, loading: historyLoading, activeLoaded, loadError, saveError, retryLoad, retrySave } = useChatSessions(newSession, recoverSession);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const studioDraftContexts = useRef<Record<string, StudioAgentContext>>({});
+  const studioRequesting = useRef(false);
   const [skills, setSkills] = useState<AgentSkill[]>([]);
   const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [modelConfiguration, setModelConfiguration] = useState<ModelConfiguration>(() => defaultModelConfiguration());
@@ -180,7 +182,7 @@ export function App() {
       return { ...message, timeline: next };
     }) } : session));
   };
-  const run = async (request: AgentSendRequest, previous?: AgentSession['messages'], newSource?: AgentSession) => {
+  const run = async (request: AgentSendRequest, previous?: AgentSession['messages'], newSource?: AgentSession, studioContext?: StudioAgentContext) => {
     if (running.current) throw new Error('请先停止当前生成');
     if (!hydrated || (!newSource && !activeLoaded)) throw new Error('请等待聊天记录加载完成');
     const selected = models.find((model) => model.id === request.modelId);
@@ -192,7 +194,7 @@ export function App() {
     const userAttachments: AgentAttachment[] | undefined = request.uploadedAttachments?.length
       ? request.uploadedAttachments
       : request.attachments?.map((attachment) => ({ name: attachment.name, type: attachment.type, size: attachment.size, url: attachment.data }));
-    const user = { id: crypto.randomUUID(), role: 'user' as const, content: request.content, agentId: conversationAgentId, ...(userAttachments?.length ? { attachments: userAttachments } : {}) };
+    const user = { id: crypto.randomUUID(), role: 'user' as const, content: request.content, agentId: conversationAgentId, ...(studioContext || {}), ...(userAttachments?.length ? { attachments: userAttachments } : {}) };
     const history: AgentSession['messages'] = previous ?? [...source.messages, user];
     const answer = { id: crypto.randomUUID(), role: 'assistant' as const, content: '', streaming: true };
     const controller = new AbortController();
@@ -213,8 +215,8 @@ export function App() {
       if (running.current === controller) { running.current = null; setGenerating(false); }
     };
     try {
-      const usedSkills = skills.filter((skill) => request.skillIds.includes(skill.id)
-        || history.some((message) => message.role === 'user' && message.content.includes(`(skill:${encodeURIComponent(skill.id)})`)));
+      const usedSkillIds = [...new Set([...request.skillIds, ...history.flatMap(message => message.role === 'user' ? message.modelSkillIds || [] : []),
+        ...skills.filter(skill => history.some(message => message.role === 'user' && message.content.includes(`(skill:${encodeURIComponent(skill.id)})`))).map(skill => skill.id)])];
       const apiMessages = history.filter((message) => message.content || message.outputs?.length || message.attachments?.length || ('toolCalls' in message && message.toolCalls?.length)).map((message) => {
         const { role, attachments } = message;
         const fileContext = (attachments || []).flatMap((attachment) => typeof attachment !== 'string' && attachment.fileId ? [{ fileId: attachment.fileId, name: attachment.name, mimeType: attachment.type }] : []);
@@ -235,7 +237,7 @@ export function App() {
       try {
         response = await fetch('/api/chat', {
           method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ websiteContext: websiteContext.current, voiceMode: request.voiceMode === true, approvalMode, sessionId: request.sessionId, agentId: conversationAgentId, skillIds: usedSkills.map((skill) => skill.id), applicationIds: request.applicationIds, providerId: selected?.providerId, modelId: selected ? decodeURIComponent(selected.id.slice(selected.id.indexOf('/') + 1)) : undefined, effort: request.reasoningEffort, messages: apiMessages }),
+          body: JSON.stringify({ websiteContext: websiteContext.current, voiceMode: request.voiceMode === true, approvalMode, sessionId: request.sessionId, agentId: conversationAgentId, skillIds: usedSkillIds, applicationIds: request.applicationIds, providerId: selected?.providerId, modelId: selected ? decodeURIComponent(selected.id.slice(selected.id.indexOf('/') + 1)) : undefined, effort: request.reasoningEffort, messages: apiMessages }),
         });
       } catch (reason) {
         if (controller.signal.aborted) throw reason;
@@ -386,22 +388,25 @@ export function App() {
     setOpen(true);
   };
   const studioTask = async (task: Record<string, unknown>) => {
-    if (running.current) throw new Error('请先停止当前 Agent 任务');
-    const draftOnly = task.draftOnly === true;
-    const selectedId = typeof task.agentId === 'string' && task.agentId ? task.agentId : agentId || 'default';
-    const session = draftOnly ? sessions.find(item => activeLoaded && item.id === activeId && !item.messages.length) || newSession(selectedId) : newSession(selectedId);
-    const selections = task.modelSelections as Record<string, string> | undefined;
-    const selectedModel = selections?.text || availableModelId;
-    if (!draftOnly && !selectedModel) throw new Error('请先配置并启用文本模型');
-    if (!sessions.some(item => item.id === session.id)) setSessions(current => [session, ...current]);
-    setActiveId(session.id); setOpen(true);
-    if (draftOnly) {
-      setDrafts(current => ({ ...current, [session.id]: studioAgentContent(task) }));
-      return;
-    }
-    const requestedSlugs: unknown[] = Array.isArray(task.skillSlugs) ? task.skillSlugs : [];
-    const requestedSkills = skills.filter(skill => requestedSlugs.includes(skill.slug || skill.name)).map(skill => skill.id);
-    await run({ sessionId: session.id, agentId: selectedId, content: studioAgentContent(task), skillIds: requestedSkills, applicationIds: [], modelId: selectedModel, reasoningEffort: activeEffort }, undefined, session);
+    if (running.current || studioRequesting.current) throw new Error('请先停止当前 Agent 任务');
+    studioRequesting.current = true;
+    try {
+      const draftOnly = task.draftOnly === true;
+      const selectedId = typeof task.agentId === 'string' && task.agentId ? task.agentId : agentId || 'default';
+      const session = draftOnly ? sessions.find(item => activeLoaded && item.id === activeId && item.agentId === selectedId && !item.messages.length) || newSession(selectedId) : newSession(selectedId);
+      const selections = task.modelSelections as Record<string, string> | undefined;
+      const selectedModel = selections?.text || availableModelId;
+      if (!draftOnly && !selectedModel) throw new Error('请先配置并启用文本模型');
+      const payload = studioAgentPayload(task, await api<AgentSkill[]>('skills?summary=1'));
+      if (!sessions.some(item => item.id === session.id)) setSessions(current => [session, ...current]);
+      setActiveId(session.id); setOpen(true);
+      if (draftOnly) {
+        studioDraftContexts.current[session.id] = payload.context;
+        setDrafts(current => ({ ...current, [session.id]: payload.content }));
+        return;
+      }
+      await run({ sessionId: session.id, agentId: selectedId, content: payload.content, skillIds: payload.context.modelSkillIds, applicationIds: [], modelId: selectedModel, reasoningEffort: activeEffort }, undefined, session, payload.context);
+    } finally { studioRequesting.current = false; }
   };
   const studioNavigate = (page: string) => {
     if (page === 'chat') { openStudioChat(); return; }
@@ -423,7 +428,7 @@ export function App() {
       composerHeader={saveError ? <p role="alert">{saveError} <button onClick={retrySave}>重试保存</button></p> : undefined}
       onNewSession={createSession}
       draft={drafts[activeId] ?? ''} onDraftChange={(value) => setDrafts(current => ({ ...current, [activeId]: value }))}
-      onSend={async (request) => { await run(request); setDrafts(current => current[request.sessionId]?.trim() === request.content ? { ...current, [request.sessionId]: '' } : current); }} onStop={() => running.current?.abort()} isGenerating={generating} onRegenerate={regenerate}
+      onSend={async (request) => { await run(request, undefined, undefined, studioDraftContexts.current[request.sessionId]); delete studioDraftContexts.current[request.sessionId]; setDrafts(current => current[request.sessionId]?.trim() === request.content ? { ...current, [request.sessionId]: '' } : current); }} onStop={() => running.current?.abort()} isGenerating={generating} onRegenerate={regenerate}
       applications={applications} onToolConfirm={async (id, approved) => { await api(`tool-confirmations/${id}`, { approved }); }}
       onUserInput={async (id, answers) => { await api(`user-inputs/${id}`, { answers }); }}
       agents={agents} selectedAgentId={agentId} models={models} selectedModelId={availableModelId} onSelectedModelIdChange={setModelId} selectedReasoningEffort={activeEffort} onSelectedReasoningEffortChange={setEffort}
