@@ -73,8 +73,8 @@ export function CreateRedraw() {
         preparation.current = { projectId, episodeId, action: 'redraw-analyze', requestId: crypto.randomUUID() }
       }
       const task = preparation.current
-      navigate(`/dialogue?projectId=${encodeURIComponent(task.projectId)}&episodeId=${encodeURIComponent(task.episodeId)}`)
-      requestAgent(task).catch(reason => notify(`拉片启动失败：${reason.message}。可在对白对照页重试。`))
+      navigate(`/source?projectId=${encodeURIComponent(task.projectId)}&episodeId=${encodeURIComponent(task.episodeId)}`)
+      requestAgent(task).catch(reason => notify(`拉片启动失败：${reason.message}。可在原片与拉片页重试。`))
     } catch (reason) { setError(reason.message + (preparation.current ? '。项目已保存，请重试启动拉片。' : projectId ? '。项目已创建，可在项目列表继续。' : '')) }
     finally { submitted.current = false; setBusy(false) }
   }
@@ -198,6 +198,7 @@ function FilmWorkspace({ context }) {
   const clips = data.clips.filter(clip => clip.episodeId === context.episode?.id)
   const [selection, setSelection] = useState([]), films = data.films.filter(film => film.projectId === context.projectId && (film.episodeId === context.episode?.id || (!film.episodeId && context.episode?.id === context.episodes[0]?.id)))
   return <div className="redraw-film"><h2>合成与导出</h2><label>剧集 <select aria-label="选择导出剧集" value={context.episode?.id || ''} onChange={event => navigate(context.link('/film', context.episodes.find(item => item.id === event.target.value)))}>{context.episodes.map(item => <option key={item.id} value={item.id}>第{item.number}集 · {item.title}</option>)}</select></label><p>按勾选顺序拼接已选用的真实视频，保留各片段生成音轨；不会混入原片声音。未生成目标对白的片段仍需先完成配音或视频重做。</p>
+    {context.episode && <a className="btn" href={`/opencut/rn/episodes/${encodeURIComponent(context.episode.id)}`}>打开时间线剪辑</a>}
     {clips.map(clip => <div className="redraw-export-row" key={clip.id}><label><input type="checkbox" disabled={!clip.currentVideo || running || busy} checked={selection.some(item => item.clipId === clip.id)} onChange={event => setSelection(current => event.target.checked ? [...current, { clipId: clip.id, start: 0 }] : current.filter(item => item.clipId !== clip.id))} />{clip.title} {selection.some(item => item.clipId === clip.id) && `· 第 ${selection.findIndex(item => item.clipId === clip.id) + 1} 段`}{!clip.currentVideo && ' · 尚未选用视频'}</label>
       {selection.some(item => item.clipId === clip.id) && <div className="redraw-fields">{['start', 'end'].map(key => <Field key={key} label={key === 'start' ? '裁剪开始秒' : '结束秒（留空用实际时长）'}><input type="number" min="0" step="0.01" value={selection.find(item => item.clipId === clip.id)[key] ?? ''} onChange={event => setSelection(current => current.map(item => item.clipId === clip.id ? { ...item, [key]: event.target.value === '' ? undefined : Number(event.target.value) } : item))} /></Field>)}</div>}
     </div>)}

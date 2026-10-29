@@ -3,15 +3,13 @@ import { randomUUID, createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { jsonSchema, Output } from 'ai';
 import type { AgentModelConfig } from '../../../src/index';
 import type { StudioChange, StudioRecord } from '../studio-schema';
-import prompts from '../prompts/video-redraw.json';
 import { StudioStore, StudioConflict } from './studio';
-import { generate, safeError, type ChatMessage, type StoredProvider } from './models';
+import { safeError, type StoredProvider } from './models';
 import { AgentFailure } from './errors';
 import type { TimedTranscript } from './voice';
-import { REDRAW_LIMITS, analysisFrameSheets, composeVideo, extractFrame, prepareVideo, prepareBreakdown, videoCommand, withVideoFiles, type SourceSegment } from './video-processing';
+import { REDRAW_LIMITS, composeVideo, extractFrame, prepareVideo, prepareBreakdown, videoCommand, withVideoFiles, type SourceSegment } from './video-processing';
 import { isLocalOrLanAddress } from './local-access';
 
 type DraftAsset = { key: string; type: string; name: string; description: string; targetName: string; targetDescription: string; targetAppearance?: string; targetCostume?: string; targetVoiceDescription?: string; targetPrompt?: string; evidenceSegmentId: string; frameIndex: number };
@@ -20,8 +18,8 @@ export type RedrawDraft = { assets: DraftAsset[]; shots: DraftShot[] };
 type Job = { id: string; projectId: string; episodeId?: string; sourceFileId?: string; kind: 'prepare' | 'breakdown' | 'transcribe' | 'analyze' | 'export'; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; phase: string; createdAt: string; error?: string; input: Record<string, unknown>; fingerprint: string;
   versions: Record<string, number>; projectVersion: number; draft: RedrawDraft; segments: SourceSegment[]; transcript?: TimedTranscript; result?: Record<string, unknown>; applied?: string[] };
 type Dependencies = {
-  model: (modelId: string) => { provider: StoredProvider; model: AgentModelConfig };
-  instructions: (agentId: string) => Promise<string>;
+  model?: (modelId: string) => { provider: StoredProvider; model: AgentModelConfig };
+  instructions?: (agentId: string) => Promise<string>;
   transcribe: (bytes: Buffer, language: string, signal: AbortSignal) => Promise<TimedTranscript>;
 };
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -41,49 +39,6 @@ export function parseModelJson(source: string) {
       '重新点击“生成改编策略”或继续分析会从当前批次重试；若反复出现，请更换视觉分析模型。', { cause: new Error(`${detail}\n输出片段：${candidate.slice(0, 500)}`) });
   }
 }
-
-/** Compatible Chat APIs reject a bare json_object request without this word in the conversation. */
-function jsonHint(text: string) { return /json/i.test(text) ? text : `${text}\n\n只返回 JSON 对象。`; }
-
-/** Keep a failed batch identifiable: the generic validator message alone cannot be acted on. */
-function validateDecodedDraft(value: unknown, segments: SourceSegment[], existing: StudioRecord[], job: Job): RedrawDraft {
-  try { return validateRedrawDraft(value, segments, existing); }
-  catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    const scope = `第 ${job.draft.shots.length + 1}–${job.draft.shots.length + segments.length} 镜头`;
-    throw new AgentFailure('validation', 'REDRAW_ANALYSIS_INVALID', `模型返回的分镜结果未通过校验（${scope}）：${reason}`, true,
-      '已完成镜头已保留；继续分析会从该批次重试，若同一批次反复失败，请更换视觉分析模型或缩短原片后重新切镜。',
-      { cause: error });
-  }
-}
-
-/** Responses-API schema mirroring validateRedrawDraft, so invalid shapes are rejected upstream instead of mid-run. */
-const redrawDraftSchema = jsonSchema<RedrawDraft>({
-  type: 'object', additionalProperties: false, required: ['assets', 'shots'],
-  properties: {
-    assets: { type: 'array', maxItems: 160, items: {
-      type: 'object', additionalProperties: false,
-      required: ['key', 'type', 'name', 'description', 'targetName', 'targetDescription', 'evidenceSegmentId', 'frameIndex'],
-      properties: {
-        key: { type: 'string', minLength: 1, maxLength: 160 }, type: { type: 'string', enum: ['角色', '场景', '道具'] },
-        name: { type: 'string' }, description: { type: 'string' }, targetName: { type: 'string' }, targetDescription: { type: 'string' },
-        targetAppearance: { type: 'string' }, targetCostume: { type: 'string' }, targetVoiceDescription: { type: 'string' }, targetPrompt: { type: 'string' },
-        evidenceSegmentId: { type: 'string' }, frameIndex: { type: 'integer', minimum: 0 },
-      } } },
-    shots: { type: 'array', items: {
-      type: 'object', additionalProperties: false,
-      required: ['segmentId', 'sceneKey', 'description', 'dialogue', 'scale', 'camera', 'transition', 'effects', 'assetKeys', 'targetDescription', 'targetDialogue', 'notes'],
-      properties: {
-        segmentId: { type: 'string' }, sceneKey: { type: 'string' }, description: { type: 'string' }, dialogue: { type: 'string' },
-        scale: { type: 'string' }, camera: { type: 'string' }, transition: { type: 'string' }, effects: { type: 'string' },
-        assetKeys: { type: 'array', items: { type: 'string' } }, targetDescription: { type: 'string' },
-        targetDuration: { type: 'number', exclusiveMinimum: 0, maximum: 120 },
-        targetDialogue: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['assetKey', 'text', 'description'],
-          properties: { assetKey: { type: 'string' }, text: { type: 'string' }, description: { type: 'string' } } } },
-        notes: { type: 'string' },
-      } } },
-  },
-});
 
 export function validateRedrawDraft(value: unknown, segments: SourceSegment[], existing: StudioRecord[]): RedrawDraft {
   if (!value || typeof value !== 'object') throw new Error('分析结果不是对象');
@@ -158,22 +113,29 @@ export class VideoRedraw {
       if (job.status !== 'completed') throw new Error('任务结果尚未就绪');
       const offset = Number(input.cursor || 0), limit = Number(input.limit || 100);
       if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error('分页参数无效');
+      if (job.kind === 'transcribe' || (input.detail !== undefined && job.transcript)) {
+        if (!job.transcript) throw new Error('该任务没有原声转写，请查询本集的 transcribe 任务');
+        const { segments, speakerTurns = [], ...metadata } = job.transcript;
+        const words = input.detail === 'words' || !speakerTurns.length;
+        const items = words ? segments : speakerTurns;
+        return { jobId: job.id, kind: job.kind, sourceFileId: job.sourceFileId, language: metadata.language, ...(offset === 0 ? { text: metadata.text } : {}), items: items.slice(offset, offset + limit), total: items.length, nextCursor: offset + limit < items.length ? String(offset + limit) : null, timing: words ? 'segments' : 'speaker_turns' };
+      }
+      if (input.detail !== undefined) throw new Error(`任务 ${job.id} 是 ${job.kind}，没有原声转写；请查询本集的 transcribe 任务`);
       if (job.kind === 'breakdown' && job.result) {
         const { shots, sheets, ...metadata } = job.result as { shots: unknown[]; sheets: unknown[]; [key: string]: unknown };
-        return { jobId: job.id, ...metadata, items: shots.slice(offset, offset + limit), total: shots.length, nextCursor: offset + limit < shots.length ? String(offset + limit) : null, sheets };
+        return { jobId: job.id, kind: job.kind, ...metadata, items: shots.slice(offset, offset + limit), total: shots.length, nextCursor: offset + limit < shots.length ? String(offset + limit) : null, sheets };
       }
-      if (job.kind !== 'transcribe' || !job.transcript) throw new Error('该任务没有可分页读取的结果');
-      const { segments, speakerTurns = [], ...metadata } = job.transcript;
-      const words = input.detail === 'words' || !speakerTurns.length;
-      const items = words ? segments : speakerTurns;
-      return { jobId: job.id, sourceFileId: job.sourceFileId, language: metadata.language, ...(offset === 0 ? { text: metadata.text } : {}), items: items.slice(offset, offset + limit), total: items.length, nextCursor: offset + limit < items.length ? String(offset + limit) : null, timing: words ? 'segments' : 'speaker_turns' };
+      if (job.kind === 'prepare' && job.result) {
+        const { segments, ...metadata } = job.result as { segments: unknown[]; [key: string]: unknown };
+        return { jobId: job.id, kind: job.kind, sourceFileId: job.sourceFileId, ...metadata, items: segments.slice(offset, offset + limit), total: segments.length, nextCursor: offset + limit < segments.length ? String(offset + limit) : null };
+      }
+      throw new Error(`任务 ${job.id} 是 ${job.kind}，没有可分页读取的切镜或转写结果`);
     }
     return { jobs: this.jobs(projectId).filter(job => (job.episodeId || this.episode(project).id) === episode.id).map(({ transcript, ...job }) => ({ ...job, hasTranscript: !!transcript })), source: this.source(project, episode) };
   }
   async edit(input: Record<string, unknown>) {
     const allowed = new Set([...Object.keys(properties), 'action']);
     if (Object.keys(input).some(key => !allowed.has(key))) throw new Error('转绘请求包含未知参数');
-    if (input.visualOnly !== undefined && typeof input.visualOnly !== 'boolean') throw new Error('visualOnly 须为布尔值');
     const projectId = String(input.projectId || ''), project = this.project(projectId);
     const action = String(input.action), episode = this.episode(project, input.episodeId);
     if (action === 'cancel') {
@@ -186,7 +148,7 @@ export class VideoRedraw {
     if (action === 'frame' || action === 'edit-shot') return this.editSource(input, project, episode);
     if (action === 'merge-assets') return this.mergeAssets(input, project);
     if (action === 'merge-shots') return this.mergeShots(input, project, episode);
-    if (!['prepare', 'breakdown', 'transcribe', 'analyze', 'export'].includes(action)) throw new Error('不支持的转绘操作');
+    if (!['prepare', 'breakdown', 'transcribe', 'export'].includes(action)) throw new Error('不支持的转绘操作');
     const requestId = String(input.requestId || '');
     if (!/^[\w-]{8,160}$/.test(requestId)) throw new Error('提交任务须提供唯一 requestId，原样重试沿用');
     const fingerprint = hash(input), prior = this.jobs().find(job => job.id === requestId);
@@ -196,21 +158,13 @@ export class VideoRedraw {
     if (input.version !== project._version) throw new StudioConflict('项目设置已变化，请重新读取');
     const source = this.source(project, episode);
     if (!source.fileId) throw new Error('请先上传原视频');
-    let segments = asList<SourceSegment>(source.segments);
-    if (action === 'analyze') {
-      this.dependencies.model(String(input.modelId || ''));
-      if (!segments.length) throw new Error('请先完成切镜和抽帧');
-      const start = input.start === undefined ? 0 : Number(input.start), end = input.end === undefined ? Number(source.duration) : Number(input.end);
-      if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start || end > Number(source.duration)) throw new Error('补漏区间无效');
-      segments = segments.filter(segment => segment.end > start && segment.start < end);
-      if (!segments.length) throw new Error('所选区间没有镜头');
-    }
+    const segments = asList<SourceSegment>(source.segments);
     const resume = input.resumeJobId ? this.job(String(input.resumeJobId)) : undefined;
     if (resume && (resume.projectId !== projectId || (resume.episodeId || this.episode(project).id) !== episode.id || resume.kind !== action || !['failed', 'cancelled', 'interrupted'].includes(resume.status)
-      || resume.projectVersion !== project._version || resume.input.modelId !== input.modelId || resume.input.agentId !== input.agentId
-      || resume.input.sourceLanguage !== input.sourceLanguage || resume.input.visualOnly !== input.visualOnly || resume.input.start !== input.start || resume.input.end !== input.end)) throw new Error('旧任务与当前设置或区间不一致，请新建分析');
+      || resume.projectVersion !== project._version
+      || resume.input.sourceLanguage !== input.sourceLanguage || resume.input.start !== input.start || resume.input.end !== input.end)) throw new Error('旧任务与当前设置或区间不一致，请新建任务');
     const state = this.studio.snapshot();
-    const reusableTranscript = input.visualOnly === true ? undefined : this.jobs().find(job => job.transcript
+    const reusableTranscript = this.jobs().find(job => job.transcript
       && (job.sourceFileId || (state.projects.find(item => item.id === job.projectId)?.sourceVideo as Record<string, unknown>)?.fileId) === source.fileId
       && String(job.input.sourceLanguage || '') === String(input.sourceLanguage || ''))?.transcript;
     const job: Job = { id: requestId, projectId, episodeId: episode.id, sourceFileId: String(source.fileId), kind: action as Job['kind'], status: 'queued', phase: '排队', createdAt: new Date().toISOString(), input, fingerprint,
@@ -239,14 +193,26 @@ export class VideoRedraw {
         job.result = result;
       } else if (job.kind === 'breakdown') {
         job.phase = '检测切镜并提取中间帧'; this.save(job);
-        job.result = await prepareBreakdown(this.files, String(source.fileId), signal);
+        const result = await prepareBreakdown(this.files, String(source.fileId), signal);
+        job.result = result; this.save(job);
         signal.throwIfAborted();
-        if (this.source(this.project(job.projectId), this.episode(this.project(job.projectId), job.episodeId)).fileId !== job.sourceFileId) throw new StudioConflict('原片已更换，拉片结果未应用');
+        const liveProject = this.project(job.projectId), liveEpisode = this.episode(liveProject, job.episodeId);
+        const liveSource = this.source(liveProject, liveEpisode);
+        if (liveSource.fileId !== job.sourceFileId) throw new StudioConflict('原片已更换，拉片结果未应用');
+        if (!Number.isFinite(liveSource.duration) || !Array.isArray(liveSource.segments) || !liveSource.segments.length) {
+          try {
+            if (liveProject._version !== job.projectVersion || liveEpisode._version !== job.versions[recordKey('episodes', liveEpisode.id)]) throw new StudioConflict('项目或剧集已修改');
+            const segments = result.shots.map(({ id, start, end, frames }) => ({ id, start, end, frames }));
+            this.studio.apply(`redraw-metadata-${hash(job.id).slice(0, 24)}`, [this.sourceChange(liveProject, liveEpisode, { ...liveSource, duration: result.duration, width: result.width, height: result.height, fps: result.fps, hasAudio: result.hasAudio, segments: Array.isArray(liveSource.segments) && liveSource.segments.length ? liveSource.segments : segments })]);
+          } catch (error) {
+            job.result = { ...result, metadataWarning: `原片信息未自动保存：${safeError(error)}。切镜结果已保留，请按最新版本保存原片元数据。` };
+          }
+        }
         this.save(job);
       } else if (job.kind === 'transcribe') {
         job.phase = '提取原声并转写'; this.save(job);
         if (source.hasAudio === false) throw new Error('该集原片没有音轨');
-        job.transcript = await withVideoFiles(this.files, [String(source.fileId)], async ([path], root) => {
+        if (!job.transcript) job.transcript = await withVideoFiles(this.files, [String(source.fileId)], async ([path], root) => {
           const audio = join(root, 'source.wav');
           await videoCommand('ffmpeg', ['-y', '-i', path, '-vn', '-ac', '1', '-ar', '16000', audio], signal);
           return this.dependencies.transcribe(await readFile(audio), String(job.input.sourceLanguage || ''), signal);
@@ -254,45 +220,7 @@ export class VideoRedraw {
         signal.throwIfAborted();
         if (this.source(this.project(job.projectId), this.episode(this.project(job.projectId), job.episodeId)).fileId !== job.sourceFileId) throw new StudioConflict('原片已更换，转写结果未应用');
         this.save(job);
-      } else if (job.kind === 'analyze') {
-        const selected = this.dependencies.model(String(job.input.modelId));
-        const instructions = await this.dependencies.instructions(String(job.input.agentId || ''));
-        if (source.hasAudio && job.input.visualOnly !== true && !job.transcript) {
-          job.phase = '提取原声并按原语言转写'; this.save(job);
-          job.transcript = await withVideoFiles(this.files, [String(source.fileId)], async ([path], root) => {
-            const audio = join(root, 'source.wav');
-            await videoCommand('ffmpeg', ['-y', '-i', path, '-vn', '-ac', '1', '-ar', '16000', audio], signal);
-            return this.dependencies.transcribe(await readFile(audio), String(job.input.sourceLanguage || ''), signal);
-          });
-          this.save(job);
-        }
-        const state = this.studio.snapshot(), existing = state.assets.filter(asset => asset.projectId === project.id);
-        const pending = job.segments.filter(segment => !job.draft.shots.some(shot => shot.segmentId === segment.id));
-        for (let index = 0; index < pending.length;) {
-          signal.throwIfAborted();
-          const segments: SourceSegment[] = [];
-          while (index < pending.length && segments.length < 4) segments.push(pending[index++]);
-          job.phase = `视觉分析 ${job.draft.shots.length}/${job.segments.length} 镜头`; this.save(job);
-          const sheets = await analysisFrameSheets(this.files, segments, signal);
-          const transcriptSegments = job.transcript?.segments.filter(line => segments.some(segment => line.end > segment.start && line.start < segment.end));
-          const frameSheets = sheets.map((sheet, index) => ({ index: index + 1, width: sheet.width, height: sheet.height, frames: sheet.frames }));
-          const instruction = this.prompt('analysis');
-          const content: Exclude<ChatMessage['content'], string> = [{ type: 'text', text: JSON.stringify({ targetRegion: project.targetRegion, targetLanguage: project.targetLanguage, requirements: project.requirements,
-            segments: segments.map(({ frames: _, ...segment }) => segment), frameSheets,
-            transcript: job.transcript ? { language: job.transcript.language, segments: transcriptSegments } : null, existingAssets: [...existing.map(asset => ({ key: asset.id, type: asset.type, name: asset.name, description: asset.source || asset.description })), ...job.draft.assets],
-            instruction: jsonHint(instruction) }) }];
-          for (const [index, sheet] of sheets.entries()) content.push({ type: 'image', name: `source-frame-sheet-${index + 1}.jpg`, mimeType: 'image/jpeg', data: sheet.bytes.toString('base64') });
-          // Responses APIs constrain the schema upstream; compatible Chat APIs support JSON mode, so parse defensively below.
-          const format = selected.provider.protocol === 'openai-responses' ? Output.object({ schema: redrawDraftSchema, name: 'redraw_analysis' }) : Output.json();
-          let output = '';
-          for await (const chunk of generate(selected.provider, selected.model, [{ role: 'user', content }], instructions, undefined, signal, undefined, format)) output += chunk;
-          const decoded = parseModelJson(output);
-          const known = [...existing, ...job.draft.assets.map(asset => ({ ...asset, id: asset.key, _version: 0 }))];
-          const draft = validateDecodedDraft(decoded, segments, known, job);
-          for (const asset of draft.assets) if (!job.draft.assets.some(item => item.key === asset.key)) job.draft.assets.push(asset);
-          job.draft.shots.push(...draft.shots); this.save(job);
-        }
-      } else {
+      } else if (job.kind === 'export') {
         job.phase = '合成实际片段'; this.save(job);
         const selections = asList<{ clipId: string; start?: number; end?: number }>(job.input.selections);
         const state = this.studio.snapshot();
@@ -308,16 +236,12 @@ export class VideoRedraw {
         this.project(project.id);
         this.studio.apply(`redraw-${job.id}`, [{ resource: 'films', id: job.id, op: 'create', values: { projectId: project.id, episodeId: episode.id, title: `第${episode.number}集成片`, url: result.url } }]);
         job.result = result;
-      }
+      } else { throw new Error('历史分析任务无法继续，请在聊天中查看原片分析'); }
       signal.throwIfAborted(); job.status = 'completed'; job.phase = '完成'; this.save(job);
     } catch (error) {
       job.status = this.disposed ? 'interrupted' : controller.signal.aborted ? 'cancelled' : 'failed';
       job.error = safeError(error); this.save(job);
     }
-  }
-  prompt(kind: keyof typeof prompts) {
-    const entry = this.studio.snapshot().prompts.find(item => item.id === `4-${['analysis', 'asset', 'clip'].indexOf(kind)}`);
-    return String(entry?.mode === 'replace' ? entry.text : entry?.defaultText || prompts[kind]);
   }
   private apply(jobId: string, project: StudioRecord, episode: StudioRecord, selected: string[]) {
     const job = this.job(jobId);
@@ -439,14 +363,14 @@ export class VideoRedraw {
 
 const properties = {
   projectId: { type: 'string' }, episodeId: { type: 'string' }, jobId: { type: 'string' }, requestId: { type: 'string' }, version: { type: 'integer' },
-  modelId: { type: 'string' }, agentId: { type: 'string' }, sourceLanguage: { type: 'string' }, visualOnly: { type: 'boolean' },
+  sourceLanguage: { type: 'string' },
   resumeJobId: { type: 'string' }, start: { type: 'number' }, end: { type: 'number' }, shotId: { type: 'string' }, shotVersion: { type: 'integer' }, split: { type: 'number' },
   shotIds: { type: 'array', items: { type: 'string' } }, fromId: { type: 'string' }, toId: { type: 'string' }, fromVersion: { type: 'integer' }, toVersion: { type: 'integer' },
   selections: { type: 'array', minItems: 1, maxItems: 80, items: { type: 'object', properties: { clipId: { type: 'string' }, start: { type: 'number', minimum: 0 }, end: { type: 'number' } }, required: ['clipId'], additionalProperties: false } },
 } as const;
 export const REDRAW_TOOLS = [
-  { name: 'builtin_read_video_redraw', title: '查询视频转绘', description: 'describe=true 查询转绘能力和限制；否则以 projectId 和 episodeId 查询该集原片、持久化任务、可应用草稿和错误；传 jobId、cursor、limit 分页读取原声转写或切镜结果。省略 episodeId 兼容第一集。查询不触发生成。', risk: 'read' as const, approval: 'workspace' as const, appId: 'builtin:studio', appName: '视频转绘', parameters: { type: 'object', properties: { projectId: properties.projectId, episodeId: properties.episodeId, jobId: properties.jobId, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500 }, detail: { type: 'string', enum: ['turns', 'words'] }, describe: { type: 'boolean' } }, additionalProperties: false } },
-  { name: 'builtin_edit_video_redraw', title: '操作视频转绘', description: '按 episodeId 操作对应剧集，省略则使用第一集。prepare 旧版切镜抽帧；breakdown 仅运行 PySceneDetect 切镜、每镜中间帧和拼图，不调用模型、不写入业务数据；transcribe 仅调用 Fish 返回原声转写，不调用 LLM、翻译或保存业务对白；analyze 用已配置视觉模型和选定 Agent 分析并生成目标地区语言草稿，可传 start/end 补漏区间；apply 按草稿 segment ID 的 shotIds 应用选中镜头（留空为全部），保留人工修改；cancel 取消；frame 截取 start/end 中间参考帧供补资产；edit-shot 调整来源区间或 split 拆分；merge-assets 合并重复资产，merge-shots 合并同场相邻镜头（fromId/toId/fromVersion/toVersion）；export 按 selections 的 clipId 顺序合成已选用视频，保留生成音轨。提交长任务须 requestId、最新项目 version，返回任务后查询。失败任务可用新 requestId 与 resumeJobId 续做已完成分析。', risk: 'write' as const, approval: 'workspace' as const, appId: 'builtin:studio', appName: '视频转绘', parameters: { type: 'object', properties: { ...properties, action: { type: 'string', enum: ['prepare', 'breakdown', 'transcribe', 'analyze', 'apply', 'cancel', 'frame', 'edit-shot', 'merge-assets', 'merge-shots', 'export'] } }, required: ['projectId', 'action'], additionalProperties: false } },
+  { name: 'builtin_read_video_redraw', title: '查询视频转绘', description: 'describe=true 查询转绘能力和限制；否则以 projectId 和 episodeId 查询该集原片、持久化任务、可应用草稿和错误；传 jobId、cursor、limit 分页读取切镜结果或原声转写；detail=turns/words 只读取该任务已有转写。省略 episodeId 兼容第一集。查询不触发生成。', risk: 'read' as const, approval: 'workspace' as const, appId: 'builtin:studio', appName: '视频转绘', parameters: { type: 'object', properties: { projectId: properties.projectId, episodeId: properties.episodeId, jobId: properties.jobId, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500 }, detail: { type: 'string', enum: ['turns', 'words'] }, describe: { type: 'boolean' } }, additionalProperties: false } },
+  { name: 'builtin_edit_video_redraw', title: '操作视频转绘', description: '按 episodeId 操作对应剧集，省略则使用第一集。prepare 旧版切镜抽帧；breakdown 运行 PySceneDetect 切镜、保存每镜中间帧和拼图；缺少原片元数据或来源镜头时自动保存，保留已有内容，不调用模型；transcribe 仅调用 Fish 返回原声转写，不调用 LLM、翻译或保存业务对白；apply 按草稿 segment ID 的 shotIds 应用选中镜头（留空为全部），保留人工修改；cancel 取消；frame 截取 start/end 中间参考帧供补资产；edit-shot 调整来源区间或 split 拆分；merge-assets 合并重复资产，merge-shots 合并同场相邻镜头（fromId/toId/fromVersion/toVersion）；export 按 selections 的 clipId 顺序合成已选用视频，保留生成音轨。提交长任务须 requestId、最新项目 version，返回任务后查询。失败任务可用新 requestId 与 resumeJobId 续做已完成阶段。', risk: 'write' as const, approval: 'workspace' as const, appId: 'builtin:studio', appName: '视频转绘', parameters: { type: 'object', properties: { ...properties, action: { type: 'string', enum: ['prepare', 'breakdown', 'transcribe', 'apply', 'cancel', 'frame', 'edit-shot', 'merge-assets', 'merge-shots', 'export'] } }, required: ['projectId', 'action'], additionalProperties: false } },
 ] as const;
 
 export async function handleRedrawRequest(req: IncomingMessage, res: ServerResponse, service: VideoRedraw) {

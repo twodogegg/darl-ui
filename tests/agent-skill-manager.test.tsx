@@ -6,6 +6,18 @@ const markdownFile = (content: string, name = 'SKILL.md') => ({ name, type: 'tex
 const importedMarkdown = '---\nname: 审查\ndescription: 检查代码\n---\n\n逐项检查。';
 
 describe('SkillManager', () => {
+  it('confirms deletion, allows cancellation and reports success only after deletion', async () => {
+    const onDelete = vi.fn().mockResolvedValue(undefined);
+    render(<SkillManager open skills={[documentSkill]} onClose={vi.fn()} onSave={vi.fn()} onDelete={onDelete} onImport={vi.fn()} onFavoriteChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '删除' }));
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('确定删除');
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(onDelete).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '删除' }));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '删除' }));
+    await waitFor(() => expect(onDelete).toHaveBeenCalledWith(documentSkill.id));
+    expect(await screen.findByText('删除成功')).toBeInTheDocument();
+  });
   const documentSkill: AgentSkill = {
     id: 'documents', name: '文档技能', description: '阅读和编辑技能资源', scope: 'custom',
     instructions: '# 使用说明\n\n[阅读指南](references/guide.md)\n\n<script>alert(1)</script>\n\n[危险链接](javascript:alert(1))',
@@ -153,5 +165,54 @@ describe('SkillManager', () => {
 
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
     expect(onImport).not.toHaveBeenCalled();
+  });
+  it('opens from a metadata-only catalog, loads the body on demand and keeps it when only metadata changes', async () => {
+    const summary: AgentSkill = { id: 'documents', name: '文档技能', description: '阅读和编辑技能资源', scope: 'custom', version: '1.0', favorite: false };
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const loadSkill = vi.fn(async (skill: AgentSkill) => ({ ...documentSkill, ...skill }));
+    render(<SkillManager open skills={[summary]} onClose={vi.fn()} onSave={onSave} onDelete={vi.fn()} onImport={vi.fn()} onFavoriteChange={vi.fn()} loadSkill={loadSkill} />);
+
+    // 对话框立即打开，正文异步补取，不阻塞列表与元数据。
+    expect(screen.getByLabelText('显示名称')).toHaveValue('文档技能');
+    await waitFor(() => expect(loadSkill).toHaveBeenCalledWith(expect.objectContaining({ id: 'documents' })));
+    expect(await screen.findByRole('heading', { name: '使用说明' })).toBeInTheDocument();
+
+    // 只改元数据时保存，必须带上已加载的正文，不能把指令和资源清空。
+    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: '文档助手' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ id: 'documents', name: '文档助手', instructions: documentSkill.instructions, resources: documentSkill.resources })));
+  });
+
+  it('shows a loading state and blocks body edits until the package body arrives', async () => {
+    const summary: AgentSkill = { id: 'documents', name: '文档技能', description: '阅读和编辑技能资源', scope: 'custom' };
+    let resolveBody: (skill: AgentSkill) => void = () => {};
+    const loadSkill = vi.fn(() => new Promise<AgentSkill>((resolve) => { resolveBody = resolve; }));
+    render(<SkillManager open skills={[summary]} onClose={vi.fn()} onSave={vi.fn()} onDelete={vi.fn()} onImport={vi.fn()} onFavoriteChange={vi.fn()} loadSkill={loadSkill} />);
+
+    await waitFor(() => expect(loadSkill).toHaveBeenCalled());
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载 Skill 正文');
+    resolveBody({ ...documentSkill });
+    expect(await screen.findByRole('heading', { name: '使用说明' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).not.toHaveTextContent('正在加载 Skill 正文');
+  });
+
+  it('waits for a built-in Skill body before saving its settings', async () => {
+    const summary: AgentSkill = { id: 'builtin', name: '内置技能', description: '内置描述', scope: 'builtin' };
+    let resolveBody: (skill: AgentSkill) => void = () => {};
+    const onSave = vi.fn();
+    render(<SkillManager open skills={[summary]} onClose={vi.fn()} onSave={onSave} onDelete={vi.fn()} onImport={vi.fn()} onFavoriteChange={vi.fn()} loadSkill={() => new Promise((resolve) => { resolveBody = resolve; })} />);
+    fireEvent.click(screen.getByLabelText('允许自动调用'));
+    expect(screen.getByRole('button', { name: '保存修改' })).toBeDisabled();
+    resolveBody({ ...summary, instructions: '内置正文', resources: [] });
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存修改' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ instructions: '内置正文', allowImplicitInvocation: false })));
+  });
+
+  it('selects the first Skill when its catalog arrives after opening', async () => {
+    const props = { open: true, onClose: vi.fn(), onSave: vi.fn(), onDelete: vi.fn(), onImport: vi.fn(), onFavoriteChange: vi.fn() };
+    const { rerender } = render(<SkillManager {...props} skills={[]} />);
+    rerender(<SkillManager {...props} skills={[documentSkill]} />);
+    await waitFor(() => expect(screen.getByLabelText('显示名称')).toHaveValue('文档技能'));
   });
 });

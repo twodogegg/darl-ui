@@ -335,7 +335,7 @@ export default function Home() {
             <Link
               className="br-project-card"
               key={p.id}
-              to={`/${p.creationMode === 'video-redraw' ? 'dialogue' : 'outline'}?projectId=${encodeURIComponent(p.id)}`}
+              to={`/${p.creationMode === 'video-redraw' ? 'source' : 'outline'}?projectId=${encodeURIComponent(p.id)}`}
             >
               <span className="br-cover">
                 <>{p.cover ? <img loading="lazy" src={imageUrl(p.cover, 320)} alt={p.title} /> : <div className="studio-cover-empty">未上传封面</div>}</>
@@ -352,8 +352,8 @@ export default function Home() {
           ))}
         </div>
       </section>
-      <section className="br-workflow" aria-label="五步创作流程">
-        <h2 className="br-workflow-title">五步创作，一部作品</h2>
+      <section className="br-workflow" aria-label="创作流程">
+        <h2 className="br-workflow-title">从创作到制作，一部作品</h2>
         <p className="br-workflow-sub">从剧本到成片，让好故事被看见。</p>
         <ol className="br-steps">
           {steps.map((s, i) => {

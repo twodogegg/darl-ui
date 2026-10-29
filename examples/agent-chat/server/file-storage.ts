@@ -69,6 +69,7 @@ export class FileStore {
 
   constructor(dbPath: string, options: FileStoreOptions = {}) {
     this.db = new DatabaseSync(dbPath);
+    this.db.exec('PRAGMA busy_timeout = 5000');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS file_assets (
         id TEXT PRIMARY KEY, sha256 TEXT NOT NULL UNIQUE, name TEXT NOT NULL DEFAULT '', mime_type TEXT NOT NULL,

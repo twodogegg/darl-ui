@@ -2,11 +2,14 @@ export const steps = [
   { path: '/outline', label: '剧本大纲', english: 'OUTLINE' },
   { path: '/script', label: '剧本', english: 'SCRIPT' },
   { path: '/art', label: '美术资产', english: 'ASSETS' },
+  { path: '/storyboard', label: '分镜表', english: 'STORYBOARD' },
   { path: '/video', label: '视频制作', english: 'VIDEO' },
 ]
 export const redrawSteps = [
-  { path: '/dialogue', label: '对白对照', english: 'DIALOGUE' },
+  { path: '/source', label: '原片与拉片', english: 'BREAKDOWN' },
+  { path: '/dialogue', label: '对白改编', english: 'DIALOGUE' },
   { path: '/art', label: '转绘资产', english: 'ASSETS' },
+  { path: '/storyboard', label: '分镜表', english: 'STORYBOARD' },
   { path: '/video', label: '视频制作', english: 'VIDEO' },
   { path: '/film', label: '合成导出', english: 'EXPORT' },
 ]

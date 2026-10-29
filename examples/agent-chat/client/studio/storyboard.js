@@ -1,5 +1,6 @@
 import { sceneLabel } from './scenes'
 import { assetMentionCandidates, mediaReferenceKey as referenceKey, mentionedAssets } from '../../asset-mentions'
+import { isH3FormattedPrompt } from './video-prompt'
 import { durations } from '../../../../src/components/media-workspace/model'
 
 /** 单条视频片段的时长上限；镜头合计超过时提示调整镜头时长或拆分片段。 */
@@ -34,7 +35,7 @@ export function clipMediaReferences(clip, data) {
   const projectAssets = episode ? data.assets.filter(asset => asset.projectId === episode.projectId) : data.assets
   const mentions = mentionedAssets(clip.prompt, projectAssets)
   const assets = projectAssets.filter(asset => (clip.assetIds || []).includes(asset.id) || mentions.some(mention => mention.assetId === asset.id))
-  const references = Array.isArray(clip.references) ? clip.references : []
+  const references = Array.isArray(clip.references) ? clip.references.filter(ref => !ref?.h3PromptReference || isH3FormattedPrompt(clip.prompt)) : []
   const frames = CLIP_IMAGE_COLUMNS.filter(column => clip[column.key]).map(column => ({ id: `${clip.id}-${column.key}`, name: column.label, kind: 'image', url: clip[column.key] }))
   const imageRefs = [
     ...frames,
@@ -54,6 +55,8 @@ export function clipMediaReferences(clip, data) {
 }
 /** 视频制作使用片段当前分镜图或页面所选参考素材。 */
 export function videoImageReferences(clip, references, mode, shots = []) {
+  const optimized = (clip?.references || []).filter(ref => ref?.h3PromptReference && ref.kind === 'image' && ref.url)
+  if (isH3FormattedPrompt(clip?.prompt) && optimized.length) return optimized
   if (mode === '分镜图') return clip?.image ? [{ id: `${clip.id}:storyboard`, name: '分镜图', kind: 'image', url: clip.image }] : []
   return references?.images || []
 }
@@ -103,6 +106,15 @@ export function clipVoices(clip, data) {
     characters: characters.filter((asset) => asset.voiceId === voice.id).map((asset) => asset.name).join('、'),
     enabled: !(clip.disabledVoiceIds || []).includes(voice.id),
   }))
+}
+/** 与视频请求保持相同的音频选择及排序。 */
+export function clipAudioReferences(clip, data, refs, mode) {
+  if (mode !== '参考生成') return []
+  const optimized = (clip.references || []).filter(ref => ref?.h3PromptReference && ref.kind === 'audio' && ref.url)
+  if (isH3FormattedPrompt(clip.prompt) && (clip.references || []).some(ref => ref?.h3PromptReference)) return optimized
+  const voices = clipVoices(clip, data)
+  const rows = [...voices.filter(voice => voice.enabled && voice.url), ...refs.additional.filter(ref => ref.kind === 'audio' && ref.url && !voices.some(voice => voice.id === ref.id))]
+  return [...new Map(rows.map(ref => [ref.url, ref])).values()]
 }
 /** 镜头在片段内的序号：场景属于片段时按片段自身顺序编号。 */
 function segmentNumber(shot, shots) {

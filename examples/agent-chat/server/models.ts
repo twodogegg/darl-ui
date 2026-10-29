@@ -67,11 +67,41 @@ export async function listModels(provider: StoredProvider, signal: AbortSignal):
 
 export interface FunctionTool { name: string; description?: string; parameters: Record<string, unknown> }
 export interface FunctionCall { id: string; name: string; arguments: string }
+export type ToolImageOutput = { text: string; images: Array<{ type: 'image'; mimeType: string; data: string }> };
+/** Keep pixels out of JSON text while retaining a transport-neutral image result. */
+export function toolResultForModel(result: Record<string, unknown>): string | ToolImageOutput {
+  const { images: rawImages, ...metadata } = result;
+  const images = Array.isArray(rawImages) ? rawImages.filter((image): image is ToolImageOutput['images'][number] =>
+    image?.type === 'image' && typeof image.mimeType === 'string' && /^image\/(png|jpe?g|webp|gif)$/i.test(image.mimeType) &&
+    typeof image.data === 'string' && image.data.length > 0 && image.data.length <= 12_000_000 && Buffer.from(image.data, 'base64').toString('base64') === image.data) : [];
+  const text = JSON.stringify(metadata, (_key, value) => value?.type === 'image' && typeof value.data === 'string' ? { type: 'image', mimeType: value.mimeType } : value);
+  return images.length ? { text, images } : text;
+}
+
+/** Chat-completions tool messages cannot carry image pixels. Supply them as user image parts. */
+export function toolImageMessages(messages: ModelMessage[]): ModelMessage[] {
+  return messages.flatMap<ModelMessage>(message => {
+    if (message.role !== 'tool') return [message];
+    const images: Array<{ type: 'image'; image: string | URL; mediaType: string }> = [];
+    const content = message.content.map(part => {
+      if (part.type !== 'tool-result' || part.output.type !== 'content') return part;
+      const value = part.output.value.filter(item => {
+        if (item.type !== 'file' || !item.mediaType.startsWith('image/')) return true;
+        if (item.data.type === 'data' && typeof item.data.data === 'string') images.push({ type: 'image', image: `data:${item.mediaType};base64,${item.data.data}`, mediaType: item.mediaType });
+        else if (item.data.type === 'url') images.push({ type: 'image', image: new URL(item.data.url), mediaType: item.mediaType });
+        else return true;
+        return false;
+      });
+      return { ...part, output: { ...part.output, value } };
+    });
+    return images.length ? [{ ...message, content }, { role: 'user' as const, content: images }] : [message];
+  });
+}
 export interface ToolExecution {
   tools: FunctionTool[];
   maxSteps?: number;
   onIntermediateText?: (text: string, startedAt: string) => void;
-  execute: (call: FunctionCall, signal?: AbortSignal) => Promise<string>;
+  execute: (call: FunctionCall, signal?: AbortSignal) => Promise<string | ToolImageOutput>;
 }
 
 export interface AgentDelegation {
@@ -171,6 +201,11 @@ export function aiTools(execution: ToolExecution | undefined, signal: AbortSigna
       callSignal.throwIfAborted();
       return result;
     },
+    toModelOutput: ({ output }) => {
+      if (typeof output === 'string') return { type: 'text' as const, value: output };
+      const result = output as ToolImageOutput;
+      return { type: 'content' as const, value: [{ type: 'text' as const, text: result.text }, ...result.images.map(image => ({ type: 'file' as const, mediaType: image.mimeType, data: { type: 'data' as const, data: image.data } }))] };
+    },
   })]));
 }
 
@@ -183,6 +218,7 @@ export async function* generate(provider: StoredProvider, model: AgentModelConfi
     model: languageModel(provider, model, onActivity),
     system: instructions,
     messages: modelMessages(messages.map(sourceBoundMessage)),
+    prepareStep: ({ messages }) => ({ messages: toolImageMessages(messages) }),
     tools: model.capabilities?.tools === false ? undefined : aiTools(execution, signal),
     stopWhen: stepCountIs(execution?.maxSteps ?? 8),
     toolCallConcurrency: 1,
@@ -230,9 +266,9 @@ function createToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, 
     instructions,
     output,
     tools: model.capabilities?.tools === false ? {} : loopTools(execution, tracked, signal),
-    prepareStep: () => {
+    prepareStep: ({ messages }: { messages: ModelMessage[] }) => {
       const name = pending.values().next().value;
-      return name ? { activeTools: [name], toolChoice: { type: 'tool' as const, toolName: name } } : {};
+      return { messages: toolImageMessages(messages), ...(name ? { activeTools: [name], toolChoice: { type: 'tool' as const, toolName: name } } : {}) };
     },
     stopWhen: stepCountIs(Math.max(execution?.maxSteps ?? 8, pending.size + 1)),
     toolCallConcurrency: 1,

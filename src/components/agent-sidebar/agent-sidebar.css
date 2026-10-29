@@ -131,6 +131,15 @@
 .darl-agent-lightbox img { display: block; width: auto; height: min(82vh, calc(100vh - 72px)); height: min(82dvh, calc(100dvh - 72px)); max-width: calc(100vw - 48px); object-fit: contain; border-radius: 6px; }
 .darl-agent-lightbox-close { position: absolute; top: 8px; right: 8px; color: var(--darl-agent-muted, #64748b); background: color-mix(in srgb, var(--darl-agent-bg, #fff) 82%, transparent); }
 .darl-agent-lightbox .darl-button:focus-visible { outline: 2px solid var(--darl-agent-primary, #2563eb); outline-offset: 3px; }
+.darl-agent-document-preview { position: fixed; z-index: 91; inset: 0 0 0 auto; width: min(700px, 100vw); display: flex; flex-direction: column; background: var(--darl-agent-bg, #fff); color: var(--darl-agent-text, #0f172a); border-left: 1px solid var(--darl-agent-border, #e2e8f0); box-shadow: -12px 0 40px rgb(0 0 0 / 18%); }
+.darl-agent-document-preview > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 8px 16px; border-bottom: 1px solid var(--darl-agent-border); }
+.darl-agent-document-preview > header h2 { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.darl-agent-document-preview > header div { display: flex; align-items: center; gap: 8px; }
+.darl-agent-document-preview > header a { display: grid; place-items: center; width: 36px; height: 36px; color: inherit; }
+.darl-agent-document-body { flex: 1; min-height: 0; overflow: auto; padding: 24px; overflow-wrap: anywhere; }
+.darl-agent-document-body .darl-agent-markdown { max-width: 640px; margin: 0 auto; font-size: 14px; }
+.darl-agent-document-body .darl-agent-markdown h1 { font-size: 22px; }
+.darl-agent-document-body .darl-agent-markdown h2 { font-size: 18px; }
 
 .darl-agent-picker-toolbar-actions { display: inline-flex; align-items: center; gap: 5px; }
 .darl-agent-skill-manager { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 18px; background: #0f172a66; -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
@@ -158,6 +167,7 @@
 .darl-agent-skill-conflict-error { margin: 0; color: var(--darl-danger, #dc2626); font-size: 11px; }
 .darl-agent-skill-conflict-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .darl-agent-skill-conflict-actions .darl-button { min-width: 84px; }
+.darl-agent-skill-toast { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); padding: 8px 16px; border: 1px solid var(--darl-agent-border); border-radius: 8px; background: var(--darl-agent-bg); color: var(--darl-agent-text); box-shadow: 0 8px 24px rgb(2 6 23 / 20%); font-size: 13px; }
 .darl-agent-manager-search svg { width: 14px; height: 14px; }
 .darl-agent-manager-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--darl-agent-text); font-size: 11px; }
 .darl-agent-skill-picker { left: 11px; right: auto; display: flex; flex-direction: column; overflow: hidden; }
@@ -267,6 +277,9 @@
 .darl-agent-tool-confirm > div { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .darl-agent-execution { margin: 4px 0 12px; min-width: 0; color: var(--darl-agent-muted); }
+.darl-agent-progress { margin: 0 0 10px; color: var(--darl-agent-text); overflow-wrap: anywhere; }
+.darl-agent-progress p { margin: 0; }
+.darl-agent-progress p + p { margin-top: 6px; }
 .darl-agent-execution-summary { display: flex; align-items: center; width: 100%; min-height: 44px; min-width: 0; gap: 8px; padding: 6px 0; border: 0; border-radius: 6px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .darl-agent-execution-summary:hover { color: var(--darl-agent-text); }
 .darl-agent-execution-summary:focus-visible, .darl-agent-execution-row:focus-visible { outline: 2px solid var(--darl-agent-primary); outline-offset: 3px; }

@@ -9,6 +9,7 @@ import Source from './pages/Source'
 import Dialogue from './pages/Dialogue'
 import Art from './pages/Art'
 import VideoProduction from './pages/VideoProduction'
+import Storyboard from './pages/Storyboard'
 import Assets from './pages/Assets'
 import Prompts from './pages/Prompts'
 import { RedrawFilm } from './components/VideoRedraw'
@@ -61,6 +62,7 @@ function Pages({ onContextChange }) {
     <Route path="/dialogue" element={<Dialogue />} />
     <Route path="/script" element={<Script />} />
     <Route path="/art" element={<Art />} />
+    <Route path="/storyboard" element={<Storyboard />} />
     <Route path="/video" element={<VideoProduction />} />
     <Route path="/film" element={<RedrawFilm />} />
     <Route path="/assets" element={<Assets />} />

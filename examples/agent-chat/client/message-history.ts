@@ -15,8 +15,8 @@ export function messageTextForModel(message: AgentMessage): string {
 
 function formatOutput(value: unknown): string {
   if (value === undefined) return '';
-  if (typeof value === 'string') return value.slice(0, MAX_TOOL_OUTPUT);
-  try { return JSON.stringify(value).slice(0, MAX_TOOL_OUTPUT); }
+  if (typeof value === 'string') return value.length > MAX_TOOL_OUTPUT ? `${value.slice(0, MAX_TOOL_OUTPUT)}\n[内容已截断，请按需重新读取]` : value;
+  try { const text = JSON.stringify(value); return text.length > MAX_TOOL_OUTPUT ? `${text.slice(0, MAX_TOOL_OUTPUT)}\n[内容已截断，请按需重新读取]` : text; }
   catch { return String(value).slice(0, MAX_TOOL_OUTPUT); }
 }
 
@@ -32,7 +32,8 @@ export function toolHistoryForModel(message: AgentMessage): string {
     const name = `${call.appName}/${call.toolTitle || call.toolName}`;
     if (call.status === 'cancelled' || call.errorInfo?.stage === 'cancellation') return `[工具调用记录] ${name}：${call.errorInfo?.message || '已停止'}；未经重新授权不要重试。`;
     if (call.status === 'error') return `[工具调用记录] ${name}：调用失败：${call.error || '未知错误'}`;
+    const input = formatOutput(call.input);
     const output = formatOutput(call.output);
-    return `[工具调用记录] ${name}：已完成${output ? `；返回数据：${output}` : ''}`;
+    return `[工具调用记录] ${name}：已完成${input ? `；参数：${input}` : ''}${output ? `；返回数据：${output}` : ''}`;
   }).join('\n');
 }

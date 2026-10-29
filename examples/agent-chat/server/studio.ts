@@ -1,5 +1,6 @@
 import { resolveAssetDependencies, sameDependencyImages, validateAssetDependencies, type DependencyImage } from '../asset-dependencies';
 import actionPrompts from '../prompts/studio-actions.json';
+import { assetMentionCandidates, validateAssetMentions } from '../asset-mentions.js';
 import promptCatalog from '../prompts/studio-prompt-catalog.json';
 import redrawPrompts from '../prompts/video-redraw.json';
 import { createHash } from 'node:crypto';
@@ -89,7 +90,7 @@ export class StudioStore {
       const invalid = Array.isArray(input.fields) ? input.fields.filter(key => !allowedFields.includes(key)) : input.fields;
       throw failure('tool-validation', 'STUDIO_FIELD_INVALID', `查询字段无效：${resource}.fields=${JSON.stringify(invalid)}。可用字段：${allowedFields.join(', ')}`, false);
     }
-    const page = items.slice(offset, offset + limit).map(item => input.fields ? Object.fromEntries(['id', '_version', ...input.fields as string[]].filter(key => Object.hasOwn(item, key)).map(key => [key, item[key]])) : item);
+    const page = items.slice(offset, offset + limit).map(item => input.fields ? Object.fromEntries(['id', '_version', ...input.fields as string[]].filter(key => Object.hasOwn(item, key)).map(key => [key, item[key]])) : resource === 'clips' ? Object.fromEntries(Object.entries(item).filter(([key]) => key !== 'description')) : item);
     return { resource, items: page, total: items.length, nextCursor: offset + limit < items.length ? String(offset + limit) : null };
   }
   apply(requestId: string, changes: StudioChange[]) {
@@ -157,6 +158,21 @@ export class StudioStore {
         clip.shotIds = (clip.shotIds as string[]).filter(id => data.shots.some(shot => shot.id === id));
       }
       this.validate(data);
+      // Validate only newly written text, so unrelated edits remain possible with legacy invalid tags.
+      for (const change of changes) {
+        const field = change.resource === 'shots' ? 'description' : change.resource === 'clips' ? 'prompt' : null;
+        if (!field || change.op === 'delete' || !change.values || !Object.hasOwn(change.values, field)) continue;
+        const item = data[change.resource].find(record => record.id === change.id);
+        if (!item || typeof item[field] !== 'string') continue;
+        const episode = data.episodes.find(record => record.id === item.episodeId);
+        const assets = data.assets.filter(record => record.projectId === episode?.projectId);
+        const candidates = assetMentionCandidates(assets);
+        const error = validateAssetMentions(item[field], candidates);
+        if (error) {
+          const names = assets.map(asset => String(asset.name)).join('、');
+          throw failure('tool-validation', 'STUDIO_ASSET_MENTION_INVALID', `${change.resource}[${change.id}].${field}：${error}。请读取当前项目 assets，使用完整 name（含英文和中文）或 <完整资产名称|完整形态名称>；当前资产：${names || '无'}。`, false);
+        }
+      }
       for (const resource of Object.keys(data) as StudioResource[]) {
         const old = new Map(original[resource].map(item => [item.id, item]));
         for (const before of original[resource]) if (!data[resource].some(item => item.id === before.id)) {
@@ -346,12 +362,30 @@ export class StudioStore {
         const project = required('projects', resource === 'assets' ? item.projectId : required('episodes', item.episodeId, path).projectId, path);
         const episode = resource === 'shots' ? required('episodes', item.episodeId, path) : data.episodes.find(e => e.projectId === project.id && (e.sourceVideo as Record<string, unknown> | undefined)?.fileId === source?.fileId);
         const video = ((episode?.sourceVideo as Record<string, unknown> | undefined) || (project.sourceVideo as Record<string, unknown>));
-        if (!source || !video || !Number.isFinite(video.duration) || source.fileId !== video.fileId || !Number.isFinite(source.start) || !Number.isFinite(source.end)
-          || Number(source.start) < 0 || Number(source.end) <= Number(source.start) || Number(source.end) > Number(video.duration) + 0.001) throw new Error('原片来源区间无效');
-        if (!Array.isArray(source.frames) || source.frames.length > 12) throw new Error('原片参考帧无效');
-        for (const frame of source.frames as Array<Record<string, unknown>>) {
-          if (!Number.isFinite(frame.time) || Number(frame.time) < Number(source.start) || Number(frame.time) > Number(source.end)
-            || this.projects.files.get(String(frame.fileId))?.mimeType !== 'image/jpeg' || this.projects.files.fromUrl(frame.url)?.id !== frame.fileId) throw new Error('原片参考帧或时间无效');
+        if (!source || !video || !Number.isFinite(video.duration)) throw failure('tool-validation', 'STUDIO_SOURCE_METADATA_MISSING', `${path}.source：原片时长尚未保存。请读取本集真实切镜或探测结果，先保存 sourceVideo 的时长等元数据。`, false);
+        if (source.fileId !== video.fileId) throw failure('tool-validation', 'STUDIO_SOURCE_FILE_INVALID', `${path}.source.fileId：须使用本集原视频的 fileId，而不是参考图片 ID。`, false);
+        if (!Number.isFinite(source.start) || !Number.isFinite(source.end) || Number(source.start) < 0 || Number(source.end) <= Number(source.start) || Number(source.end) > Number(video.duration) + 0.001)
+          throw failure('tool-validation', 'STUDIO_SOURCE_RANGE_INVALID', `${path}.source：来源区间 ${source.start}–${source.end} 秒无效，原片时长 ${video.duration} 秒。请使用真实镜头的起止时间。`, false);
+        if (!Array.isArray(source.frames) || source.frames.length > 12) throw failure('tool-validation', 'STUDIO_SOURCE_FRAMES_INVALID', `${path}.source.frames：须为最多 12 张原片参考帧。`, false);
+        for (const [index, frame] of (source.frames as Array<Record<string, unknown>>).entries()) {
+          const framePath = `${path}.source.frames[${index}]`;
+          if (this.projects.files.get(String(frame.fileId))?.mimeType !== 'image/jpeg' || this.projects.files.fromUrl(frame.url)?.id !== frame.fileId)
+            throw failure('tool-validation', 'STUDIO_SOURCE_FRAME_FILE_INVALID', `${framePath}：fileId 和 url 必须对应同一张已保存的 JPEG 原片帧。`, false);
+          if (!Number.isFinite(frame.time) || Number(frame.time) < 0 || Number(frame.time) > Number(video.duration) + 0.001)
+            throw failure('tool-validation', 'STUDIO_SOURCE_FRAME_TIME_INVALID', `${framePath}.time：${frame.time} 秒超出原片时长 ${video.duration} 秒，请使用真实帧时间。`, false);
+          const inAnchor = Number(frame.time) >= Number(source.start) && Number(frame.time) <= Number(source.end);
+          const knownFrame = resource === 'assets' && Array.isArray(video.segments) && (video.segments as Array<Record<string, unknown>>).some(segment => Array.isArray(segment.frames) && (segment.frames as Array<Record<string, unknown>>).some(item => item.fileId === frame.fileId && Number.isFinite(item.time) && Math.abs(Number(item.time) - Number(frame.time)) < 0.0001));
+          if (!inAnchor && !knownFrame) throw failure('tool-validation', 'STUDIO_SOURCE_FRAME_TIME_INVALID', `${framePath}.time：${frame.time} 秒不在来源区间 ${source.start}–${source.end} 秒内，且不是该原片已记录的参考帧。请读取本集来源帧并使用其真实 ID 和时间。`, false);
+        }
+        if (source.evidence !== undefined) {
+          if (!Array.isArray(source.evidence) || source.evidence.length > 50) throw new Error('补充证据须为最多 50 项');
+          for (const evidence of source.evidence as Array<Record<string, unknown>>) {
+            const file = this.projects.files.get(String(evidence.fileId));
+            const expectedType = evidence.kind === 'clip' ? 'video/mp4' : 'image/jpeg';
+            if (!file || file.mimeType !== expectedType || this.projects.files.fromUrl(evidence.url)?.id !== evidence.fileId) throw new Error('补充证据文件与类型不匹配');
+            if (!Number.isInteger(evidence.round) || Number(evidence.round) < 1 || !['single', 'crop', 'grid4', 'clip'].includes(String(evidence.kind)) || typeof evidence.label !== 'string') throw new Error('补充证据字段无效');
+            if (!Number.isFinite(evidence.start) || !Number.isFinite(evidence.end) || Number(evidence.start) < 0 || Number(evidence.end) <= Number(evidence.start) || Number(evidence.end) > Number(video.duration) + 0.001 || Number(evidence.end) <= Number(source.start) || Number(evidence.start) >= Number(source.end)) throw new Error('补充证据区间必须与镜头相交并在原片时长内');
+          }
         }
         if (source.confirmed !== undefined && typeof source.confirmed !== 'boolean') throw new Error('来源确认状态无效');
         for (const key of ['description', 'name', 'dialogue', 'notes']) if (source[key] !== undefined && typeof source[key] !== 'string') throw new Error('来源描述须为文本');
@@ -382,8 +416,8 @@ export class StudioStore {
 }
 
 export const STUDIO_TOOLS = [
-  { name: 'builtin_read_studio', title: '查询短剧创作数据', description: '按项目/剧集/场次批量读取大纲、剧本场次、资产、镜头（shots）、视频片段（clips）。视频制作以 clips.prompt、clips.duration、片段资产和参考素材为生成依据。shots/shotIds 仅作来源记录，不派生或覆盖片段描述、时长、音色。先用 describe=true 获取该资源现有字段、默认值与编辑规则。返回真实 ID、_version、total 和 nextCursor；分页未读完不代表全部内容。', risk: 'read' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { resource: { type: 'string', enum: [...Object.keys(studioFields), 'styles'] }, describe: { type: 'boolean' }, projectId: { type: 'string' }, episodeId: { type: 'string' }, sceneId: { type: 'string' }, ids: { type: 'array', items: { type: 'string' }, maxItems: 500 }, fields: { type: 'array', items: { type: 'string' } }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500 } }, required: ['resource'], additionalProperties: false } },
-  { name: 'builtin_edit_studio', title: '批量修改短剧内容', description: '按读取到的字段白名单提交一组原子编辑，最多500项。修改/删除传最新 _version 作为 version；values 只含改变字段。资源字段、类型、创建必填项与默认值先通过查询工具 describe 获取。分镜角色对白必须引用当前项目真实角色资产；可把新资产与分镜放同批创建。剧本页显示 episodes.scenes[].content，须包含完整动作与台词并同步 script，不支持 scenes[].dialogue。创建项目的 id 为临时标识，返回实际编号；同批新剧集可用临时 projectId 关联。position 可调整记录排序。requestId 为唯一请求标识，重试沿用。关联变化放同批，失败整批回滚。视频片段直接维护 prompt 与 duration；不要求创建或同步 shots，不要为凑整秒修改来源镜头。生成任务用已有媒体工具。', risk: 'write' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { requestId: { type: 'string' }, changes: { type: 'array', minItems: 1, maxItems: 500, items: studioChangeSchema } }, required: ['requestId', 'changes'], additionalProperties: false } },
+  { name: 'builtin_read_studio', title: '查询短剧创作数据', description: '按项目/剧集/场次批量读取大纲、剧本场次、资产、镜头（shots）、视频片段（clips）。分镜表编辑 shots；视频制作以 clips.prompt、clips.duration、片段资产和参考素材为生成依据，镜头不会自动覆盖片段描述、时长或音色。先用 describe=true 获取该资源现有字段、默认值与编辑规则。clips 默认不返回 description；需读取时通过 fields 显式指定，页面视频描述使用 prompt。返回真实 ID、_version、total 和 nextCursor；分页未读完不代表全部内容。', risk: 'read' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { resource: { type: 'string', enum: [...Object.keys(studioFields), 'styles'] }, describe: { type: 'boolean' }, projectId: { type: 'string' }, episodeId: { type: 'string' }, sceneId: { type: 'string' }, ids: { type: 'array', items: { type: 'string' }, maxItems: 500 }, fields: { type: 'array', items: { type: 'string' } }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500 } }, required: ['resource'], additionalProperties: false } },
+  { name: 'builtin_edit_studio', title: '批量修改短剧内容', description: '按读取到的字段白名单提交一组原子编辑，最多500项。修改/删除传最新 _version 作为 version；values 只含改变字段。资源字段、类型、创建必填项与默认值先通过查询工具 describe 获取。分镜角色对白必须引用当前项目真实角色资产；可把新资产与分镜放同批创建。剧本页显示 episodes.scenes[].content，须包含完整动作与台词并同步 script，不支持 scenes[].dialogue。创建项目的 id 为临时标识，返回实际编号；同批新剧集可用临时 projectId 关联。position 可调整记录排序。requestId 为唯一请求标识，重试沿用。关联变化放同批，失败整批回滚。分镜表通过 shots 创建和编辑镜头；视频片段直接维护 prompt 与 duration，镜头变化不会自动修改片段。shots.description 和 clips.prompt 的资产标签必须完全匹配当前项目资产的完整 name 或 <完整名称|完整形态名称>；无效或歧义标签会拒绝整批并返回字段及修正提示。不要为凑整秒修改镜头。生成任务用已有媒体工具。', risk: 'write' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { requestId: { type: 'string' }, changes: { type: 'array', minItems: 1, maxItems: 500, items: studioChangeSchema } }, required: ['requestId', 'changes'], additionalProperties: false } },
 ] as const;
 
 export async function handleStudioRequest(req: IncomingMessage, res: ServerResponse, store: StudioStore): Promise<boolean> {

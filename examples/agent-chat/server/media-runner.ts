@@ -124,7 +124,10 @@ export class MediaJobRunner {
     if (job.status === 'completed') this.completed(job);
   }
   private completed(job: MediaJob) {
-    try { this.onCompleted(job); }
+    try {
+      this.onCompleted(job);
+      if (job.error?.startsWith('生成已完成，写回失败：')) { job.error = undefined; this.store.put(job); }
+    }
     catch (error) { job.error = `生成已完成，写回失败：${error instanceof Error ? error.message : '未知错误'}`; this.store.put(job); }
   }
   async media(job:MediaJob,index=0):Promise<{bytes:Buffer;mime:string}|undefined>{

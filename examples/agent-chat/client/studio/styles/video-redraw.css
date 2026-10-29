@@ -53,3 +53,34 @@
 @media (min-width:1100px) {
   .redraw-source-layout { grid-template-columns:minmax(0,1.2fr) minmax(320px,1fr); }
 }
+.redraw-breakdown { display:grid; gap:16px; }
+.redraw-breakdown-list, .redraw-breakdown-detail { min-width:0; }
+.redraw-breakdown-list { max-height:65vh; overflow:auto; border:1px solid var(--br-border); border-radius:8px; }
+.redraw-breakdown-list h3 { margin:0; padding:14px; }
+.redraw-breakdown-list button { display:flex; width:100%; gap:12px; padding:12px; border:0; border-top:1px solid var(--br-border); background:transparent; color:inherit; text-align:left; cursor:pointer; }
+.redraw-breakdown-list button.active { background:var(--br-theme-accent-wash-12b); }
+.redraw-breakdown-list button span { min-width:0; overflow-wrap:anywhere; }
+.redraw-breakdown-detail h3 { margin:16px 0 10px; }
+.redraw-breakdown-edit { display:grid; gap:12px; margin-top:16px; }
+.redraw-breakdown-edit label { display:grid; gap:6px; }
+.redraw-breakdown-edit textarea { width:100%; min-height:70px; resize:vertical; }
+.redraw-next { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-top:20px; }
+.redraw-next small { color:var(--br-text-secondary); }
+@media (min-width: 800px) { .redraw-breakdown { grid-template-columns:minmax(220px, 300px) minmax(0,1fr); } }
+.redraw-breakdown-tabs { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+.redraw-breakdown-tabs button { padding:8px 16px; border:1px solid var(--br-border); border-radius:6px; background:transparent; color:inherit; cursor:pointer; }
+.redraw-breakdown-tabs button[aria-pressed="true"] { background:var(--br-theme-accent-wash-12b); }
+.redraw-breakdown-list button img { width:72px; height:46px; flex:none; object-fit:cover; border-radius:4px; }
+.redraw-breakdown-list button span { font-size:12px; line-height:1.5; }
+.redraw-breakdown-list button strong { color:var(--br-text-primary); }
+.redraw-breakdown-list > p { padding:12px; }
+.redraw-breakdown-info { min-width:0; padding:16px; border:1px solid var(--br-border); border-radius:8px; }
+.redraw-breakdown-info h3 { margin:0; }
+.redraw-breakdown-detail .redraw-frame-grid a { display:block; color:inherit; font-size:12px; }
+.redraw-breakdown-detail .redraw-frame-grid img { display:block; width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:6px; }
+.redraw-shot-controls { display:flex; gap:8px; }
+@media (min-width:1100px) { .redraw-breakdown { grid-template-columns:minmax(200px,260px) minmax(0,1fr) minmax(230px,300px); } }
+.redraw-supplement { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); gap:12px; }
+.redraw-supplement figure { margin:0; min-width:0; }
+.redraw-supplement figcaption { margin-bottom:6px; font-size:12px; color:var(--br-text-secondary); }
+.redraw-supplement img,.redraw-supplement video { display:block; width:100%; border-radius:6px; }

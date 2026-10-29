@@ -8,6 +8,7 @@ import type { AgentSkill } from '../../../src/components/agent-sidebar/types';
 import { skillMarkdown, skillPathValid, validateSkill } from '../../../src/components/agent-sidebar/skill-package';
 import { readSkillPackage, type SkillLibrary } from './skill-library';
 import type { FileStore } from './file-storage';
+import sharp from 'sharp';
 
 type Risk = 'read' | 'write';
 const string = { type: 'string', minLength: 1 };
@@ -23,7 +24,8 @@ export const RUNTIME_TOOLS = [
   tool('create_skill', '创建 / 安装 Skill', '将生成或下载到工作区的单个 Skill 包安装到网站 Skills 库。path 可为包含 SKILL.md 的目录、单个 SKILL.md 或 ZIP。复用网站导入校验，不执行脚本；成功后所有 Agent 可发现。更新已有自定义技能时同时传 skillId 和 expectedVersion，禁止静默覆盖。', 'write', { path, skillId: string, expectedVersion: string }, ['path'], 'library'),
   tool('load_skill', '加载技能', '读取指定 Skill 的完整指令，并将整个技能包放入当前工作区。返回技能目录、文件清单和 SKILL.md；随后可读取资源或执行脚本。', 'read', { skillId: string }, ['skillId']),
   tool('list_files', '列出工作区文件', '列出指定工作区目录中的文件和文件夹，不递归。', 'read', { path }),
-  tool('read_file', '读取工作区文件', '分页读取工作区文本文件；二进制文件可用 base64 编码读取。图片可使用 publish_file 取得可访问链接。', 'read', { path, offset: integer(0, 50_000_000), limit: integer(1, 32_000), encoding: { type: 'string', enum: ['utf8', 'base64'] } }, ['path']),
+  tool('read_file', '读取工作区文件', '分页读取工作区文本文件；读取 PNG/JPEG/WebP/GIF 时直接返回可看见的图片，不当作 UTF-8 文本。二进制文件可显式用 base64 编码分页读取。', 'read', { path, offset: integer(0, 50_000_000), limit: integer(1, 32_000), encoding: { type: 'string', enum: ['utf8', 'base64'] } }, ['path']),
+  tool('read_image', '查看图片', '读取工作区图片 path、网站已保存的图片 URL（填入 path）或网站文件服务的 fileId（二选一），将真实图片传给当前模型，不自动展示在聊天中。外部未知 URL 不支持；URL、文件名和 Base64 文本本身不等于已看图。', 'read', { path, fileId: string }),
   tool('write_file', '写入工作区文件', '写入工作区文件，自动创建父目录。encoding 为 base64 时支持二进制文件。', 'write', { path, content: { type: 'string', maxLength: 2_800_000 }, encoding: { type: 'string', enum: ['utf8', 'base64'] } }, ['path', 'content']),
   tool('run_command', '运行命令', '在后端机器的当前工作区运行 Shell 命令，可调用已安装的 CLI、Node.js、Python 或安装依赖。返回真实输出、退出码或运行中的进程 ID。不是沙箱，命令拥有后端系统用户的权限；不继承后端 API 密钥。', 'write', { command: { ...string, maxLength: 16_000 }, cwd: path, timeoutMs: integer(100, 600_000), waitMs: integer(0, 10_000) }, ['command'], 'command'),
   tool('process_status', '查看命令状态与输出', '查询当前工作区进程。传 processId 可等待并分页读取输出；省略则列出进程。', 'read', { processId: string, offset: integer(0, 100_000_000), waitMs: integer(0, 10_000) }),
@@ -44,6 +46,10 @@ const MAX_OUTPUT = 1_000_000;
 const MAX_FILE = 50 * 1024 * 1024;
 const PROMPT_FILE = fileURLToPath(new URL('../prompts/skill-runtime.md', import.meta.url));
 const mimeTypes: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf', '.zip': 'application/zip', '.mp4': 'video/mp4', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.txt': 'text/plain', '.md': 'text/plain', '.json': 'text/plain', '.csv': 'text/plain' };
+async function imageResult(bytes: Buffer, name: string) {
+  const { data, info } = await sharp(bytes).rotate().resize({ width: 4096, height: 4096, fit: 'inside', withoutEnlargement: true }).flatten({ background: '#fff' }).jpeg({ quality: 90 }).toBuffer({ resolveWithObject: true });
+  return { name, displayImages: false, width: info.width, height: info.height, images: [{ type: 'image' as const, mimeType: 'image/jpeg', data: data.toString('base64') }] };
+}
 
 function textArg(args: Record<string, unknown>, key: string) {
   const value = args[key];
@@ -183,6 +189,20 @@ export class SkillRuntime {
       });
       return this.snapshot(job, 0, waitMs);
     }
+    if (name === 'builtin_read_image') {
+      if (!!args.path === !!args.fileId) throw new Error('请提供 path 或 fileId 中的一个');
+      const input = args.path ? textArg(args, 'path') : undefined;
+      const urlInput = input && (/^https?:\/\//i.test(input) || input.startsWith('/api/files/'));
+      const storedFromUrl = urlInput ? this.files.fromUrl(input) : undefined;
+      if (urlInput && !storedFromUrl) throw new Error('图片 URL 未对应网站已保存的文件；请使用已保存图片的 fileId 或工作区图片路径。');
+      if (args.fileId || storedFromUrl) {
+        const id = storedFromUrl?.id || textArg(args, 'fileId'), stored = storedFromUrl || this.files.get(id);
+        if (!stored?.mimeType.startsWith('image/') || stored.size > MAX_FILE) throw new Error('请选择不超过 50 MiB 的图片');
+        const file = await this.files.getBytes(id);
+        if (!file) throw new Error('图片文件不存在');
+        return { fileId: id, ...await imageResult(file.bytes, stored.name) };
+      }
+    }
     const target = await this.safePath(root, args.path === undefined && name === 'builtin_list_files' ? '.' : textArg(args, 'path'));
     if (name === 'builtin_create_skill') {
       if (!this.library) throw new Error('宿主未配置 Skills 库');
@@ -220,6 +240,7 @@ export class SkillRuntime {
       const file = await this.files.put(bytes, mimeTypes[extname(target).toLowerCase()] || 'application/octet-stream', basename(target));
       return { name: basename(target), fileId: file.id, url: `/api/files/${file.id}?download=1`, size: file.size, mimeType: file.mimeType };
     }
+    if (name === 'builtin_read_image' || (args.encoding !== 'base64' && mimeTypes[extname(target).toLowerCase()]?.startsWith('image/'))) return { path: target, ...await imageResult(bytes, basename(target)) };
     const encoding = args.encoding ?? 'utf8';
     if (encoding !== 'utf8' && encoding !== 'base64') throw new Error('encoding 仅支持 utf8 和 base64');
     const content = encoding === 'base64' ? bytes.toString('base64') : new TextDecoder('utf-8', { fatal: true }).decode(bytes);

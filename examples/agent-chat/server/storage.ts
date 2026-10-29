@@ -51,6 +51,7 @@ export class LocalStorage {
     this.path = resolve(directory, 'data.sqlite');
     this.database = new DatabaseSync(this.path);
     this.database.exec(`
+      PRAGMA busy_timeout = 5000;
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = NORMAL;
       CREATE TABLE IF NOT EXISTS app_config (

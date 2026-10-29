@@ -65,6 +65,21 @@ async function api<T>(path: string, body?: unknown, method = body ? 'POST' : 'GE
   return data;
 }
 
+/** The library is metadata-only; cache it so opening the manager does not refetch a multi-MB payload. */
+let skillsLoad: { at: number; skills: AgentSkill[] } | null = null;
+const SKILLS_TTL = 60_000;
+async function loadSkillCatalog(force = false): Promise<AgentSkill[]> {
+  if (!force && skillsLoad && Date.now() - skillsLoad.at < SKILLS_TTL) return skillsLoad.skills;
+  const skills = await api<AgentSkill[]>('skills?summary=1');
+  skillsLoad = { at: Date.now(), skills };
+  return skills;
+}
+
+/** Lists carry metadata only; the editor fetches the package body on demand. */
+async function loadSkillBody(skill: AgentSkill): Promise<AgentSkill> {
+  return api<AgentSkill>(`skills/${encodeURIComponent(skill.id)}`);
+}
+
 export function App() {
   const fishVoice = useFishVoice();
   const { sessions, setSessions, activeId, setActiveId, selectSession, renameSession, removeSession, flush, ready: hydrated, loading: historyLoading, activeLoaded, loadError, saveError, retryLoad, retrySave } = useChatSessions(newSession, recoverSession);
@@ -123,7 +138,7 @@ export function App() {
   }, []);
   useEffect(() => {
     let active = true;
-    api<AgentSkill[]>('skills?summary=1').then(value => { if (active) setSkills(value); }).catch(reason => { if (active) setError(reason.message); });
+    loadSkillCatalog().then(value => { if (active) setSkills(value); }).catch(reason => { if (active) setError(reason.message); });
     return () => { active = false; };
   }, []);
   useEffect(() => {
@@ -266,7 +281,7 @@ export function App() {
               continue;
             }
             if (event.type === 'studio-changed') { window.dispatchEvent(new Event('studio-changed')); continue; }
-            if (event.type === 'skills-changed') { setSkills(await api<AgentSkill[]>('skills?summary=1')); continue; }
+            if (event.type === 'skills-changed') { setSkills(await loadSkillCatalog(true)); continue; }
             if (event.type === 'error') { streamError = typeof event.error === 'object' ? event.error as AgentErrorInfo : { code: 'MODEL_REQUEST_FAILED', stage: 'model', message: String(event.error || '请求失败'), requestId: requestId || undefined, runId: runId || undefined, retryable: true, suggestion: '检查模型、提供方和网络设置后重试。' }; break; }
             if (event.type === 'execution') {
               appendTimeline(source.id, answer.id, (event.event || event) as AgentExecutionEvent);
@@ -334,14 +349,19 @@ export function App() {
     await run({ sessionId: session.id, agentId: session.agentId, content: createSkillPrompt.trim(), skillIds: ['builtin:skill-creator'], applicationIds: [], modelId: availableModelId, reasoningEffort: activeEffort }, undefined, session);
   };
   const saveSkill = async (skill: AgentSkill) => {
-    setSkills(await api<AgentSkill[]>('skills', { skill }));
+    const next = await api<AgentSkill[]>('skills?summary=1', { skill });
+    skillsLoad = { at: Date.now(), skills: next };
+    setSkills(next);
   };
   const manageSkills = async () => {
-    try { setSkills(await api<AgentSkill[]>('skills')); setSkillManagerOpen(true); }
+    // 设置页已持有同一份元数据目录：先立即打开，只有从未加载成功时才补取。
+    setSkillManagerOpen(true);
+    if (skillsLoad) return;
+    try { setSkills(await loadSkillCatalog(true)); }
     catch (reason) { setError(reason instanceof Error ? reason.message : '无法读取 Skills'); }
   };
   const buttonClass = 'darl-button darl-button--outline darl-button-size--default';
-  const skillsSettings = <section className="example-skills-settings" aria-labelledby="example-skills-settings-title"><header><div><span className="example-eyebrow">SKILL LIBRARY</span><h2 id="example-skills-settings-title">Skills</h2><p>模型先读取技能目录，按需加载指令和资源。也可以在聊天中 @ 引用指定技能。</p></div><button className={buttonClass} onClick={manageSkills}><Sparkles size={15} />管理 Skills</button></header><div className="example-skills-settings-summary"><strong>{skills.length} 个 Skill</strong><span>可以在聊天中描述需求创建 Skill，或发送链接让 Agent 下载并安装。</span></div>{skillManagerOpen && <SkillManager open skills={skills} onClose={() => setSkillManagerOpen(false)} onCreateViaChat={createSkillViaChat} createViaChatDisabled={generating || !approvalReady || approvalSaving} onImport={saveSkill} onSave={saveSkill} onDelete={async (id) => { setSkills(await api<AgentSkill[]>(`skills/${encodeURIComponent(id)}`, undefined, 'DELETE')); }} onFavoriteChange={async (id, favorite) => { const skill = skills.find((item) => item.id === id); if (skill) await saveSkill({ ...skill, favorite }); }} />}</section>;
+  const skillsSettings = <section className="example-skills-settings" aria-labelledby="example-skills-settings-title"><header><div><span className="example-eyebrow">SKILL LIBRARY</span><h2 id="example-skills-settings-title">Skills</h2><p>模型先读取技能目录，按需加载指令和资源。也可以在聊天中 @ 引用指定技能。</p></div><button className={buttonClass} onClick={manageSkills}><Sparkles size={15} />管理 Skills</button></header><div className="example-skills-settings-summary"><strong>{skills.length} 个 Skill</strong><span>可以在聊天中描述需求创建 Skill，或发送链接让 Agent 下载并安装。</span></div>{skillManagerOpen && <SkillManager open skills={skills} onClose={() => setSkillManagerOpen(false)} onCreateViaChat={createSkillViaChat} createViaChatDisabled={generating || !approvalReady || approvalSaving} onImport={saveSkill} onSave={saveSkill} loadSkill={loadSkillBody} onDelete={async (id) => { const next = await api<AgentSkill[]>(`skills/${encodeURIComponent(id)}?summary=1`, undefined, 'DELETE'); skillsLoad = { at: Date.now(), skills: next }; setSkills(next); }} onFavoriteChange={async (id, favorite) => { const skill = skills.find((item) => item.id === id); if (skill) await saveSkill({ ...(skill.instructions !== undefined ? skill : await loadSkillBody(skill)), favorite }); }} />}</section>;
   const showSettings = () => { setStudioVisible(false); setSettingsReturn(studioVisible ? 'studio' : mediaJobsVisible ? 'media' : 'chat'); setOpen(false); setGuide(false); setPlazaVisible(false); setProjectsVisible(false); setMediaJobsVisible(false); setSettings(true); };
   const leaveSettings = () => {
     setSettings(false);
@@ -397,7 +417,7 @@ export function App() {
       const selections = task.modelSelections as Record<string, string> | undefined;
       const selectedModel = selections?.text || availableModelId;
       if (!draftOnly && !selectedModel) throw new Error('请先配置并启用文本模型');
-      const payload = studioAgentPayload(task, await api<AgentSkill[]>('skills?summary=1'));
+      const payload = studioAgentPayload(task, await loadSkillCatalog());
       if (!sessions.some(item => item.id === session.id)) setSessions(current => [session, ...current]);
       setActiveId(session.id); setOpen(true);
       if (draftOnly) {

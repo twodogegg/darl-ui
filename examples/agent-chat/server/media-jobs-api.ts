@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { dirname, join } from 'node:path';
 import { MediaJobStore } from './media-job-store';
 import { MediaJobRunner } from './media-runner';
+import { promptFor } from './media-adapters';
 import { createFailureLog } from './failure-log';
 import { effectiveCapabilities, type ModelConfiguration } from '../../../src/components/settings/model-config';
 import { persistMediaReferencesInStore, resolveMediaReferencesInStore } from './media-references';
@@ -61,7 +62,8 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
   const store=new MediaJobStore(dbPath, files, (job) => {
     const provider = providers().find(item => item.id === job.providerId);
     records?.syncMedia(job, { modelName: config().models.find(item => item.id === job.modelId)?.displayName, providerName: provider?.name, secret: provider?.apiKey });
-    hooks.completed?.(job);
+    // Business attachment runs through runner.completed(), which preserves results
+    // and reports write-back failures instead of throwing from store notifications.
   });
   const logFailure = createFailureLog(join(dirname(dbPath), 'logs'));
   const runner=new MediaJobRunner(store,(job)=>{
@@ -139,6 +141,18 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
     try{
       if(path==='/api/media-generation/jobs' && method==='GET'){
         sendRevalidatedJson(req,res,store.list().map((job)=>presentJob(job,files,true)));return true;
+      }
+      if(path==='/api/media-generation/preview-prompt' && method==='POST'){
+        const input=await body(req, MAX_MEDIA_BODY);
+        if(typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>16000)throw new Error('提示词无效');
+        const model=config().models.find(m=>m.id===input.modelId&&m.enabled!==false);
+        if(!model || model.type!=='video')throw new Error('视频模型不可用');
+        const bindings=model.bindings.filter(b=>b.enabled!==false);
+        if(bindings.length!==1)throw new Error('每个模型必须且只能绑定一个已启用供应商');
+        const options=input.options&&typeof input.options==='object'&&!Array.isArray(input.options)?input.options as Record<string,unknown>:{};
+        const prepared=hooks.prepare?.({prompt:input.prompt,options},'video')||{prompt:input.prompt,options};
+        const binding=bindings[0];
+        reply(res,200,{prompt:promptFor({prompt:prepared.prompt.trim(),style:parseStyle(input.style),type:'video',modelId:model.id,upstreamModelId:binding.upstreamModelId,protocolKey:binding.protocolKey})});return true;
       }
       if(path==='/api/media-generation/limits' && method==='GET'){reply(res,200,store.limits());return true;}
       if(path==='/api/media-generation/limits' && method==='POST'){

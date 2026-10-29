@@ -7,10 +7,34 @@ import { DatabaseSync } from 'node:sqlite';
 import { MediaJobStore } from '../examples/agent-chat/server/media-job-store';
 import { FileStore } from '../examples/agent-chat/server/file-storage';
 import { persistMediaReferencesInStore, resolveMediaReferencesInStore } from '../examples/agent-chat/server/media-references';
+import { createMediaJobsApi } from '../examples/agent-chat/server/media-jobs-api';
+import { defaultModelConfiguration } from '../src/components/settings/model-config';
 
 const createStore = (path: string) => new MediaJobStore(path, new FileStore(path));
 
 describe('SQLite media generation queue',()=>{
+  it('retains completed files and reports attachment failures without recursively invoking completion notifications', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'media-writeback-'));
+    let api: ReturnType<typeof createMediaJobsApi> | undefined;
+    try {
+      const path = join(dir, 'db.sqlite'), files = new FileStore(path), store = new MediaJobStore(path, files);
+      const file = await files.put(Buffer.from('saved-result'), 'video/mp4', 'result.mp4');
+      const job = store.create({ modelId: 'minimax-h3-flash', type: 'video', prompt: 'A', providerId: 'darl', upstreamModelId: 'minimax-h3-flash', baseUrl: 'https://example.invalid', options: {} });
+      job.status = 'completed'; job.resultFileIds = [file.id]; store.put(job);
+      let calls = 0;
+      api = createMediaJobsApi(path, defaultModelConfiguration, () => [], files, { completed: () => { calls++; throw new Error('历史片段校验失败'); } });
+      expect(calls).toBe(1);
+      expect(api.store.get(job.id)).toMatchObject({ status: 'completed', resultFileIds: [file.id], error: '生成已完成，写回失败：历史片段校验失败' });
+      expect((await api.runner.media(api.store.get(job.id)!))?.bytes.toString()).toBe('saved-result');
+      api.store.put(api.store.get(job.id)!);
+      expect(calls).toBe(1);
+      api.runner.stop();
+      api = createMediaJobsApi(path, defaultModelConfiguration, () => [], files, { completed: () => { calls++; } });
+      expect(calls).toBe(2);
+      expect(api.store.get(job.id)).toMatchObject({ status: 'completed', resultFileIds: [file.id] });
+      expect(api.store.get(job.id)?.error).toBeUndefined();
+    } finally { api?.runner.stop(); rmSync(dir, { recursive: true, force: true }); }
+  });
   it('cleans historical signatures on startup without changing job state or result files', () => {
     const dir = mkdtempSync(join(tmpdir(), 'media-signatures-'));
     try {

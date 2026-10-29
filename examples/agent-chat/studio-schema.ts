@@ -125,13 +125,14 @@ const segmentSchema = { type: 'object', additionalProperties: false, properties:
 const videoSourceSchema = { type: 'object', additionalProperties: false, properties: {
   fileId: { type: 'string' }, url: { type: 'string' }, name: { type: 'string' }, duration: { type: 'number', exclusiveMinimum: 0 },
   width: { type: 'integer', minimum: 1 }, height: { type: 'integer', minimum: 1 }, fps: { type: 'number', minimum: 0 }, hasAudio: { type: 'boolean' },
-  segments: { type: 'array', items: segmentSchema, maxItems: 80 },
+  segments: { type: 'array', items: segmentSchema, maxItems: 200 },
 } };
 export const sourceSchema = {
   type: 'object', additionalProperties: false, properties: {
     fileId: { type: 'string' }, segmentId: { type: 'string' }, start: { type: 'number', minimum: 0 }, end: { type: 'number', exclusiveMinimum: 0 },
     frames: { type: 'array', items: frameSchema, maxItems: 12 }, name: { type: 'string' }, description: { type: 'string' },
     dialogue: { type: 'string' }, confirmed: { type: 'boolean' }, notes: { type: 'string' },
+    evidence: { type: 'array', maxItems: 50, items: { type: 'object', additionalProperties: false, properties: { fileId: { type: 'string' }, url: { type: 'string' }, round: { type: 'integer', minimum: 1 }, kind: { type: 'string', enum: ['single', 'crop', 'grid4', 'clip'] }, start: { type: 'number', minimum: 0 }, end: { type: 'number', exclusiveMinimum: 0 }, label: { type: 'string' } }, required: ['fileId', 'url', 'round', 'kind', 'start', 'end', 'label'] } },
   }, required: ['fileId', 'start', 'end', 'frames'],
 };
 export const studioRequiredOnCreate: Partial<Record<StudioResource, string[]>> = {
@@ -171,6 +172,7 @@ export function studioValueSchema(resource: StudioResource): Record<string, unkn
     if (numericFields.has(key)) schema = { type: key === 'planned' ? ['number', 'null'] : 'number' };
     if (arrayFields.has(key)) schema = { type: 'array' };
     if (objectFields.has(key)) schema = key === 'source' ? sourceSchema : key === 'sourceVideo' ? videoSourceSchema : { type: 'object' };
+    if (key === 'source' && (resource === 'assets' || resource === 'shots')) schema = { ...sourceSchema, description: resource === 'assets' ? '来源区间须在原片时长内；frames 可引用区间内的原片帧，也可引用本集 sourceVideo.segments 中其他时间点的真实帧（fileId、url、time 按记录原样填写）。' : '来源区间须在原片时长内，frames 的时间必须落在该镜头来源区间内。' };
     if (key === 'creationMode') schema = { type: 'string', enum: ['script', 'video-redraw'] };
     if (key === 'adaptation') schema = { type: 'string', enum: ['忠实', '抽核', '借壳'] };
     if (key === 'targetRegion') schema = { type: 'string', enum: ['japan', 'western'] };

@@ -46,19 +46,17 @@
     }
   },
   "storyboard": {
-    "visibleMessage": "请帮我编写或完善这集的视频片段描述。",
-    "hiddenMessage": "读取指定项目、剧集、场次、已有视频片段和资产；视频制作直接维护 clips.prompt（完整视频描述）、clips.duration（片段时长）、assetIds 与 references。把初始站位、逐镜画面与动作、景别运镜切镜、对白音效和时间安排统一写进 clips.prompt，不再另建或同步隐藏的 shots、blocking 或 sourceSignature。历史 shots 仅供查阅原片依据，不修改来源镜头凑时长。片段时长大于 0 且最多 15 秒，可含小数；生成请求按模型支持的时长向上取整，不能为整秒改写镜头时长。创建片段无需 shotIds，保留已有片段 ID、选用图片视频、历史版本和参考素材。先 describe 确认字段，按最新版本保存并回读验证。视频转绘按目标地区语言整理，保留用户最新描述与改编要求，不自动用原片镜头覆盖。\n\n资产引用协议：模型读取和保存资产引用时必须使用规范尖括号标记。基础资产使用 <资产名称>，具体变装、年龄或衍生形态使用 <资产名称|形态名称>；竖线左侧保持主体名称，右侧保持形态名称。不要只写页面显示的 @ 标签，不要把形态降级成基础资产。分镜和视频提示词中的角色、场景、道具、已启用参考图都要引用真实项目资产；无法确认资产时保留普通文字并提示确认。",
+    "visibleMessage": "请帮我编写或完善这集的分镜表。",
+    "hiddenMessage": "先加载 storyboard-table 和 darl-studio。按分镜表 Skill 编写、保存并回读；逐条填写对白的发声方式，画面与音效不写后期字幕。视频转绘保留原片来源与用户已有修改。",
     "parameters": [
       "projectId",
       "episodeId"
     ],
-    "skills": [],
-    "skillsByProjectMode": {
-      "video-redraw": [
-        "video-redraw",
-        "darl-studio"
-      ]
-    }
+    "skills": [
+      "darl-studio",
+      "storyboard-table"
+    ],
+    "skillsByProjectMode": {}
   },
   "audio": {
     "visibleMessage": "请帮我处理音频需求。",
@@ -99,7 +97,7 @@
   },
   "redraw-analyze": {
     "visibleMessage": "请根据原片拉片并整理原声对白。",
-    "hiddenMessage": "先加载 short-drama-video-breakdown、fish-audio-api 和 darl-studio。按按钮的 projectId、episodeId 读取现有任务与项目设置。用视频转绘工具的 breakdown 只做 PySceneDetect 切镜和拼图，transcribe 只调用 Fish 转写；先复用已完成结果，分别分页读取结果。由你查看实际拼图并根据 short-drama-video-breakdown 进行必要补证、记录中文原片镜头；根据 Fish 原声转写结合上下文校订、标记说话人疑点并翻译为目标语言。通过工作台现有业务工具保存结果，不能把背景操作或仅提交任务说成完成。不要生成目标语言的画面描述。失败时保留结果并报告。",
+    "hiddenMessage": "先加载 short-drama-video-breakdown、fish-audio-api 和 darl-studio。按按钮的 projectId、episodeId 读取现有任务与项目设置。用视频转绘工具的 breakdown 做 PySceneDetect 切镜，获得各镜头单帧和拼图，并在缺失时保存原片元数据；transcribe 只调用 Fish 转写；先复用已完成结果，按任务类型分别分页读取；已有 prepare 切镜帧可直接使用，不必重复切镜。切镜补充原片信息后，提交转写或保存前重新读取项目和剧集版本。读取实际拼图或单帧及时间映射，根据 short-drama-video-breakdown 进行必要补证、记录中文原片镜头；根据 Fish 原声转写结合画面字幕和上下文校订原文，保留字幕与语音冲突、标记说话人疑点；将原文和待确认事项保存到对应 shots.source.dialogue 和 shots.source.notes。不要翻译或创建改编对白，等待用户点击下一步。保存前读取现有镜头并保留用户修改，不覆盖已有人工内容。通过工作台现有业务工具保存结果，按真实原片 ID、时长、来源区间和参考帧时间填写；提交失败时先读取具体字段错误并修正，不能盲目重复整批。不能把背景操作或仅提交任务说成完成。不要生成目标语言的画面描述或改编对白。失败时保留结果并报告。 切镜和中点帧只是分析输入，不是拉片完成。对每个当前来源镜头写入可见画面与动作、原片对白或无对白的判断，保留角色/场景/道具线索、证据与不确定项；将原片事实写入 shots.source.description、dialogue、notes，按实际原片时间与 segmentId 匹配。对无证据内容明确待确认，不用一句中点帧时间代替分析。回读并核对每个当前切镜是否有具体画面描述；有缺项时说明未完成，不能把抽帧或空记录说成完成。",
     "parameters": [
       "projectId",
       "episodeId",
@@ -111,5 +109,33 @@
       "fish-audio-api",
       "darl-studio"
     ]
+  },
+  "redraw-dialogue": {
+    "visibleMessage": "请根据拉片结果生成对白改编。",
+    "hiddenMessage": "读取指定项目、剧集、原片镜头及其 source.dialogue、source.notes 和已有对白，以当前剧集 sourceVideo.segments 为镜头边界；仅使用 segmentId 一致或来源时间完全一致的镜头分析，旧切镜中不匹配的记录不得混入，发现缺少分析时，先复用已有切镜、帧和原声转写，对缺失镜头完成原片画面与对白分析并保存，再生成对白改编；若无法完成则保留已有内容并报告缺失，不得将部分结果称为全片。结合目标地区、目标语言和用户要求，将原片对白改编为自然可表演的目标语言。保持原意和专名一致，标记来源不确定或字幕与语音冲突；根据目标语言估算说话时长，明确只是估算。通过工作台工具 describe 查询 dialogues 字段，保存原文、改编、来源时间及备注，按真实来源去重，保留已有用户修改，不覆盖已有对白；保存后回读并报告实际结果。原片无对白时如实说明。",
+    "parameters": [
+      "projectId",
+      "episodeId"
+    ],
+    "skills": [
+      "short-drama-video-breakdown",
+      "fish-audio-api",
+      "darl-studio"
+    ]
+  },
+  "video-description": {
+    "visibleMessage": "请帮我编写或完善这集的视频片段描述。",
+    "hiddenMessage": "读取指定项目、剧集、场次、分镜表、已有视频片段和资产；以已确认分镜为依据编写片段描述，并保留用户已有修改；视频制作直接维护 clips.prompt（完整视频描述）、clips.duration（片段时长）、assetIds 与 references。把初始站位、逐镜画面与动作、景别运镜切镜、对白音效和时间安排统一写进 clips.prompt，不再另建或同步隐藏的 shots、blocking 或 sourceSignature。不修改已有镜头凑时长。片段时长大于 0 且最多 15 秒，可含小数；生成请求按模型支持的时长向上取整，不能为整秒改写镜头时长。创建片段无需 shotIds，保留已有片段 ID、选用图片视频、历史版本和参考素材。先 describe 确认字段，按最新版本保存并回读验证。视频转绘按目标地区语言整理，保留用户最新描述与改编要求，不自动用原片镜头覆盖。\n\n资产引用协议：模型读取和保存资产引用时必须使用规范尖括号标记。基础资产使用 <资产名称>，具体变装、年龄或衍生形态使用 <资产名称|形态名称>；竖线左侧保持主体名称，右侧保持形态名称。不要只写页面显示的 @ 标签，不要把形态降级成基础资产。分镜和视频提示词中的角色、场景、道具、已启用参考图都要引用真实项目资产；无法确认资产时保留普通文字并提示确认。",
+    "parameters": [
+      "projectId",
+      "episodeId"
+    ],
+    "skills": [],
+    "skillsByProjectMode": {
+      "video-redraw": [
+        "video-redraw",
+        "darl-studio"
+      ]
+    }
   }
 }

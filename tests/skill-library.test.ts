@@ -8,6 +8,7 @@ import { LocalStorage } from '../examples/agent-chat/server/storage';
 import { FileStore } from '../examples/agent-chat/server/file-storage';
 import { SkillLibrary } from '../examples/agent-chat/server/skill-library';
 import { SkillRuntime } from '../examples/agent-chat/server/skill-runtime';
+import { newSkillDraft } from '../src/components/agent-sidebar/skill-package';
 
 let directory: string;
 let library: SkillLibrary;
@@ -66,5 +67,26 @@ it('rejects invalid, escaping, symlinked, oversized and cancelled packages witho
   await expect(run('create_skill', { path: 'draft' })).rejects.toThrow('一次只能');
   const controller = new AbortController(); controller.abort();
   await expect(run('create_skill', { path: 'draft' }, controller.signal)).rejects.toThrow();
+  expect(library.list().map(skill => skill.id)).toEqual(['builtin:skill-creator']);
+});
+
+it('serves metadata-only catalogs and keeps the cached library coherent across writes', async () => {
+  const storage = new LocalStorage(directory);
+  const created = library.create({ ...newSkillDraft(), name: '长技能', description: '带大资源', instructions: '正文'.repeat(1_000), resources: [{ path: 'references/data.md', content: 'x'.repeat(50_000) }] });
+  // 保存后立刻可读，不需要重新解析整库 JSON。
+  expect(library.list().map(skill => skill.id)).toContain(created.id);
+  const [builtin, summary] = library.catalog();
+  expect(builtin).not.toHaveProperty('instructions');
+  expect(builtin).not.toHaveProperty('resources');
+  expect(summary).not.toHaveProperty('instructions');
+  expect(summary).not.toHaveProperty('resources');
+  expect(summary).toMatchObject({ id: created.id, name: '长技能', description: '带大资源', scope: 'custom' });
+  expect(JSON.stringify(library.catalog()).length).toBeLessThan(JSON.stringify(library.list()).length / 10);
+  expect(library.list().find(skill => skill.id === created.id)?.instructions).toBe('正文'.repeat(1_000));
+  // 第二个实例读同一份数据库时能看到已保存内容。
+  const reopened = new SkillLibrary(storage);
+  await reopened.ready;
+  expect(reopened.list().map(skill => skill.id)).toContain(created.id);
+  library.delete(created.id);
   expect(library.list().map(skill => skill.id)).toEqual(['builtin:skill-creator']);
 });

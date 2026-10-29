@@ -33,7 +33,7 @@ export default function Dialogue() {
       const episodeId = crypto.randomUUID(), number = Math.max(0, ...episodes.map(item => item.number)) + 1
       const saved = await update(draft => draft.episodes.push({ ...structuredClone(studioDefaults.episodes), id: episodeId, projectId: project.id, number, title: file.name.replace(/\.mp4$/i, ''), sourceVideo: { fileId: uploaded.fileId, url: `/api/files/${uploaded.fileId}`, name: file.name } }))
       if (!saved) throw new Error('剧集保存失败')
-      navigate(`/dialogue?projectId=${encodeURIComponent(project.id)}&episodeId=${encodeURIComponent(episodeId)}`)
+      navigate(`/source?projectId=${encodeURIComponent(project.id)}&episodeId=${encodeURIComponent(episodeId)}`)
       start(episodeId)
     } catch (reason) { notify(reason.message) }
     finally { setUploading(false) }
@@ -46,6 +46,6 @@ export default function Dialogue() {
       <div className="dialogue-meta"><strong>{row.idCode}</strong><span>{clock(row.sourceStart)}–{clock(row.sourceEnd)}</span><button type="button" disabled={!source?.url} onClick={() => play(row)}>播放原声</button><span>{row.timingStatus === 'estimate_not_measured' ? '时长估算，未实测' : row.timingStatus}</span><span>预计说话 {Number(row.estimatedSeconds || 0).toFixed(1)} 秒 · 窗口 {Number(row.plannedSeconds || 0).toFixed(1)} 秒</span></div>
       <div className="dialogue-columns">{[['原片对白', 'sourceText', 'sourceSpeaker'], ['改编对白', 'targetText', 'targetSpeaker']].map(([title, text, speaker]) => <section key={text}><h3>{title}</h3><Field label="说话人" value={row[speaker]} onSave={value => patch('dialogues', row.id, { [speaker]: value })} /><Field label="台词" value={row[text]} multiline onSave={value => patch('dialogues', row.id, { [text]: value })} /></section>)}</div>
       <div className="dialogue-columns"><Field label="语气与表演" value={row.tone} onSave={value => patch('dialogues', row.id, { tone: value })} /><Field label="校订及改编说明" value={row.note} onSave={value => patch('dialogues', row.id, { note: value })} /></div>
-    </article>)}{!rows.length && <div className="empty"><h2>暂无对白</h2><p>本集的原文和改编对白会显示在这里。</p></div>}</div>
+    </article>)}{!rows.length && <div className="empty"><h2>暂无对白</h2><p>生成中的进度和失败原因可在 AI 助手中查看，完成后本集对白会显示在这里。</p></div>}</div>
   </Workflow>
 }

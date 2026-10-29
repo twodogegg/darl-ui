@@ -220,7 +220,7 @@ export default function ArtAssetDrawer({
                 aria-label="查看大图"
                 onClick={() => setPreview({ name: form.name, url: image })}
               >
-                <img loading="lazy" src={imageUrl(image, 1024)} alt={form.name} />
+                <img loading="lazy" src={image} alt={form.name} />
               </button>
             ) : (
               <div className="asset-drawer__empty">

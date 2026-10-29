@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { aiTools, generate, languageModel, modelMessages, type StoredProvider } from '../examples/agent-chat/server/models';
+import { aiTools, generate, languageModel, modelMessages, toolImageMessages, toolResultForModel, type StoredProvider } from '../examples/agent-chat/server/models';
+import type { ModelMessage } from 'ai';
 import { ToolConfirmations } from '../examples/agent-chat/server/mcp';
 import { resolveTextModel } from '../examples/agent-chat/server/api';
 import { defaultModelConfiguration } from '../src/components/settings/model-config';
@@ -29,6 +30,24 @@ describe('AI SDK runtime integration boundary', () => {
       { role: 'user', content: [{ type: 'text', text: '描述这张图' }, { type: 'image', image: 'data:image/png;base64,aGVsbG8=', mediaType: 'image/png' }] },
       { role: 'assistant', content: '**好的**' },
     ]);
+  });
+
+  it('passes tool images as model image parts without serializing pixels into text or duplicating them', async () => {
+    const image = { type: 'image' as const, mimeType: 'image/png', data: 'aGVsbG8=' };
+    const output = toolResultForModel({ fileId: 'frame', images: [image, null, { type: 'image', data: 'bad', mimeType: 'text/plain' }], content: [image] });
+    expect(output).toEqual({ text: '{"fileId":"frame","content":[{"type":"image","mimeType":"image/png"}]}', images: [image] });
+    const tools = aiTools({ tools: [{ name: 'read', parameters: { type: 'object' } }], execute: async () => output }, new AbortController().signal)!;
+    const result = await tools.read.toModelOutput!({ output, input: {}, toolCallId: 'read-1' });
+    const messages: ModelMessage[] = [
+      { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'read-1', toolName: 'read', input: {} }] },
+      { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'read-1', toolName: 'read', output: result }] },
+    ];
+    const prepared = toolImageMessages(messages);
+    expect(prepared[1]).toMatchObject({ role: 'tool', content: [{ output: { type: 'content', value: [{ type: 'text', text: expect.stringContaining('frame') }] } }] });
+    expect(prepared[2]).toEqual({ role: 'user', content: [{ type: 'image', mediaType: 'image/png', image: 'data:image/png;base64,aGVsbG8=' }] });
+    expect(toolImageMessages(prepared)).toEqual(prepared);
+    expect(messages).toHaveLength(2);
+    expect(toolResultForModel({ value: 'plain', images: [] })).toBe('{"value":"plain"}');
   });
 
   it('keeps MCP schemas intact and passes execution through dynamic tools', async () => {

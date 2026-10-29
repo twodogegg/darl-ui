@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import sharp from 'sharp';
 import { LocalStorage } from '../examples/agent-chat/server/storage';
 import { FileStore } from '../examples/agent-chat/server/file-storage';
 import { SkillRuntime } from '../examples/agent-chat/server/skill-runtime';
@@ -61,6 +62,36 @@ describe('generic local Skill runtime', () => {
     expect((await execute('read_file', { path: 'inputs/source.txt' })).content).toBe('attachment');
     await expect(execute('import_file', { path: 'inputs/missing.txt', fileId: 'missing' })).rejects.toThrow('附件不存在');
     await expect(execute('write_file', { path: 'bad.bin', content: '!!!!', encoding: 'base64' })).rejects.toThrow('base64');
+  });
+
+  it('reads actual image pixels from workspace files and stored file IDs, keeping binary pagination available', async () => {
+    const bytes = await sharp({ create: { width: 80, height: 40, channels: 3, background: '#cc2200' } }).png().toBuffer();
+    await execute('write_file', { path: 'frames/frame.png', content: bytes.toString('base64'), encoding: 'base64' });
+    const file = await files.put(bytes, 'image/png', 'original.png');
+    for (const result of [
+      await execute('read_file', { path: 'frames/frame.png' }),
+      await execute('read_image', { path: 'frames/frame.png' }),
+      await execute('read_image', { fileId: file.id }),
+    ]) {
+      expect(result).toMatchObject({ width: 80, height: 40, images: [{ type: 'image', mimeType: 'image/jpeg' }] });
+      expect(result).not.toHaveProperty('content');
+      const pixels = sharp(Buffer.from(result.images[0].data, 'base64'));
+      expect(await pixels.metadata()).toMatchObject({ format: 'jpeg', width: 80, height: 40 });
+      expect((await pixels.stats()).channels[0].mean).toBeGreaterThan(190);
+    }
+    expect(await execute('read_file', { path: 'frames/frame.png', encoding: 'base64', limit: 8 })).toMatchObject({ content: bytes.toString('base64').slice(0, 8), nextOffset: 8, truncated: true });
+  });
+
+  it('rejects invalid images and enforces the existing workspace boundary for image reads', async () => {
+    await execute('write_file', { path: 'bad.jpg', content: 'not an image' });
+    await expect(execute('read_image', { path: 'bad.jpg' })).rejects.toThrow();
+    await expect(execute('read_image', { path: '../outside.jpg' })).rejects.toThrow('超出工作区');
+    await expect(execute('read_image', { path: 'missing.jpg' })).rejects.toThrow('ENOENT');
+    await expect(execute('read_image', {})).rejects.toThrow('一个');
+    await expect(execute('read_image', { path: 'bad.jpg', fileId: 'id' })).rejects.toThrow('一个');
+    const text = await files.put(Buffer.from('text'), 'text/plain', 'text.txt');
+    await expect(execute('read_image', { fileId: text.id })).rejects.toThrow('图片');
+    await expect(execute('read_image', { fileId: 'missing' })).rejects.toThrow('图片');
   });
 
   it('returns actual exit errors and missing dependencies without fabricating success', async () => {

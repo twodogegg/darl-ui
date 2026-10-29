@@ -59,7 +59,8 @@ export class RequestRecordStore {
   private closed = false;
   constructor(private storage: LocalStorage, readonly files: FileStore, private secrets: () => string[] = () => []) {
     this.db = new DatabaseSync(storage.path);
-    this.db.exec(`PRAGMA journal_mode=WAL;
+    this.db.exec(`PRAGMA busy_timeout=5000;
+      PRAGMA journal_mode=WAL;
       CREATE TABLE IF NOT EXISTS request_records (id TEXT PRIMARY KEY, type TEXT NOT NULL, model_id TEXT NOT NULL, provider_id TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, ended_at TEXT, data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS request_records_time ON request_records(created_at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS request_records_filter ON request_records(type, status, created_at DESC);`);

@@ -106,15 +106,20 @@ export async function prepareBreakdown(files: FileStore, fileId: string, signal:
       return { id: `SHOT_${String(index + 1).padStart(4, '0')}`, start, end, startFrame, endFrameExclusive: endFrame, midpointFrame: startFrame + Math.floor((endFrame - startFrame) / 2) };
     });
     const extracted = await extractVideoFrames(path, root, shots.map(shot => Math.max(0, (shot.midpointFrame - 0.00001) / info.fps)), signal);
-    const sheets = [];
+    const sheets = [], shotsWithFrames: Array<typeof shots[number] & { frames: Array<{ fileId: string; time: number; url: string }> }> = [];
     for (let start = 0; start < shots.length; start += 9) {
       const batch = shots.slice(start, start + 9);
-      const frames = await Promise.all(batch.map(async (shot, i) => ({ image: await readFile(extracted[start + i].path), segmentId: shot.id, frameIndex: 0, time: extracted[start + i].time })));
+      const frames = await Promise.all(batch.map(async (shot, i) => {
+        const image = await readFile(extracted[start + i].path), time = extracted[start + i].time;
+        const saved = await files.put(image, 'image/jpeg', `原片-${shot.id}.jpg`);
+        return { image, segmentId: shot.id, frameIndex: 0, time, stored: { fileId: saved.id, time, url: files.originalUrl(saved)! } };
+      }));
+      shotsWithFrames.push(...batch.map((shot, i) => ({ ...shot, frames: [frames[i].stored] })));
       const sheet = await createFrameSheet(frames, signal, shots.map(shot => shot.id));
       const image = await files.put(sheet.bytes, 'image/jpeg', `拉片总览-${start + 1}.jpg`);
       sheets.push({ fileId: image.id, url: files.originalUrl(image)!, frames: sheet.frames });
     }
-    return { sourceFileId: fileId, ...info, detector: 'pyscenedetect-adaptive', timebaseNote: '基于视频帧率计算；可变帧率素材需另核对时间戳', shots, sheets };
+    return { sourceFileId: fileId, ...info, detector: 'pyscenedetect-adaptive', timebaseNote: '基于视频帧率计算；可变帧率素材需另核对时间戳', shots: shotsWithFrames, sheets };
   });
 }
 

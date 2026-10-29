@@ -42,9 +42,9 @@ export default defineConfig(({ mode }) => {
       { find: '@darl/ui', replacement: resolve(root, 'src/index.ts') },
     ] },
     cacheDir: resolve(root, 'node_modules/.vite/agent-chat'),
-    server: { host: '0.0.0.0', port: Number(env.AGENT_CHAT_PORT || 5197), strictPort: true, allowedHosts, fs: { deny: fsDeny } },
+    server: { proxy: { '/opencut': { target: 'http://127.0.0.1:5310', ws: true } }, host: '0.0.0.0', port: Number(env.AGENT_CHAT_PORT || 5197), strictPort: true, allowedHosts, fs: { deny: fsDeny } },
     // preview 直接服务 build 产物：首屏只有打包后的少量资源，适合通过隧道/反代对外访问。
-    preview: { host: '0.0.0.0', port: Number(env.AGENT_CHAT_PREVIEW_PORT || 5199), strictPort: true, allowedHosts, fs: { deny: fsDeny } },
+    preview: { proxy: { '/opencut': { target: 'http://127.0.0.1:5310', ws: true } }, host: '0.0.0.0', port: Number(env.AGENT_CHAT_PREVIEW_PORT || 5199), strictPort: true, allowedHosts, fs: { deny: fsDeny } },
     build: { outDir: resolve(root, 'dist/agent-chat'), emptyOutDir: true },
   };
 });

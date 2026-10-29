@@ -239,7 +239,7 @@ function ArtWorkspace({ context }) {
                     patch('episodes', e.id, { stage: Math.max(e.stage, 4) }),
                   )
                   navigate(
-                    `/video?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(context.episodes[0]?.id || '')}`,
+                    `/storyboard?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(context.episodes[0]?.id || '')}`,
                   )
                 }}
               >

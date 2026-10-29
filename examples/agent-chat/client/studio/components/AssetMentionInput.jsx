@@ -1,5 +1,6 @@
 import { imageUrl } from '../../image-url'
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 const MARKER = /<([^<>|]+)(?:\|([^<>]+))?>/g
 const H3_REFERENCE = /^(?:Subject|Picture|Video|Audio) \d+$|^(?:d|\/d|scenetrans|cutoff)$/
@@ -139,13 +140,36 @@ function render(root, value, candidates) {
   })
 }
 
+function useMentionPreview() {
+  const [preview, setPreview] = useState(null)
+  useEffect(() => {
+    const hide = () => setPreview(null)
+    window.addEventListener('scroll', hide, true)
+    window.addEventListener('resize', hide)
+    return () => { window.removeEventListener('scroll', hide, true); window.removeEventListener('resize', hide) }
+  }, [])
+  const show = event => {
+    const chip = event.target.closest('.asset-mention-chip')
+    const img = chip?.querySelector('img')
+    if (!img) return
+    const rect = chip.getBoundingClientRect()
+    const size = Math.min(220, window.innerWidth - 16, window.innerHeight - 16)
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - size - 8))
+    const top = rect.top >= size + 8 ? rect.top - size - 6 : Math.min(rect.bottom + 6, window.innerHeight - size - 8)
+    setPreview({ src: img.src, left, top, size, root: chip.closest('.rn-studio') })
+  }
+  return { show, hide: () => setPreview(null), popup: preview && createPortal(<img className="asset-mention-preview" src={preview.src} alt="" style={{ left: preview.left, top: preview.top, width: preview.size, height: preview.size }} />, preview.root || document.body) }
+}
+
 export function MentionText({ value, candidates = [] }) {
-  return <span className="asset-mention-text">{parse(value, candidates).map((part, index) => part.text !== undefined
+  const preview = useMentionPreview()
+  return <span className="asset-mention-text" onMouseOver={preview.show} onMouseOut={preview.hide}>{preview.popup}{parse(value, candidates).map((part, index) => part.text !== undefined
     ? <span key={index}>{part.text}</span>
     : <span key={index} className={`asset-mention-chip asset-mention-chip--inline ${part.h3 ? 'asset-mention-chip--h3' : part.candidate ? `asset-mention-chip--${part.candidate.typeKey || 'asset'}` : 'asset-mention-chip--unknown'}`} title={part.h3 ? 'H3 内部引用标签' : part.candidate ? `${part.candidate.type} · ${part.candidate.name}${part.candidate.variantName ? ` · ${part.candidate.variantName}` : ''}` : '无法解析的资产引用，请确认'}>{part.candidate?.image && <img loading="lazy" src={imageUrl(part.candidate.image, 160)} alt="" />}<span>{part.label}</span></span>)}</span>
 }
 
 export default function AssetMentionInput({ value = '', onChange, onBlur, candidates = [], multiline = true, label, placeholder = '输入文字，键入 @ 选择资产…', inputRef }) {
+  const preview = useMentionPreview()
   const root = useRef(null)
   const attach = (element) => { root.current = element; if (typeof inputRef === 'function') inputRef(element); else if (inputRef) inputRef.current = element }
   const focused = useRef(false)
@@ -192,7 +216,8 @@ export default function AssetMentionInput({ value = '', onChange, onBlur, candid
     if (event.key === 'Backspace' && removeAdjacentMention(root.current, 'backward')) { event.preventDefault(); emit() }
     if (event.key === 'Delete' && removeAdjacentMention(root.current, 'forward')) { event.preventDefault(); emit() }
   }
-  return <div className="asset-mention-field">
+  return <div className="asset-mention-field" onMouseOver={preview.show} onMouseOut={preview.hide}>
+    {preview.popup}
     {label && <span className="asset-mention-label">{label}</span>}
     <Tag ref={attach} className="asset-mention-editor" contentEditable suppressContentEditableWarning role="textbox" aria-label={label} data-placeholder={placeholder} onFocus={() => { focused.current = true }} onBlur={() => { setTimeout(() => setMenu(null), 120); focused.current = false; onBlur?.(serialize(root.current)) }} onInput={() => { emit(); inspect() }} onKeyDown={onKeyDown} />
     {menu && <div className="asset-mention-menu" role="listbox">{menu.items.map((candidate, index) => <span key={candidate.protocol || protocolOf(candidate)}>{(index === 0 || menu.items[index - 1].type !== candidate.type) && <strong className="asset-mention-group">{candidate.type === '图片' ? '参考图' : candidate.type}</strong>}<button className={index === selected ? 'active' : ''} role="option" aria-selected={index === selected} onMouseDown={event => { event.preventDefault(); choose(candidate) }}>{candidate.image && <img loading="lazy" src={imageUrl(candidate.image, 160)} alt="" />}<span><strong>@{candidate.name}{candidate.variantName ? ` · ${candidate.variantName}` : ''}</strong><small>{candidate.type}</small></span></button></span>)}</div>}

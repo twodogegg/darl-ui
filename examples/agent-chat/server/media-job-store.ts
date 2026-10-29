@@ -53,6 +53,7 @@ export class MediaJobStore {
   private db: DatabaseSync;
   constructor(dbPath: string, readonly files: FileStore, private onChange?: (job: MediaJob) => void) {
     this.db = new DatabaseSync(dbPath);
+    this.db.exec('PRAGMA busy_timeout = 5000');
     this.db.exec('PRAGMA journal_mode=WAL');
     this.db.exec('CREATE TABLE IF NOT EXISTS media_generation_jobs (id TEXT PRIMARY KEY, model_id TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL)');
     this.db.exec('CREATE INDEX IF NOT EXISTS media_generation_jobs_queue ON media_generation_jobs(status,updated_at)');

@@ -67,7 +67,7 @@ export function Projects() {
       <div className="projects-grid">
         {projects.map((p) => (
           <article className="project-card" key={p.id}>
-            <Link to={`/${p.creationMode === 'video-redraw' ? 'dialogue' : 'outline'}?projectId=${encodeURIComponent(p.id)}`}>
+            <Link to={`/${p.creationMode === 'video-redraw' ? 'source' : 'outline'}?projectId=${encodeURIComponent(p.id)}`}>
               <>{p.cover ? <img loading="lazy" className="project-card-cover" src={imageUrl(p.cover, 320)} alt={p.title} /> : <div className="studio-cover-empty">未上传封面</div>}</>
               <div className="project-card-body">
                 <h2>{p.title}</h2>

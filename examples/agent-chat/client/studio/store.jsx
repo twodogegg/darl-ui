@@ -3,6 +3,7 @@ import redrawPrompts from '../../prompts/video-redraw.json'
 import { emptyStudioData, studioFields, studioPositions } from '../../studio-schema'
 import { styleOptionsFromCatalog } from '../workspace-styles'
 import { startPolling } from '../polling'
+import { isH3FormattedPrompt, videoPrompt } from './video-prompt'
 
 const Store = import.meta.hot?.data.studioContext || createContext(null)
 if (import.meta.hot) import.meta.hot.data.studioContext = Store
@@ -109,7 +110,7 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
     const project = state.current.projects.find(project => project.id === task.projectId)
     await onAgentRequest({ ...task, agentId: task.agentId || agentSelection || currentAgentId, modelSelections, projectMode: project?.creationMode })
   }
-  const generateMedia = async ({ type = 'image', prompt, target, references = [], options = {}, modelId, applyStyle = true, styleId }) => {
+  const generateMedia = async ({ type = 'image', prompt, target, references = [], options = {}, modelId, applyStyle = true, styleId, preview = false, promptReferences = [], promptAudios = [] }) => {
     await queue.current
     if (failed.current) throw new Error('请先处理保存错误')
     options = Object.fromEntries(Object.entries(options).filter(([, value]) => value !== '' && value !== undefined))
@@ -123,11 +124,12 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
     const episode = item.episodeId && state.current.episodes.find(episode => episode.id === item.episodeId)
     const project = state.current.projects.find(project => project.id === (item.projectId || episode?.projectId))
     if (project?.creationMode === 'video-redraw') {
-      const kind = target.resource === 'assets' ? 'asset' : 'clip'
-      const entry = state.current.prompts.find(entry => entry.id === `4-${kind === 'asset' ? 1 : 2}`)
-      const directive = entry?.mode === 'replace' ? entry.text : entry?.defaultText || redrawPrompts[kind]
-      prompt = [directive, `目标地区：${project.targetRegion}；目标语言：${project.targetLanguage}`, prompt].join('\n')
-      if (target.resource === 'clips') {
+      if (target.resource === 'assets') {
+        const entry = state.current.prompts.find(entry => entry.id === '4-1')
+        const directive = entry?.mode === 'replace' ? entry.text : entry?.defaultText || redrawPrompts.asset
+        prompt = [directive, `目标地区：${project.targetRegion}；目标语言：${project.targetLanguage}`, prompt].join('\n')
+      }
+      if (!preview && target.resource === 'clips') {
         const missing = state.current.assets.filter(asset => item.assetIds.includes(asset.id) && !asset.image)
         if (missing.length) throw new Error(`请先准备目标资产图片：${missing.map(asset => asset.name).join('、')}`)
         if (!references.length) throw new Error('视频转绘需要目标形象参考，请选择多模态参考并准备目标资产图片')
@@ -136,14 +138,17 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
     const catalog = applyStyle ? await studioApi('workspace/styles') : null
     const style = catalog && styleOptionsFromCatalog(catalog.data).find(item => item.id === String(styleId ?? project?.style_catalog_id))
     if (applyStyle && !style) throw new Error('请先选择项目视觉风格')
+    const preparedVideoPrompt = type === 'video' && target.resource === 'clips'
+    if (preparedVideoPrompt) prompt = videoPrompt(prompt, style, promptReferences, promptAudios, !isH3FormattedPrompt(prompt))
     const requestId = crypto.randomUUID()
     const resolution = options.resolution || (selectedId === defaults[type]?.modelId ? defaults[type]?.resolution : model.defaults?.resolution) || model.capabilities?.resolutions?.[0]
     const aspectRatio = options.aspectRatio || (type === 'image' && target.resource === 'assets' ? '16:9' : project?.ratio) || defaults[type]?.aspectRatio || model.defaults?.aspectRatio
-    if (references.length > (model.capabilities?.images || 0)) throw new Error(`当前模型最多支持 ${model.capabilities?.images || 0} 张参考图片`)
-    const job = await studioApi('media-generation/jobs', {
-      requestId, taskId: requestId, modelId: selectedId, prompt, ...(style ? { style: { id: style.id, name: style.name, description: style.description, category: style.category } } : {}),
+    if (!preview && references.length > (model.capabilities?.images || 0)) throw new Error(`当前模型最多支持 ${model.capabilities?.images || 0} 张参考图片`)
+    const job = await studioApi(preview ? 'media-generation/preview-prompt' : 'media-generation/jobs', {
+      requestId, taskId: requestId, modelId: selectedId, prompt, ...(style && !preparedVideoPrompt ? { style: { id: style.id, name: style.name, description: style.description, category: style.category } } : {}),
       options: { resolution, aspectRatio, ...options, ...(references.length ? { references } : {}), studioTarget: { ...target, version: item._version } },
     })
+    if (preview) return job.prompt
     if (mounted.current) setMediaJobs(current => [job, ...current.filter(item => item.id !== job.id)])
     announce('生成任务已入队，页面将同步真实进度')
     return job

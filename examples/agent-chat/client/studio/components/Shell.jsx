@@ -20,13 +20,13 @@ import {
 import { useStore } from '../store'
 import { projectSteps } from '../data'
 
-const stepIcons = [IconNotebook, IconScript, IconLayoutList, IconPhoto, IconVideo]
-const redrawStepIcons = [IconScript, IconLayoutList, IconPhoto, IconVideo]
+const stepIcons = [IconNotebook, IconScript, IconPhoto, IconLayoutList, IconVideo]
+const redrawStepIcons = [IconFileText, IconScript, IconPhoto, IconLayoutList, IconVideo, IconMovie]
 // 项目级步骤：整个项目共用同一份内容，不按集拆分
 const projectLevelPaths = ['/source', '/outline', '/script', '/art', '/film']
 const isProjectPath = (path, project) => projectLevelPaths.includes(path) && !(project?.creationMode === 'video-redraw' && ['/source', '/film'].includes(path))
 // 分集步骤：进入后才选择具体剧集
-const episodeLevelPaths = ['/dialogue', '/video']
+const episodeLevelPaths = ['/dialogue', '/storyboard', '/video']
 
 const nav = [
   { to: '/', label: '工作台', mobile: '工作台', icon: IconHome },
