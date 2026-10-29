@@ -53,7 +53,7 @@ describe('SQLite project workspace', () => {
   it('uses built-in style catalog, not external API credentials or fake project results', async () => {
     const styles = await request('styles');
     expect(styles.status).toBe(200);
-    expect(styles.data.data.official_items.some((item: { name: string }) => item.name === '电影感')).toBe(true);
+    expect(styles.data.data.official_items.some((item: { name: string }) => item.name === '电影超写实')).toBe(true);
     const created = await createProject();
     expect(created.status).toBe(201);
     expect(created.data.data.project.name).toBe('测试短剧');

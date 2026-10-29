@@ -21,6 +21,8 @@ export function storageImage(key?: string | null): string | undefined {
   if (!key) return undefined;
   if (/^https?:\/\//i.test(key) || /^\/api\/files\/[a-f0-9-]+(?:\?width=\d+)?$/.test(key)) return key;
   if (/^\/media-workspace\/scene-[1-6]\.svg$/.test(key)) return key;
+  // 内置画风预设封面（与 RN 短剧 169 条官方风格同步），随 public/media-workspace/style-presets 一起发布。
+  if (/^\/media-workspace\/style-presets\/[a-z0-9-]+\/style-\d{3}\.(jpg|png|webp)$/i.test(key)) return key;
   return undefined;
 }
 
