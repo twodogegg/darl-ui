@@ -7,10 +7,11 @@ import { LocalStorage } from '../examples/agent-chat/server/storage';
 import { FileStore } from '../examples/agent-chat/server/file-storage';
 import { ProjectStore } from '../examples/agent-chat/server/project-store';
 import { StudioStore } from '../examples/agent-chat/server/studio';
-import { VideoRedraw, parseModelJson, validateRedrawDraft } from '../examples/agent-chat/server/video-redraw';
+import { VideoRedraw, parseModelJson, validateRedrawDraft, validateRevision } from '../examples/agent-chat/server/video-redraw';
 import { AgentFailure } from '../examples/agent-chat/server/errors';
 import { saveExtractedAssets } from '../examples/agent-chat/server/redraw-asset-extraction';
 import { saveRedrawVideoPrompts } from '../examples/agent-chat/server/redraw-video-prompts';
+import { saveRedrawStoryboard } from '../examples/agent-chat/server/redraw-storyboard';
 
 let directory: string, files: FileStore, studio: StudioStore, service: VideoRedraw;
 beforeEach(async () => {
@@ -46,6 +47,51 @@ it('accepts model output wrapped in fences or prose and reports invalid JSON as 
   expect((error as Error).message).not.toContain('after property value');
   expect((error as Error).message).not.toContain('at position');
   expect(String((error as Error).cause)).toContain('at position');
+});
+
+it('preserves shot order when a scene returns after an intercut', async () => {
+  const file = await files.put(Buffer.from('video reference'), 'video/mp4', 'source.mp4');
+  const project = studio.snapshot().projects[0];
+  const source = { fileId: file.id, duration: 3 };
+  studio.apply('intercut-setup', [
+    { resource: 'projects', id: project.id, op: 'update', version: project._version, values: { creationMode: 'video-redraw', sourceVideo: source } },
+    { resource: 'episodes', id: 'episode', op: 'create', values: { projectId: project.id, title: '第1集', scenes: [] } },
+  ]);
+  const state = studio.snapshot();
+  const shots = ['a', 'b', 'a'].map((sceneKey, index) => ({ sceneKey, start: index, end: index + 1, scale: '中景', description: `镜头 ${index + 1}`, dialogue: [], effects: '', assets: [] }));
+  saveRedrawStoryboard(studio, state.projects[0], state.episodes[0], source, {
+    assets: [{ name: '车内', type: '场景' }, { name: '街道', type: '场景' }],
+    scenes: [{ key: 'a', location: '车内', setting: '内', time: '夜', asset: '车内' }, { key: 'b', location: '街道', setting: '外', time: '夜', asset: '街道' }], shots,
+  }, 'intercut');
+  const result = studio.snapshot(), scenes = result.episodes[0].scenes as Array<{ id: string; assetId: string; location: string }>;
+  expect(scenes.map(scene => scene.location)).toEqual(['车内', '街道', '车内']);
+  expect(scenes[0].assetId).toBe(scenes[2].assetId);
+  expect(result.shots.map(shot => shot.sceneId)).toEqual(scenes.map(scene => scene.id));
+});
+
+it('accepts only supported updates for real, unique shots', () => {
+  const shots = [{ id: 'shot-1' }] as ReturnType<StudioStore['snapshot']>['shots'];
+  const valid = { changes: [{ shotId: 'shot-1', reason: '核对画面', values: { description: '正确画面', dialogue: [{ type: '旁白', text: '原句' }] } }], notes: '' };
+  expect(validateRevision(valid, shots)).toEqual(valid);
+  expect(() => validateRevision({ ...valid, changes: [valid.changes[0], valid.changes[0]] }, shots)).toThrow();
+  expect(() => validateRevision({ ...valid, changes: [{ ...valid.changes[0], shotId: 'unknown' }] }, shots)).toThrow();
+  expect(() => validateRevision({ ...valid, changes: [{ ...valid.changes[0], values: { sceneId: 'unknown' } }] }, shots)).toThrow();
+});
+
+it('refuses to apply a revision if a shot changed after analysis', async () => {
+  const file = await files.put(Buffer.from('video reference'), 'video/mp4', 'source.mp4');
+  const project = studio.snapshot().projects[0];
+  studio.apply('revision-setup', [
+    { resource: 'projects', id: project.id, op: 'update', version: project._version, values: { creationMode: 'video-redraw', sourceVideo: { fileId: file.id, duration: 3 } } },
+    { resource: 'episodes', id: 'episode', op: 'create', values: { projectId: project.id, title: '第1集', scenes: [{ id: 'scene', location: '车内', setting: '内', time: '夜', content: '', suggestedDuration: '' }] } },
+    { resource: 'shots', id: 'shot', op: 'create', values: { episodeId: 'episode', sceneId: 'scene', description: '旧画面', source: { fileId: file.id, start: 0, end: 3, frames: [] } } },
+  ]);
+  const state = studio.snapshot();
+  const job = { id: 'revision-job', projectId: project.id, episodeId: 'episode', sourceFileId: file.id, kind: 'revise-storyboard', status: 'completed', phase: '完成', projectVersion: state.projects[0]._version, versions: { 'episodes:episode': state.episodes[0]._version, 'shots:shot': state.shots[0]._version }, input: {}, fingerprint: '', segments: [], draft: { assets: [], shots: [] }, result: { readyToApply: true }, workflow: { outputs: [{ output_type: 'structured', content: JSON.stringify({ changes: [{ shotId: 'shot', reason: '核对', values: { description: '模型建议' } }], notes: '' }) }] } };
+  studio.projects.db.prepare('INSERT INTO video_redraw_jobs(id,project_id,data) VALUES(?,?,?)').run(job.id, job.projectId, JSON.stringify(job));
+  studio.apply('user-edit', [{ resource: 'shots', id: 'shot', op: 'update', version: state.shots[0]._version, values: { description: '用户的新内容' } }]);
+  await expect(service.edit({ action: 'apply-revision', projectId: project.id, episodeId: 'episode', jobId: job.id })).rejects.toThrow('资产或分镜在运行期间发生变化');
+  expect(studio.snapshot().shots[0].description).toBe('用户的新内容');
 });
 
 it('fills missing existing variant prompts without replacing user content or images', () => {

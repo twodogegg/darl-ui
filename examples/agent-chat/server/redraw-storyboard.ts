@@ -37,25 +37,27 @@ export function saveRedrawStoryboard(studio: StudioStore, project: StudioRecord,
   }
   if (!Array.isArray(value.scenes) || !value.scenes.length || value.scenes.length > 200) throw new Error('模型未返回有效场次');
   const scenes = structuredClone(liveEpisode.scenes) as Array<Record<string, unknown>>;
-  const sceneIds = new Map<string, string>();
+  const sceneTemplates = new Map<string, Record<string, unknown>>();
   for (const scene of value.scenes) {
-    if (!scene || typeof scene.key !== 'string' || !scene.key.trim() || sceneIds.has(scene.key) || typeof scene.location !== 'string' || !scene.location.trim() || !['内', '外', '内外'].includes(scene.setting) || typeof scene.time !== 'string') throw new Error('模型返回的场次字段无效');
+    if (!scene || typeof scene.key !== 'string' || !scene.key.trim() || sceneTemplates.has(scene.key) || typeof scene.location !== 'string' || !scene.location.trim() || !['内', '外', '内外'].includes(scene.setting) || typeof scene.time !== 'string') throw new Error('模型返回的场次字段无效');
     const asset = scene.asset ? names.get(scene.asset) : undefined;
     if (scene.asset && (!asset || asset.type !== '场景')) throw new Error(`场次 ${scene.location} 的场景资产不存在`);
     if (scene.variant && (!asset || !asset.variants.has(scene.variant))) throw new Error(`场次 ${scene.location} 的场景状态不存在`);
-    const id = randomUUID(); sceneIds.set(scene.key, id);
     const definition = value.assets.find(item => item.name === scene.asset);
     const variantId = scene.variant && definition ? (changes.find(change => change.resource === 'assets' && change.id === asset?.id)?.values?.variants as Array<{ id: string; name: string }> | undefined || (snapshot.assets.find(item => item.id === asset?.id)?.variants as Array<{ id: string; name: string }> | undefined))?.find(item => item.name === scene.variant)?.id : undefined;
-    scenes.push({ id, location: scene.location, setting: scene.setting, time: scene.time, content: '', suggestedDuration: '', ...(asset ? { assetId: asset.id } : {}), ...(variantId ? { variantId } : {}) });
+    sceneTemplates.set(scene.key, { location: scene.location, setting: scene.setting, time: scene.time, content: '', suggestedDuration: '', ...(asset ? { assetId: asset.id } : {}), ...(variantId ? { variantId } : {}) });
   }
-  changes.push({ resource: 'episodes', id: episode.id, op: 'update', version: liveEpisode._version, values: { scenes } });
-  const visitedScenes = new Set<string>(); let currentScene = '';
+  const usedScenes = new Set<string>(); let currentSceneKey = '', currentSceneId = '';
   let previousEnd = 0;
   for (const [index, shot] of value.shots.entries()) {
     if (!shot || !Number.isFinite(shot.start) || !Number.isFinite(shot.end) || shot.start < 0 || shot.end <= shot.start || shot.end > Number(liveSource.duration) + .05 || (index > 0 && Math.abs(shot.start - previousEnd) > .05) || !Array.isArray(shot.assets) || !Array.isArray(shot.dialogue) || typeof shot.description !== 'string') throw new Error(`模型返回的第 ${index + 1} 镜时间或字段无效`);
-    const sceneId = sceneIds.get(shot.sceneKey);
-    if (!sceneId) throw new Error(`第 ${index + 1} 镜场次不存在`);
-    if (currentScene !== sceneId) { if (visitedScenes.has(sceneId)) throw new Error(`第 ${index + 1} 镜场次不连续`); visitedScenes.add(sceneId); currentScene = sceneId; }
+    const template = sceneTemplates.get(shot.sceneKey);
+    if (!template) throw new Error(`第 ${index + 1} 镜场次不存在`);
+    if (currentSceneKey !== shot.sceneKey) {
+      currentSceneKey = shot.sceneKey; currentSceneId = randomUUID(); usedScenes.add(shot.sceneKey);
+      scenes.push({ id: currentSceneId, ...template });
+    }
+    const sceneId = currentSceneId;
     const start = Math.max(previousEnd, shot.start), end = Math.min(shot.end, Number(liveSource.duration));
     if (end <= start) throw new Error(`第 ${index + 1} 镜时间无效`);
     previousEnd = end;
@@ -79,6 +81,8 @@ export function saveRedrawStoryboard(studio: StudioStore, project: StudioRecord,
     changes.push({ resource: 'shots', id: randomUUID(), op: 'create', position: index, values: { episodeId: episode.id, sceneId, duration: end - start, scale: String(shot.scale || ''), description, dialogue: lines, effects: String(shot.effects || ''), assetIds: [...new Set(selected)], source: { fileId: source.fileId, start, end, frames: [], description: String(shot.originalDescription || ''), dialogue: sourceDialogue, confirmed: false } } });
   }
   if (Number(value.shots[0].start) > .2 || Number(liveSource.duration) - previousEnd > .2) throw new Error('模型分镜没有覆盖完整原视频，请重新分析');
+  for (const [key, template] of sceneTemplates) if (!usedScenes.has(key)) scenes.push({ id: randomUUID(), ...template });
+  changes.push({ resource: 'episodes', id: episode.id, op: 'update', version: liveEpisode._version, values: { scenes } });
   if (changes.length > 500) throw new Error('分镜与资产数量超过单次保存限制');
   studio.apply(`redraw-storyboard-${jobId}`, changes);
   return { shots: value.shots.length, assets: value.assets.length };

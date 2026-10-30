@@ -32,6 +32,7 @@ import { RequestRecordStore, requestRecordsApi, requestRecordScope } from './req
 import { createPromptOptimization, type OptimizationPromptKey } from './prompt-optimization';
 import { RequestTimeout } from './request-timeout';
 import { VideoRedraw, REDRAW_TOOLS, handleRedrawRequest } from './video-redraw';
+import { loadWorkflowAgents, validateWorkflowAgents } from './workflow-agents';
 import { VideoEditing, handleVideoEditingRequest } from './video-editing';
 import { USER_INPUT_TOOL, validateUserAnswers, validateUserInput } from './user-input';
 
@@ -276,8 +277,22 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const storageSettings = new StorageSettings(storage, files, fileConfig);
   const projectStore = new ProjectStore(storage.path, files);
   const studio = new StudioStore(projectStore);
-  const videoRedraw = new VideoRedraw(studio, {
-    analysisCredentials: () => env.VIDEO_ANALYSIS_BASE_URL && env.VIDEO_ANALYSIS_API_KEY ? { baseUrl: env.VIDEO_ANALYSIS_BASE_URL, apiKey: env.VIDEO_ANALYSIS_API_KEY } : undefined,
+  const videoRedraw: VideoRedraw = new VideoRedraw(studio, {
+    workflowAgent: kind => loadWorkflowAgents(storage).find(agent => agent.kind === kind)!,
+    workflowSkills: ids => ids.map(id => {
+      const skill = skillLibrary.list().find(item => item.id === id);
+      if (!skill) throw new Error(`工作流 Skill 不存在：${id}`);
+      return skill;
+    }),
+    workflowTools: () => [...RUNTIME_TOOLS, ...STUDIO_TOOLS, ...REDRAW_TOOLS].filter(tool => tool.risk === 'read' && !('waitForCompletion' in tool)).map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters })),
+    executeWorkflowTool: async (name, args, context): Promise<unknown> => {
+      const definition = [...RUNTIME_TOOLS, ...STUDIO_TOOLS, ...REDRAW_TOOLS].find(tool => tool.name === name);
+      if (!definition || definition.risk !== 'read' || 'waitForCompletion' in definition) throw new Error('工作流工具不存在或不允许后台执行');
+      if (RUNTIME_TOOLS.some(tool => tool.name === name)) return runtime.execute(name, args, context);
+      if (STUDIO_TOOLS.some(tool => tool.name === name)) return studio.query(args);
+      return videoRedraw.read(args);
+    },
+    analysisCredentials: () => env.VIDEO_ANALYSIS_BASE_URL && env.VIDEO_ANALYSIS_API_KEY ? { baseUrl: env.VIDEO_ANALYSIS_BASE_URL, apiKey: env.VIDEO_ANALYSIS_API_KEY, videoUrlFormat: env.VIDEO_ANALYSIS_VIDEO_URL_FORMAT || 'object' } : undefined,
     videoDurations: () => {
       const modelId = validateDefaultMediaSelection(storage.getConfig<unknown>('defaultMediaModels') || defaultMediaSelection).video.modelId;
       const configuration = storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration();
@@ -481,6 +496,18 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       const defaultAgent: StoredAgent = { id: 'default', name: savedDefault?.name || '网站助手', avatar: savedDefault?.avatar || '/agent-default-avatar.png', description: savedDefault?.description || '系统默认 Agent', type: 'main_agent', source: 'system_default', selectable: true, callable: true, contextStrategy: 'inherit_filtered', instructions: savedDefault?.instructions || await loadPrompt(), websiteInstructions: savedDefault?.websiteInstructions ?? readFileSync(new URL('../prompts/website.md', import.meta.url), 'utf8'), skillIds: [], contextPolicy: savedDefault?.contextPolicy || { childContext: 'task-only', historyMode: 'summary', toolResultMode: 'standard' }, enabled: true, isDefault: true, builtIn: true };
       const agents = [defaultAgent, ...configuredAgents.filter((agent) => agent.id !== defaultAgent.id)];
       const path = request.url.split('?')[0];
+      if (path === '/api/workflow-agents/tools' && request.method === 'GET') return send(200, [...RUNTIME_TOOLS, ...STUDIO_TOOLS, ...REDRAW_TOOLS].filter(tool => tool.risk === 'read' && !('waitForCompletion' in tool)).map(tool => ({ name: tool.name, title: tool.title, risk: tool.risk })));
+      if (path === '/api/workflow-agents' && request.method === 'GET') return send(200, loadWorkflowAgents(storage));
+      if (path === '/api/workflow-agents' && request.method === 'POST') {
+        const next = validateWorkflowAgents(await readBody(request));
+        const available = new Set([...RUNTIME_TOOLS, ...STUDIO_TOOLS, ...REDRAW_TOOLS].filter(tool => tool.risk === 'read' && !('waitForCompletion' in tool)).map(tool => tool.name));
+        for (const agent of next) {
+          for (const name of agent.toolNames) if (!available.has(name)) throw new Error(`工作流工具不可用：${name}`);
+          for (const id of agent.skillIds) if (!skillLibrary.list().some(skill => skill.id === id)) throw new Error(`工作流 Skill 不存在：${id}`);
+        }
+        storage.setConfig('workflowAgents', next);
+        return send(200, next);
+      }
       if (path === '/api/tools' && request.method === 'GET') return send(200, [...MEDIA_TOOLS.filter(tool => tool.name !== 'builtin_generate_media'), ...RUNTIME_TOOLS, ...STUDIO_TOOLS, ...REDRAW_TOOLS, USER_INPUT_TOOL].map((tool) => ({ ...tool, inputSchema: tool.parameters, parameters: undefined })));
       if (path === '/api/approval-settings' && request.method === 'GET') return send(200, storage.getConfig('approvalSettings') || { mode: DEFAULT_APPROVAL_MODE });
       if (path === '/api/approval-settings' && request.method === 'POST') {

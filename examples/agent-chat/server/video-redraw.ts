@@ -12,27 +12,48 @@ import { AgentFailure } from './errors';
 import type { TimedTranscript } from './voice';
 import { REDRAW_LIMITS, composeVideo, detectVideoCuts, videoCommand, withVideoFiles, type SourceSegment } from './video-processing';
 import { isLocalOrLanAddress } from './local-access';
-import redrawConfig from '../prompts/video-redraw.json';
 import { saveRedrawStoryboard } from './redraw-storyboard';
 import { saveExtractedAssets } from './redraw-asset-extraction';
 import { saveRedrawVideoPrompts } from './redraw-video-prompts';
+import { defaultWorkflowAgents, workflowContracts, type WorkflowAgent, type WorkflowKind } from './workflow-agents';
+import { runTextWorkflow, runVideoWorkflow, workflowExecution, workflowInstructions, type WorkflowDependencies, type WorkflowStep } from './workflow-runtime';
+import type { AgentSkill } from '../../../src/components/agent-sidebar/types';
+import { mentionedAssets } from '../asset-mentions.js';
 
 type DraftAsset = { key: string; type: string; name: string; description: string; targetName: string; targetDescription: string; targetAppearance?: string; targetCostume?: string; targetVoiceDescription?: string; targetPrompt?: string; evidenceSegmentId: string; frameIndex: number };
 type DraftShot = { segmentId: string; sceneKey: string; description: string; dialogue: string; scale: string; camera: string; transition: string; effects: string; assetKeys: string[]; targetDescription: string; targetDuration?: number; targetDialogue: Array<{ assetKey: string; text: string; description: string }>; notes: string };
 export type RedrawDraft = { assets: DraftAsset[]; shots: DraftShot[] };
-type Job = { id: string; projectId: string; episodeId?: string; sourceFileId?: string; kind: 'prepare' | 'breakdown' | 'transcribe' | 'analyze' | 'extract-assets' | 'video-prompts' | 'export'; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; phase: string; createdAt: string; error?: string; input: Record<string, unknown>; fingerprint: string;
+type WorkflowRun = { config: WorkflowAgent; skills: AgentSkill[]; steps: WorkflowStep[]; context?: unknown; outputs: Array<{ output_type: 'raw' | 'structured'; content: string; incomplete?: boolean }> };
+type Job = { id: string; projectId: string; episodeId?: string; sourceFileId?: string; kind: 'prepare' | 'breakdown' | 'transcribe' | 'analyze' | 'revise-storyboard' | 'extract-assets' | 'video-prompts' | 'export'; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; phase: string; createdAt: string; error?: string; input: Record<string, unknown>; fingerprint: string; workflow?: WorkflowRun;
   versions: Record<string, number>; projectVersion: number; draft: RedrawDraft; segments: SourceSegment[]; transcript?: TimedTranscript; result?: Record<string, unknown>; applied?: string[] };
-type Dependencies = {
+type Dependencies = WorkflowDependencies & {
   model?: (modelId: string) => { provider: StoredProvider; model: AgentModelConfig };
   videoDurations?: () => { modelId: string; seconds: number[] };
   instructions?: (agentId: string) => Promise<string>;
-  analysisCredentials?: () => { baseUrl: string; apiKey: string } | undefined;
+  analysisCredentials?: () => { baseUrl: string; apiKey: string; videoUrlFormat?: string } | undefined;
   transcribe?: (bytes: Buffer, language: string, signal: AbortSignal) => Promise<TimedTranscript>;
+  workflowAgent?: (kind: WorkflowKind) => WorkflowAgent;
+  workflowSkills?: (ids: string[]) => AgentSkill[];
 };
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const asList = <T>(value: unknown): T[] => Array.isArray(value) ? value : [];
 const text = (value: unknown, label: string) => { if (typeof value !== 'string' || value.length > 16_000) throw new Error(`${label} 须为文本且不超过16000字`); return value; };
 const recordKey = (resource: string, id: string) => `${resource}:${id}`;
+type RevisionValues = { description?: string; scale?: string; effects?: string; sourceDescription?: string; sourceDialogue?: string; dialogue?: Array<{ id?: string; type: string; assetId?: string; speaker?: string; text: string; description?: string }> };
+type Revision = { changes: Array<{ shotId: string; reason: string; values: RevisionValues }>; notes: string };
+export function validateRevision(value: unknown, shots: StudioRecord[]): Revision {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('调整结果无效');
+  const revision = value as Revision;
+  if (!Array.isArray(revision.changes) || revision.changes.length > shots.length || typeof revision.notes !== 'string' || revision.notes.length > 16000) throw new Error('调整建议列表无效');
+  const seen = new Set<string>();
+  for (const change of revision.changes) {
+    if (!change || typeof change.shotId !== 'string' || !shots.some(shot => shot.id === change.shotId) || seen.has(change.shotId) || typeof change.reason !== 'string' || !change.values || typeof change.values !== 'object' || Array.isArray(change.values)) throw new Error('调整建议引用的镜头无效或重复');
+    seen.add(change.shotId);
+    const entries = Object.entries(change.values);
+    if (!entries.length || entries.some(([key, item]) => key === 'dialogue' ? !Array.isArray(item) || item.length > 100 || item.some(line => !line || typeof line !== 'object' || !['角色', '旁白'].includes(line.type) || typeof line.text !== 'string' || (line.id !== undefined && typeof line.id !== 'string') || (line.assetId !== undefined && typeof line.assetId !== 'string') || (line.speaker !== undefined && typeof line.speaker !== 'string') || (line.description !== undefined && typeof line.description !== 'string')) : !['description', 'scale', 'effects', 'sourceDescription', 'sourceDialogue'].includes(key) || typeof item !== 'string' || item.length > 16000)) throw new Error('调整建议包含不支持的字段或无效内容');
+  }
+  return revision;
+}
 
 /** Accept the shapes models actually emit: fenced blocks, leading commentary, trailing prose. */
 export function parseModelJson(source: string) {
@@ -45,6 +66,16 @@ export function parseModelJson(source: string) {
     throw new AgentFailure('model', 'REDRAW_ANALYSIS_JSON_INVALID', '模型返回的分镜结果不是有效 JSON，本批未采用。', true,
       '重新点击“生成改编策略”或继续分析会从当前批次重试；若反复出现，请更换视觉分析模型。', { cause: new Error(`${detail}\n输出片段：${candidate.slice(0, 500)}`) });
   }
+}
+
+function workflowFailureStage(job: Job) {
+  if (!job.workflow || !['failed', 'cancelled', 'interrupted'].includes(job.status)) return undefined;
+  if (job.phase.includes('校验并保存')) return '校验与保存';
+  if (job.phase === '整理页面字段') {
+    const structured = job.workflow.outputs.find(output => output.output_type === 'structured')?.content;
+    if (structured) { try { parseModelJson(structured); return '校验与保存'; } catch { /* 无效 JSON 属于整理阶段 */ } }
+  }
+  return job.phase.includes('整理') ? '页面字段整理' : '原始分析';
 }
 
 export function validateRedrawDraft(value: unknown, segments: SourceSegment[], existing: StudioRecord[]): RedrawDraft {
@@ -99,7 +130,7 @@ export class VideoRedraw {
     const episode = this.episode(project, input.episodeId);
     const job = this.job(String(input.jobId || ''));
     if (job.projectId !== project.id || (job.episodeId || this.episode(project).id) !== episode.id) throw new Error('任务不属于当前剧集');
-    if (!['analyze', 'extract-assets', 'video-prompts'].includes(job.kind)) throw new Error('该等待工具仅支持视频分析、资产提取和视频提示词任务');
+    if (!['analyze', 'revise-storyboard', 'extract-assets', 'video-prompts'].includes(job.kind)) throw new Error('该等待工具仅支持视频分析、分镜调整、资产提取和视频提示词任务');
     signal.throwIfAborted();
     const finished = !['queued', 'running'].includes(job.status) ? job : await new Promise<Job>((resolve, reject) => {
       const listeners = this.waiters.get(job.id) || new Set<(job: Job) => void>();
@@ -152,6 +183,10 @@ export class VideoRedraw {
     if (input.jobId) {
       const job = this.job(String(input.jobId));
       if (job.projectId !== projectId || (job.episodeId || this.episode(project).id) !== episode.id) throw new Error('任务不属于当前剧集');
+      if (job.workflow) {
+        if (job.sourceFileId !== this.source(project, episode).fileId) throw new Error('原片已更换，该分析结果已过期');
+        return { jobId: job.id, kind: job.kind, status: job.status, phase: job.phase, failureStage: workflowFailureStage(job), error: job.error, sourceFileId: job.sourceFileId, model: job.workflow.config.model, formatterModel: job.workflow.config.formatterModel, steps: job.workflow.steps, outputs: job.workflow.outputs, ...(job.result || {}) };
+      }
       if (job.status !== 'completed') return { jobId: job.id, kind: job.kind, status: job.status, phase: job.phase, error: job.error };
       const offset = Number(input.cursor || 0), limit = Number(input.limit || 100);
       if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error('分页参数无效');
@@ -177,45 +212,90 @@ export class VideoRedraw {
       }
       throw new Error(`任务 ${job.id} 是 ${job.kind}，没有可分页读取的切镜或转写结果`);
     }
-    return { jobs: this.jobs(projectId).filter(job => (job.episodeId || this.episode(project).id) === episode.id).map(({ transcript, ...job }) => ({ ...job, ...(job.kind === 'analyze' ? { result: undefined } : {}), hasTranscript: !!transcript })), source: this.source(project, episode) };
+    return { jobs: this.jobs(projectId).filter(job => (job.episodeId || this.episode(project).id) === episode.id).map(full => { const { transcript, workflow, result, ...job } = full; return { ...job, ...(workflow ? { hasWorkflow: true, failureStage: workflowFailureStage(full) } : job.kind !== 'analyze' ? { result } : {}), hasTranscript: !!transcript }; }), source: this.source(project, episode) };
   }
   async edit(input: Record<string, unknown>) {
     const allowed = new Set([...Object.keys(properties), 'action']);
     if (Object.keys(input).some(key => !allowed.has(key))) throw new Error('转绘请求包含未知参数');
     const projectId = String(input.projectId || ''), project = this.project(projectId);
     const action = String(input.action), episode = this.episode(project, input.episodeId);
-    if (input.requirements !== undefined && (!['extract-assets', 'video-prompts'].includes(action) || typeof input.requirements !== 'string' || input.requirements.length > 2000)) throw new Error('补充要求仅用于资产提取或视频提示词，且不超过 2000 字');
+    if (input.requirements !== undefined && (!['extract-assets', 'video-prompts', 'revise-storyboard'].includes(action) || typeof input.requirements !== 'string' || input.requirements.length > 2000)) throw new Error('补充要求无效或超过 2000 字');
     if (input.mode !== undefined && (action !== 'video-prompts' || !['参考生成', '分镜图'].includes(String(input.mode)))) throw new Error('视频生成方式无效');
     if (action === 'cancel') {
       const job = this.job(String(input.jobId));
       if ((job.projectId !== projectId || (job.episodeId || this.episode(project).id) !== episode.id)) throw new Error('任务不属于当前剧集');
       if (['queued', 'running'].includes(job.status)) { job.status = 'cancelled'; this.running.get(job.id)?.abort(); this.save(job); }
-      return job;
+      return { id: job.id, kind: job.kind, status: job.status, phase: job.phase };
     }
     if (action === 'apply') return this.apply(String(input.jobId), project, episode, asList<string>(input.shotIds));
+    if (action === 'apply-revision') return this.applyRevision(String(input.jobId), project, episode);
     if (action === 'merge-assets') return this.mergeAssets(input, project);
     if (['prepare', 'breakdown', 'transcribe'].includes(action)) throw new Error('视频转绘已改用视频分析接口，不支持通过旧流程自动切镜或转写。请检查分析接口错误后重试。');
-    if (!['analyze', 'extract-assets', 'video-prompts', 'export'].includes(action)) throw new Error('不支持的转绘操作');
+    if (!['analyze', 'revise-storyboard', 'extract-assets', 'video-prompts', 'retry-format', 'retry-save', 'export'].includes(action)) throw new Error('不支持的转绘操作');
     const requestId = String(input.requestId || '');
     if (!/^[\w-]{8,160}$/.test(requestId)) throw new Error('提交任务须提供唯一 requestId，原样重试沿用');
     const fingerprint = hash(input), prior = this.jobs().find(job => job.id === requestId);
-    if (prior) { if (prior.fingerprint !== fingerprint) throw new Error('同一 requestId 不能用于不同请求'); return prior; }
+    if (prior) { if (prior.fingerprint !== fingerprint) throw new Error('同一 requestId 不能用于不同请求'); return { id: prior.id, kind: prior.kind, status: prior.status, phase: prior.phase, sourceFileId: prior.sourceFileId }; }
     if (this.jobs(projectId).some(job => ['running', 'queued'].includes(job.status))) throw new Error('本项目已有任务运行，请完成或取消后再提交');
     if (this.running.size >= 2) throw new Error('当前有两个转绘任务运行，请稍后提交');
     if (input.version !== project._version) throw new StudioConflict('项目设置已变化，请重新读取');
     const source = this.source(project, episode);
     if (!source.fileId) throw new Error('请先上传原视频');
+    if (action === 'retry-format' || action === 'retry-save') {
+      const original = this.job(String(input.jobId || ''));
+      if (original.projectId !== projectId || original.episodeId !== episode.id || original.sourceFileId !== source.fileId || !['failed', 'interrupted', 'cancelled'].includes(original.status) || !original.workflow?.outputs.some(item => item.output_type === 'raw' && !item.incomplete)) throw new Error('该任务没有可重新整理的完整原始输出');
+      if (action === 'retry-save' && !original.workflow.outputs.some(item => item.output_type === 'structured')) throw new Error('该任务没有可重新写入的整理结果');
+      const job: Job = { ...structuredClone(original), id: requestId, status: 'queued', phase: '排队', createdAt: new Date().toISOString(), error: undefined, fingerprint, input: { ...original.input, retryFormat: action === 'retry-format', retrySave: action === 'retry-save' }, workflow: { ...structuredClone(original.workflow), outputs: original.workflow.outputs.filter(item => action === 'retry-save' || item.output_type === 'raw'), steps: [...original.workflow.steps] } };
+      if (action === 'retry-format') job.workflow!.config.formatterModel = this.dependencies.workflowAgent?.(original.workflow.config.kind).formatterModel || original.workflow.config.formatterModel;
+      this.save(job);
+      const controller = new AbortController(); this.running.set(job.id, controller);
+      void this.run(job, controller).finally(() => this.running.delete(job.id));
+      return { id: job.id, kind: job.kind, status: job.status, phase: job.phase };
+    }
     if (action === 'analyze' && this.studio.snapshot().shots.some(shot => shot.episodeId === episode.id)) throw new Error('本集已有分镜，请直接编辑，避免覆盖现有内容');
     const state = this.studio.snapshot();
-    if (['extract-assets', 'video-prompts'].includes(action) && !state.shots.some(shot => shot.episodeId === episode.id)) throw new Error('请先确认本集分镜');
+    if (['extract-assets', 'video-prompts', 'revise-storyboard'].includes(action) && !state.shots.some(shot => shot.episodeId === episode.id)) throw new Error('请先确认本集分镜');
     if (action === 'video-prompts' && state.clips.some(clip => clip.episodeId === episode.id)) throw new Error('本集已有视频片段，请在页面或通过 Agent 调整，避免覆盖已有内容');
     const job: Job = { id: requestId, projectId, episodeId: episode.id, sourceFileId: String(source.fileId), kind: action as Job['kind'], status: 'queued', phase: '排队', createdAt: new Date().toISOString(), input, fingerprint,
       projectVersion: project._version, versions: Object.fromEntries(['assets', 'shots', 'episodes'].flatMap(resource => state[resource as 'assets'].filter(item => resource === 'assets' ? item.projectId === projectId : resource === 'shots' ? item.episodeId === episode.id : item.id === episode.id).map(item => [recordKey(resource, item.id), item._version]))),
       segments: [], draft: { assets: [], shots: [] } };
+    if (['analyze', 'revise-storyboard', 'extract-assets', 'video-prompts'].includes(action)) {
+      const kind = (action === 'revise-storyboard' ? 'analyze' : action) as WorkflowKind;
+      const config = structuredClone(this.dependencies.workflowAgent?.(kind) || defaultWorkflowAgents().find(item => item.kind === kind)!);
+      const skills = structuredClone(this.dependencies.workflowSkills?.(config.skillIds) || []);
+      if (skills.length !== config.skillIds.length) throw new Error('工作流 Skill 配置不可用');
+      job.workflow = { config, skills, steps: [], outputs: [] };
+    }
     this.save(job);
     const controller = new AbortController(); this.running.set(job.id, controller);
     void this.run(job, controller).finally(() => this.running.delete(job.id));
-    return job;
+    return { id: job.id, kind: job.kind, status: job.status, phase: job.phase, sourceFileId: job.sourceFileId };
+  }
+  private async formatWorkflow(job: Job, signal: AbortSignal) {
+    const workflow = job.workflow;
+    const raw = workflow?.outputs.find(output => output.output_type === 'raw' && !output.incomplete)?.content;
+    if (!workflow || !raw) throw new Error('没有可整理的原始输出');
+    const selected = this.dependencies.model?.(workflow.config.formatterModel);
+    if (!selected) throw new Error('请配置工作流整理模型');
+    job.phase = '整理页面字段'; this.save(job);
+    const guide = await readFile(new URL('../prompts/workflow-formatter.md', import.meta.url), 'utf8');
+    let structured = '';
+    const contract = job.kind === 'revise-storyboard' ? await readFile(new URL('../prompts/redraw-revision-formatter.md', import.meta.url), 'utf8') : workflowContracts[workflow.config.kind];
+    for await (const chunk of generate(selected.provider, selected.model, [{ role: 'user', content: JSON.stringify({ context: workflow.context, raw }) }], `${guide}\n\n${contract}`, undefined, signal, undefined, Output.json())) structured += chunk;
+    if (!structured.trim()) throw new Error('整理模型未返回内容');
+    workflow.outputs = workflow.outputs.filter(output => output.output_type !== 'structured');
+    workflow.outputs.push({ output_type: 'structured', content: structured }); this.save(job);
+    job.phase = '校验整理结果'; this.save(job);
+    return parseModelJson(structured);
+  }
+  private assertWorkflowVersions(job: Job) {
+    const state = this.studio.snapshot(), project = state.projects.find(item => item.id === job.projectId), episode = state.episodes.find(item => item.id === job.episodeId);
+    if (!project || project._version !== job.projectVersion || !episode || episode._version !== job.versions[recordKey('episodes', episode.id)]) throw new StudioConflict('项目或剧集在运行期间发生变化，结果未写入，请重新检查');
+    const relevant = [...state.assets.filter(item => item.projectId === job.projectId).map(item => recordKey('assets', item.id)), ...state.shots.filter(item => item.episodeId === job.episodeId).map(item => recordKey('shots', item.id))];
+    if (relevant.some(key => job.versions[key] === undefined) || Object.entries(job.versions).some(([key, version]) => {
+      const [resource, id] = key.split(':');
+      return resource === 'assets' ? !state.assets.some(item => item.id === id && item._version === version) : resource === 'shots' ? !state.shots.some(item => item.id === id && item._version === version) : false;
+    })) throw new StudioConflict('资产或分镜在运行期间发生变化，结果未写入，请重新检查');
   }
   private async run(job: Job, controller: AbortController) {
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15 * 60_000)]);
@@ -223,18 +303,49 @@ export class VideoRedraw {
       job.status = 'running'; this.save(job);
       const project = this.project(job.projectId), episode = this.episode(project, job.episodeId), source = this.source(project, episode);
       if (job.sourceFileId && source.fileId !== job.sourceFileId) throw new StudioConflict('本集原片已改变，请重新提交');
-      if (job.kind === 'analyze') {
+      const workflow = job.workflow;
+      const execution = workflow && job.input.retryFormat !== true && job.input.retrySave !== true ? workflowExecution(workflow.config, workflow.skills, job.id, this.dependencies, workflow.steps, () => this.save(job)) : undefined;
+      const instructions = workflow && workflowInstructions(workflow.config, workflow.skills);
+      const savePartial = (content: string) => { if (workflow) { workflow.outputs.push({ output_type: 'raw', content, incomplete: true }); this.save(job); } };
+      if (job.input.retryFormat === true || job.input.retrySave === true) {
+        this.assertWorkflowVersions(job);
+        const saved = workflow?.outputs.find(output => output.output_type === 'structured')?.content;
+        const structured = job.input.retrySave === true ? parseModelJson(saved || '') : await this.formatWorkflow(job, signal);
+        job.phase = '校验并保存结果'; this.save(job);
+        this.assertWorkflowVersions(job);
+        if (job.kind === 'revise-storyboard') { validateRevision(structured, this.studio.snapshot().shots.filter(item => item.episodeId === episode.id)); job.result = { readyToApply: true }; }
+        else if (job.kind === 'analyze') job.result = { analysis: workflow!.outputs[0].content, ...saveRedrawStoryboard(this.studio, project, episode, source, structured, job.id) };
+        else if (job.kind === 'extract-assets') job.result = { analysis: workflow!.outputs[0].content, ...saveExtractedAssets(this.studio, project, episode, structured, job.versions, job.id) };
+        else if (job.kind === 'video-prompts') {
+          const videoModel = (workflow?.context as { videoModel?: { seconds: number[]; modelId: string } })?.videoModel;
+          if (!videoModel?.seconds?.length) throw new Error('原任务缺少视频模型时长配置');
+          job.result = { analysis: workflow!.outputs[0].content, ...saveRedrawVideoPrompts(this.studio, project, episode, job.versions, structured, String(job.input.mode || '参考生成'), job.id, videoModel.seconds, videoModel.modelId) };
+        } else throw new Error('任务类型不能重新整理');
+      } else if (job.kind === 'revise-storyboard') {
         const analysis = this.dependencies.analysisCredentials?.();
         if (!analysis?.apiKey || !analysis.baseUrl) throw new Error('请先配置视频分析接口地址与 API Key');
+        if (analysis.videoUrlFormat && !['object', 'string'].includes(analysis.videoUrlFormat)) throw new Error('视频分析地址格式配置无效');
+        this.assertWorkflowVersions(job);
+        const state = this.studio.snapshot();
+        const context = { projectId: project.id, episodeId: episode.id, project: { targetRegion: project.targetRegion, targetLanguage: project.targetLanguage, requirements: project.requirements }, requirements: job.input.requirements || '', scenes: episode.scenes, shots: state.shots.filter(item => item.episodeId === episode.id).sort((a, b) => Number(a._position || 0) - Number(b._position || 0)), assets: state.assets.filter(item => item.projectId === project.id) };
+        if (!workflow || !instructions) throw new Error('工作流配置不存在');
+        workflow.context = context; this.save(job);
+        job.phase = '准备原片地址'; this.save(job);
+        const videoUrl = await this.files.ensureCosUrl(String(source.fileId), signal);
+        const revisionInstructions = await readFile(new URL('../prompts/redraw-revision.md', import.meta.url), 'utf8');
+        job.phase = '对照原片调整分镜'; this.save(job);
+        const raw = await runVideoWorkflow(analysis.baseUrl, analysis.apiKey, workflow.config.model, `${instructions}\n\n${revisionInstructions}`, [{ type: 'text', text: JSON.stringify(context) }, { type: 'video_url', video_url: analysis.videoUrlFormat === 'string' ? videoUrl : { url: videoUrl } }], signal, execution, savePartial);
+        workflow.outputs.push({ output_type: 'raw', content: raw }); this.save(job);
+        const structured = await this.formatWorkflow(job, signal);
+        validateRevision(structured, state.shots.filter(item => item.episodeId === episode.id));
+        this.assertWorkflowVersions(job);
+        job.result = { readyToApply: true };
+      } else if (job.kind === 'analyze') {
+        const analysis = this.dependencies.analysisCredentials?.();
+        if (!analysis?.apiKey || !analysis.baseUrl) throw new Error('请先配置视频分析接口地址与 API Key');
+        if (analysis.videoUrlFormat && !['object', 'string'].includes(analysis.videoUrlFormat)) throw new Error('视频分析地址格式配置无效，请使用 object 或 string');
         const analysisApi = new URL(analysis.baseUrl);
         if (!['http:', 'https:'].includes(analysisApi.protocol) || analysisApi.username || analysisApi.password || analysisApi.search || analysisApi.hash) throw new Error('视频分析接口地址无效');
-        const checked = async (response: Response) => {
-          if (!response.ok) {
-            const value = await response.json().catch(() => null) as { error?: { message?: string }; message?: string } | null;
-            throw new Error(safeError(new Error(`视频分析接口 HTTP ${response.status}：${value?.error?.message || value?.message || response.statusText}`), analysis.apiKey));
-          }
-          return response.json();
-        };
         job.phase = '检测候选切镜'; this.save(job);
         const { segments: candidates, ...info } = await detectVideoCuts(this.files, String(source.fileId), signal);
         job.segments = candidates; this.save(job);
@@ -243,54 +354,64 @@ export class VideoRedraw {
         const liveProject = this.project(job.projectId), liveEpisode = this.episode(liveProject, job.episodeId);
         const liveSource = this.source(liveProject, liveEpisode);
         if (liveSource.fileId !== job.sourceFileId) throw new StudioConflict('原片已更换，请重新提交');
+        if (liveProject._version !== job.projectVersion || liveEpisode._version !== job.versions[recordKey('episodes', liveEpisode.id)]) throw new StudioConflict('项目或剧集在检测期间发生变化，请重新提交');
         this.studio.apply(`redraw-metadata-${hash(job.id).slice(0, 24)}`, [this.sourceChange(liveProject, liveEpisode, { ...liveSource, ...info, segments: candidates })]);
+        job.projectVersion = this.project(job.projectId)._version as number;
+        job.versions[recordKey('episodes', episode.id)] = this.episode(this.project(job.projectId), job.episodeId)._version as number;
         job.phase = '准备原片 COS 地址'; this.save(job);
         const videoUrl = await this.files.ensureCosUrl(String(source.fileId), signal);
         if (!/^https?:\/\//i.test(videoUrl)) throw new Error('原片没有可供模型读取的 COS 地址');
         signal.throwIfAborted();
         job.phase = '分析视频画面与声音'; this.save(job);
-        const response = await checked(await fetch(`${analysisApi.toString().replace(/\/$/, '')}/chat/completions`, { method: 'POST', signal, headers: { Authorization: `Bearer ${analysis.apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: redrawConfig.videoAnalysisModel, response_format: { type: 'json_object' }, messages: [{ role: 'user', content: [{ type: 'text', text: `${redrawConfig.storyboardAnalysisPrompt}\n目标地区：${project.targetRegion}，目标语言：${project.targetLanguage}；用户要求：${project.requirements || '无'}\n原视频总时长为 ${info.duration} 秒，必须输出从 0 秒到 ${info.duration} 秒的全部镜头，不能遗漏尾部；最后一镜 end 必须为 ${info.duration}。\n已有项目资产：${JSON.stringify(this.studio.snapshot().assets.filter(item => item.projectId === project.id).map(({ id, name, type, alias, description, appearance, costume, variants }) => ({ id, name, type, alias, description, appearance, costume, variants }))) }\n候选镜头：${JSON.stringify(candidates.map(({ id, start, end }) => ({ id, start, end })))}` }, { type: 'video_url', video_url: { url: videoUrl } }] }] }) })) as { choices?: Array<{ finish_reason?: string; message?: { content?: unknown } }> };
-        const choice = response.choices?.[0];
-        if (choice?.finish_reason === 'length') throw new Error('视频分析结果被模型截断，请调整模型配置后重试');
-        if (typeof choice?.message?.content !== 'string' || !choice.message.content.trim()) throw new Error('视频分析接口未返回分析内容');
-        signal.throwIfAborted();
-        job.result = { analysis: choice.message.content }; this.save(job);
+        if (!workflow || !instructions) throw new Error('工作流配置不存在');
+        const context = { projectId: project.id, episodeId: episode.id, project: { targetRegion: project.targetRegion, targetLanguage: project.targetLanguage, requirements: project.requirements }, duration: info.duration, assets: this.studio.snapshot().assets.filter(item => item.projectId === project.id).map(({ id, name, type, alias, description, appearance, costume, variants }) => ({ id, name, type, alias, description, appearance, costume, variants })), candidates: candidates.map(({ id, start, end }) => ({ id, start, end })) };
+        workflow.context = context; this.save(job);
+        const raw = await runVideoWorkflow(analysisApi.toString(), analysis.apiKey, workflow.config.model, instructions, [{ type: 'text', text: JSON.stringify(context) }, { type: 'video_url', video_url: analysis.videoUrlFormat === 'string' ? videoUrl : { url: videoUrl } }], signal, execution, savePartial);
+        workflow.outputs.push({ output_type: 'raw', content: raw }); this.save(job);
         if (this.source(this.project(job.projectId), this.episode(this.project(job.projectId), job.episodeId)).fileId !== job.sourceFileId) throw new StudioConflict('原片已更换，分析结果未应用');
-        const structured = parseModelJson(choice.message.content);
+        const structured = await this.formatWorkflow(job, signal);
+        job.phase = '校验并保存分镜'; this.save(job);
+        this.assertWorkflowVersions(job);
         const summary = saveRedrawStoryboard(this.studio, project, episode, source, structured, job.id);
-        job.result = { analysis: choice.message.content, ...summary };
+        job.result = { analysis: raw, ...summary };
       } else if (job.kind === 'extract-assets') {
-        const selected = this.dependencies.model?.(redrawConfig.assetExtractionModel);
+        if (!workflow || !instructions) throw new Error('工作流配置不存在');
+        const selected = this.dependencies.model?.(workflow.config.model);
         if (!selected) throw new Error('请在模型设置中配置并启用资产提取文本模型');
         const state = this.studio.snapshot();
         const shots = state.shots.filter(item => item.episodeId === episode.id);
         const assets = state.assets.filter(item => item.projectId === project.id);
         const prior = this.jobs(project.id).find(item => item.kind === 'analyze' && item.episodeId === episode.id && item.status === 'completed' && item.sourceFileId === source.fileId);
-        const context = { project: { targetRegion: project.targetRegion, targetLanguage: project.targetLanguage, requirements: project.requirements }, extractionRequirements: job.input.requirements || '', scenes: episode.scenes, shots, assets, sourceAnalysis: prior?.result?.analysis || '' };
+        const context = { projectId: project.id, episodeId: episode.id, project: { targetRegion: project.targetRegion, targetLanguage: project.targetLanguage, requirements: project.requirements }, extractionRequirements: job.input.requirements || '', scenes: episode.scenes, shots, assets, sourceAnalysis: prior?.result?.analysis || '' };
         job.phase = '提取并核对美术资产'; this.save(job);
-        let analysis = '';
-        for await (const text of generate(selected.provider, selected.model, [{ role: 'user', content: JSON.stringify(context) }], redrawConfig.assetExtractionPrompt, undefined, signal, undefined, Output.json())) analysis += text;
+        workflow.context = context; this.save(job);
+        const analysis = await runTextWorkflow(selected.provider, selected.model, context, instructions, signal, execution, savePartial);
         if (!analysis.trim()) throw new Error('资产提取接口未返回内容');
         signal.throwIfAborted();
-        job.result = { analysis, model: selected.model.id, providerId: selected.provider.id }; this.save(job);
-        const summary = saveExtractedAssets(this.studio, project, episode, parseModelJson(analysis), job.versions, job.id);
+        workflow.outputs.push({ output_type: 'raw', content: analysis }); job.result = { analysis, model: selected.model.id, providerId: selected.provider.id }; this.save(job);
+        const structured = await this.formatWorkflow(job, signal);
+        job.phase = '校验并保存资产'; this.save(job);
+        const summary = saveExtractedAssets(this.studio, project, episode, structured, job.versions, job.id);
         job.result = { ...job.result, ...summary };
       } else if (job.kind === 'video-prompts') {
-        const selected = this.dependencies.model?.(redrawConfig.videoPromptModel);
+        if (!workflow || !instructions) throw new Error('工作流配置不存在');
+        const selected = this.dependencies.model?.(workflow.config.model);
         if (!selected) throw new Error('请在模型设置中配置并启用视频提示词文本模型');
         const state = this.studio.snapshot();
         const shots = state.shots.filter(item => item.episodeId === episode.id).sort((a, b) => Number(a._position || 0) - Number(b._position || 0));
         const assets = state.assets.filter(item => item.projectId === project.id);
         const videoModel = this.dependencies.videoDurations?.();
         if (!videoModel?.seconds.length) throw new Error('请在模型设置中配置默认视频模型支持的整数时长（不超过 15 秒）');
-        const context = { project: { targetRegion: project.targetRegion, targetLanguage: project.targetLanguage, requirements: project.requirements }, mode: job.input.mode || '参考生成', requirements: job.input.requirements || '', videoModel, scenes: episode.scenes, shots, assets };
+        const context = { projectId: project.id, episodeId: episode.id, project: { targetRegion: project.targetRegion, targetLanguage: project.targetLanguage, requirements: project.requirements }, mode: job.input.mode || '参考生成', requirements: job.input.requirements || '', videoModel, scenes: episode.scenes, shots, assets };
         job.phase = '编写视频片段提示词'; this.save(job);
-        let analysis = '';
-        for await (const text of generate(selected.provider, selected.model, [{ role: 'user', content: JSON.stringify(context) }], redrawConfig.videoPromptWritingPrompt, undefined, signal, undefined, Output.json())) analysis += text;
+        workflow.context = context; this.save(job);
+        const analysis = await runTextWorkflow(selected.provider, selected.model, context, instructions, signal, execution, savePartial);
         if (!analysis.trim()) throw new Error('视频提示词接口未返回内容');
         signal.throwIfAborted();
-        job.result = { analysis, model: selected.model.id, providerId: selected.provider.id }; this.save(job);
-        const summary = saveRedrawVideoPrompts(this.studio, project, episode, job.versions, parseModelJson(analysis), String(job.input.mode || '参考生成'), job.id, videoModel.seconds, videoModel.modelId);
+        workflow.outputs.push({ output_type: 'raw', content: analysis }); job.result = { analysis, model: selected.model.id, providerId: selected.provider.id }; this.save(job);
+        const structured = await this.formatWorkflow(job, signal);
+        job.phase = '校验并保存视频提示词'; this.save(job);
+        const summary = saveRedrawVideoPrompts(this.studio, project, episode, job.versions, structured, String(job.input.mode || '参考生成'), job.id, videoModel.seconds, videoModel.modelId);
         job.result = { ...job.result, ...summary };
       } else if (job.kind === 'export') {
         job.phase = '合成实际片段'; this.save(job);
@@ -314,6 +435,24 @@ export class VideoRedraw {
       job.status = this.disposed ? 'interrupted' : controller.signal.aborted ? 'cancelled' : 'failed';
       job.error = safeError(error); this.save(job);
     }
+  }
+  private applyRevision(jobId: string, project: StudioRecord, episode: StudioRecord) {
+    const job = this.job(jobId);
+    if (job.projectId !== project.id || job.episodeId !== episode.id || job.kind !== 'revise-storyboard' || job.status !== 'completed' || !job.result?.readyToApply || job.result.applied) throw new Error('没有可应用的调整结果');
+    if (this.source(project, episode).fileId !== job.sourceFileId) throw new StudioConflict('原片已更换，不能应用调整');
+    this.assertWorkflowVersions(job);
+    const state = this.studio.snapshot(), shots = state.shots.filter(item => item.episodeId === episode.id);
+    const output = job.workflow?.outputs.find(item => item.output_type === 'structured')?.content;
+    const revision = validateRevision(parseModelJson(output || ''), shots);
+    const changes: StudioChange[] = revision.changes.map(({ shotId, values }) => {
+      const shot = shots.find(item => item.id === shotId)!;
+      const { sourceDescription, sourceDialogue, dialogue, ...fields } = values;
+      const assetIds = values.description === undefined && !dialogue ? undefined : [...new Set([...asList<string>(shot.assetIds), ...mentionedAssets(values.description || '', state.assets.filter(asset => asset.projectId === project.id)).map((asset: { assetId: string }) => asset.assetId), ...(dialogue || []).flatMap(line => line.assetId ? [line.assetId] : [])])];
+      return { resource: 'shots', op: 'update', id: shotId, version: shot._version, values: { ...fields, ...(assetIds ? { assetIds } : {}), ...(dialogue ? { dialogue: dialogue.map(line => ({ ...line, id: line.id || randomUUID() })) } : {}), ...(sourceDescription !== undefined || sourceDialogue !== undefined ? { source: { ...(shot.source as object), ...(sourceDescription !== undefined ? { description: sourceDescription } : {}), ...(sourceDialogue !== undefined ? { dialogue: sourceDialogue } : {}) } } : {}) } };
+    });
+    if (changes.length) this.studio.apply(`redraw-revision-${job.id}`, changes);
+    job.result = { ...job.result, applied: true, appliedCount: changes.length }; this.save(job);
+    return { applied: true, count: changes.length };
   }
   private apply(jobId: string, project: StudioRecord, episode: StudioRecord, selected: string[]) {
     const job = this.job(jobId);
@@ -388,15 +527,15 @@ export class VideoRedraw {
 }
 
 const properties = {
-  mode: { type: 'string', enum: ['参考生成', '分镜图'] }, requirements: { type: 'string', maxLength: 2000, description: '资产提取或视频提示词生成的补充要求；保留已有用户设定。' }, projectId: { type: 'string' }, episodeId: { type: 'string' }, jobId: { type: 'string' }, requestId: { type: 'string' }, version: { type: 'integer' },
+  mode: { type: 'string', enum: ['参考生成', '分镜图'] }, requirements: { type: 'string', maxLength: 2000, description: '资产提取、分镜调整或视频提示词生成的补充要求。' }, projectId: { type: 'string' }, episodeId: { type: 'string' }, jobId: { type: 'string' }, requestId: { type: 'string' }, version: { type: 'integer' },
   start: { type: 'number' }, end: { type: 'number' }, shotId: { type: 'string' }, shotVersion: { type: 'integer' }, split: { type: 'number' },
   shotIds: { type: 'array', items: { type: 'string' } }, fromId: { type: 'string' }, toId: { type: 'string' }, fromVersion: { type: 'integer' }, toVersion: { type: 'integer' },
   selections: { type: 'array', minItems: 1, maxItems: 80, items: { type: 'object', properties: { clipId: { type: 'string' }, start: { type: 'number', minimum: 0 }, end: { type: 'number' } }, required: ['clipId'], additionalProperties: false } },
 } as const;
 export const REDRAW_TOOLS = [
-  { name: 'builtin_wait_video_redraw', title: '等待视频转绘任务', description: '等待指定项目与剧集的视频分析、资产提取或视频提示词任务结束；完成后返回分析结果，失败、中断或取消时返回真实状态和错误。停止等待不会取消后台任务。', risk: 'read' as const, approval: 'workspace' as const, waitForCompletion: true as const, appId: 'builtin:studio', appName: '视频转绘', parameters: { type: 'object', properties: { projectId: properties.projectId, episodeId: properties.episodeId, jobId: properties.jobId }, required: ['projectId', 'jobId'], additionalProperties: false } },
-  { name: 'builtin_read_video_redraw', title: '查询视频转绘', description: 'describe=true 查询转绘能力和限制；否则以 projectId 和 episodeId 查询该集原片、持久化任务、可应用草稿和错误；传 jobId 读取 analyze、extract-assets、video-prompts 的完整结果，或用 cursor、limit 分页读取历史切镜结果或原声转写；detail=turns/words 只读取该任务已有转写。省略 episodeId 兼容第一集。查询不触发生成。', risk: 'read' as const, approval: 'workspace' as const, appId: 'builtin:studio', appName: '视频转绘', parameters: { type: 'object', properties: { projectId: properties.projectId, episodeId: properties.episodeId, jobId: properties.jobId, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500 }, detail: { type: 'string', enum: ['turns', 'words'] }, describe: { type: 'boolean' } }, additionalProperties: false } },
-  { name: 'builtin_edit_video_redraw', title: '操作视频转绘', description: '按 episodeId 操作对应剧集，省略则使用第一集。analyze 复用原片 COS 地址调用视频模型分析画面与声音，本地原片先通过现有 COS 配置上传；extract-assets 使用文本模型补充资产并关联镜头；video-prompts 根据已确认分镜与用户 mode、requirements 调用文本模型创建视频片段和提示词，已有片段不覆盖；完成后用等待工具取得结果；分析失败时报告真实错误，不自动改用其他分析方式；cancel 取消；merge-assets 合并重复资产，export 按 selections 的 clipId 顺序合成已选用视频，保留生成音轨。提交长任务须 requestId、最新项目 version，返回任务后查询。失败后使用新 requestId 重新提交。', risk: 'write' as const, approval: 'workspace' as const, appId: 'builtin:studio', appName: '视频转绘', parameters: { type: 'object', properties: { projectId: properties.projectId, episodeId: properties.episodeId, jobId: properties.jobId, requestId: properties.requestId, version: properties.version, requirements: properties.requirements, mode: properties.mode, fromId: properties.fromId, toId: properties.toId, fromVersion: properties.fromVersion, toVersion: properties.toVersion, selections: properties.selections, action: { type: 'string', enum: ['analyze', 'extract-assets', 'video-prompts', 'cancel', 'merge-assets', 'export'] } }, required: ['projectId', 'action'], additionalProperties: false } },
+  { name: 'builtin_wait_video_redraw', title: '等待视频转绘任务', description: '等待指定项目与剧集的视频分析、分镜调整、资产提取或视频提示词任务结束；完成后返回分析结果，失败、中断或取消时返回真实状态和错误。停止等待不会取消后台任务。', risk: 'read' as const, approval: 'workspace' as const, waitForCompletion: true as const, appId: 'builtin:studio', appName: '视频转绘', parameters: { type: 'object', properties: { projectId: properties.projectId, episodeId: properties.episodeId, jobId: properties.jobId }, required: ['projectId', 'jobId'], additionalProperties: false } },
+  { name: 'builtin_read_video_redraw', title: '查询视频转绘', description: 'describe=true 查询转绘能力和限制；否则以 projectId 和 episodeId 查询该集原片、持久化任务、可应用草稿和错误；传 jobId 读取 analyze、extract-assets、video-prompts 的状态、failureStage 失败阶段、工具步骤和 outputs（raw 原始输出、structured 页面字段），失败任务也可读取已保存输出，或用 cursor、limit 分页读取历史切镜结果或原声转写；detail=turns/words 只读取该任务已有转写。省略 episodeId 兼容第一集。查询不触发生成。', risk: 'read' as const, approval: 'workspace' as const, appId: 'builtin:studio', appName: '视频转绘', parameters: { type: 'object', properties: { projectId: properties.projectId, episodeId: properties.episodeId, jobId: properties.jobId, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500 }, detail: { type: 'string', enum: ['turns', 'words'] }, describe: { type: 'boolean' } }, additionalProperties: false } },
+  { name: 'builtin_edit_video_redraw', title: '操作视频转绘', description: '按 episodeId 操作对应剧集，省略则使用第一集。analyze 复用原片 COS 地址调用视频模型分析画面与声音，本地原片先通过现有 COS 配置上传；revise-storyboard 将原片和现有分镜发给视频分析 Agent 生成待审核建议；apply-revision 传 jobId，校验版本后应用建议；extract-assets 使用文本模型补充资产并关联镜头；video-prompts 根据已确认分镜与用户 mode、requirements 调用文本模型创建视频片段和提示词，已有片段不覆盖；retry-format 使用失败任务 jobId、最新项目 version 和新的 requestId 从原始输出重新整理；retry-save 使用已保存的整理结果重试校验与保存，不调用模型；完成后用等待工具取得结果；分析失败时报告真实错误，不自动改用其他分析方式；cancel 取消；merge-assets 合并重复资产，export 按 selections 的 clipId 顺序合成已选用视频，保留生成音轨。提交长任务须 requestId、最新项目 version，返回任务后查询。失败后使用新 requestId 重新提交。', risk: 'write' as const, approval: 'workspace' as const, appId: 'builtin:studio', appName: '视频转绘', parameters: { type: 'object', properties: { projectId: properties.projectId, episodeId: properties.episodeId, jobId: properties.jobId, requestId: properties.requestId, version: properties.version, requirements: properties.requirements, mode: properties.mode, fromId: properties.fromId, toId: properties.toId, fromVersion: properties.fromVersion, toVersion: properties.toVersion, selections: properties.selections, action: { type: 'string', enum: ['analyze', 'revise-storyboard', 'apply-revision', 'extract-assets', 'video-prompts', 'retry-format', 'retry-save', 'cancel', 'merge-assets', 'export'] } }, required: ['projectId', 'action'], additionalProperties: false } },
 ] as const;
 
 export async function handleRedrawRequest(req: IncomingMessage, res: ServerResponse, service: VideoRedraw) {

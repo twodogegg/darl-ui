@@ -10,6 +10,7 @@ import { types } from '../data'
 import ArtAssetDrawer from '../components/ArtAssetDrawer'
 import { assetJob, canBatchGenerate, generateAssetBatch, jobLabel, pendingJob } from '../art'
 import { AssetSourceEvidence, SupplementAsset } from '../components/VideoRedraw'
+import { WorkflowRunDetails } from '../components/WorkflowRunDetails'
 
 export default function Art() {
   const context = useProject()
@@ -153,7 +154,7 @@ function ArtWorkspace({ context }) {
                 </nav>
               </div>
               <div className="art-toolbar__right">
-                {isRedraw && <><span role="status">{['queued', 'running'].includes(extraction?.status) ? '正在提取美术资产…' : extraction?.status === 'failed' || extraction?.status === 'interrupted' || extraction?.status === 'cancelled' ? `资产提取${extraction.status === 'cancelled' ? '已取消' : '失败'}：${extraction.error || '请重试'}` : extraction?.status === 'completed' ? '资产提取完成' : ''}</span><button className="tool-btn" disabled={!extractionEpisode || ['queued', 'running'].includes(extraction?.status)} onClick={() => setExtractionOpen(true)}>重新提取资产</button></>}
+                {isRedraw && <><WorkflowRunDetails projectId={projectId} episodeId={extractionEpisode} job={extraction} reload={reload} onStarted={next => setExtraction({ ...next, refresh: Date.now() })} /><span role="status">{['queued', 'running'].includes(extraction?.status) ? '正在提取美术资产…' : extraction?.status === 'failed' || extraction?.status === 'interrupted' || extraction?.status === 'cancelled' ? `资产提取${extraction.status === 'cancelled' ? '已取消' : '失败'}：${extraction.error || '请重试'}` : extraction?.status === 'completed' ? '资产提取完成' : ''}</span><button className="tool-btn" disabled={!extractionEpisode || ['queued', 'running'].includes(extraction?.status)} onClick={() => setExtractionOpen(true)}>重新提取资产</button></>}
                 <button className="tool-btn art-style-select" aria-label="选择项目视觉风格" title={selectedStyle?.description} disabled={batchBusy || styleBusy} onClick={() => setStyleOpen(true)}>
                   {styleBusy ? '正在保存风格…' : `视觉风格：${selectedStyle?.name || '请选择'}`}
                 </button>

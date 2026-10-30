@@ -180,9 +180,13 @@ H3 视频模型支持 `minimax-h3-flash` 与 `minimax-h3-standard`；视频清�
 
 1. 读取项目、剧集、来源视频与已有 `shots`、`assets`。项目已选地区和语言即为有效设定：欧美未指定具体国家时采用通用语境，不为此提问。
 2. 查询 `builtin_read_video_redraw`；没有可复用结果时通过 `builtin_edit_video_redraw` 提交 `analyze`，再调用 `builtin_wait_video_redraw`。服务端自动检测候选切点，直接使用文件服务中原片的 COS 地址，交模型校正并保存镜头及资产条目。已有 COS 原片不重复上传，本地原片需先配置 COS，上传并校验后保留同一 fileId；不依赖网关文件接口；失败时报告真实错误，不重复运行独立切镜或转写。
+`analyze`、`extract-assets`、`video-prompts` 分别使用工作流 Agent。提交后通过 `builtin_wait_video_redraw` 等待，或用 `builtin_read_video_redraw` 传 `projectId`、`episodeId`、`jobId` 查询真实状态；详情的 `outputs` 中 `output_type=raw` 是模型原始输出，`output_type=structured` 是整理后的页面字段，`steps` 是工具调用状态，失败时 `failureStage` 标明原始分析、页面字段整理或校验与保存。失败、中断或取消的任务也可读取已保存输出；`incomplete=true` 表示原始输出被截断或中断，不能用于重新整理。若整理结果已保存但写回校验失败，可用 `builtin_edit_video_redraw` 的 `retry-save`，传原 `jobId`、新 `requestId` 和最新项目 `version`，复用整理结果重新保存，不调用模型。若需要重新整理，使用 `retry-format`；两种操作都需通过版本校验，不能覆盖用户修改。
+
+对已有原片分镜进行重新分析时，`builtin_edit_video_redraw` 使用 `revise-storyboard`，传 `projectId`、`episodeId`、最新项目 `version`、新 `requestId` 和可选 `requirements`。任务将原片、现有场次、镜头和资产交给视频分析 Agent，可用 `builtin_wait_video_redraw` 等待完成，返回可查看的原始分析和逐镜调整建议，不自动覆盖现有记录。读取结果并让用户确认后，使用 `apply-revision` 传 `projectId`、`episodeId`、`jobId` 应用；应用时核对原片和项目、场次、分镜及资产版本。支持调整画面、景别、音效、原片描述及对白；镜头拆合、时长和场次变化留在建议中供人工处理。
+
 3. 回读 `shots` 和 `assets`。根据用户要求使用 `builtin_edit_studio` 调整相应镜头，保留其他镜头和用户修改；画面中的资产以 `<完整资产名称>` 或 `<完整资产名称|状态名称>` 存储，页面显示 @ 标签。 场次的 `assetId` 与可选 `variantId` 关联场景及其状态，连续的同地点同时间镜头属于同一场次；场景无法确认时保留待确认。生成视频片段时必须将所属场次的场景资产和状态带入片段引用与提示词。对白角色必须引用真实角色 ID，原片内容保存在 `source`，目标对白保存在 `dialogue`。
 4. 修改时间时同时维护相邻镜头区间与时长。拆分、合并时检查对白分配，证据不足标记待确认；不要覆盖已完成的媒体。保存后按 ID 回读。
-5. 确认分镜后使用 `builtin_edit_video_redraw` 的 `extract-assets` 提交资产提取，可在 `requirements` 中提供本次补充要求（最多 2000 字），再通过 `builtin_wait_video_redraw` 等待结果。接口使用独立配置的文本模型（assetExtractionModel，默认 deepseek-v4.1-flash）处理分镜、场次、原片分析和已有资产，不重新调用视频理解模型；结果含实际 model 与 providerId，保留既有设定、图片与非空提示词，新增缺失资产、必要状态和镜头关联，并补全本集已有衍生状态的空生图提示词。模型漏掉需要补全的状态时任务失败，报告错误并用新的 requestId 重试。原片分析阶段可先留下空提示词，由资产提取阶段补齐。用户要求调整时使用 studio 工具修改已有资产；不要求提供单独剧本。
+5. 确认分镜后使用 `builtin_edit_video_redraw` 的 `extract-assets` 提交资产提取，可在 `requirements` 中提供本次补充要求（最多 2000 字），再通过 `builtin_wait_video_redraw` 等待结果。接口使用资产提取工作流 Agent 配置的文本模型处理分镜、场次、原片分析和已有资产，不重新调用视频理解模型；结果含实际 model 与 providerId，保留既有设定、图片与非空提示词，新增缺失资产、必要状态和镜头关联，并补全本集已有衍生状态的空生图提示词。模型漏掉需要补全的状态时任务失败，报告错误并用新的 requestId 重试。原片分析阶段可先留下空提示词，由资产提取阶段补齐。用户要求调整时使用 studio 工具修改已有资产；不要求提供单独剧本。
 
 ## 工作区文件与命令
 

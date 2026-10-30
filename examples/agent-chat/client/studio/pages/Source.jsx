@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { studioApi, useStore } from '../store'
 import { startPolling } from '../../polling'
 import { SourcePlayer } from '../components/VideoRedraw'
+import { WorkflowRunDetails } from '../components/WorkflowRunDetails'
 import { studioDefaults } from '../../../studio-schema'
 
 export default function Source() {
@@ -93,6 +94,6 @@ function RedrawSource({ context }) {
   }
   return <Workflow context={context}>
     <header className="workspace-toolbar"><div><h2>原片</h2><p className="muted">自动检测候选切镜，分析原片并生成可编辑分镜表。</p></div><div className="toolbar"><input ref={input} type="file" accept="video/mp4,.mp4" aria-label="上传新剧集原片" hidden onChange={addEpisode} /><button className="btn" disabled={uploading} onClick={() => input.current?.click()}>{uploading ? '正在上传剧集…' : '＋ 添加剧集'}</button><button className="btn" disabled={!source?.fileId || starting || hasShots || ['queued', 'running'].includes(analysis?.status)} onClick={generate}>{starting ? '正在启动…' : '生成分镜'}</button><button className="btn primary" onClick={() => navigate(context.link('/storyboard'))}>查看分镜</button></div></header>
-    <div className="redraw-source">{source?.fileId ? <SourcePlayer source={source} /> : <div className="empty"><h2>暂无原视频</h2><p>请先上传原视频。</p></div>}<p className="muted" role={submitError || analysis?.status === 'failed' ? 'alert' : 'status'}>{submitError ? `生成分镜启动失败：${submitError}` : ['queued', 'running'].includes(analysis?.status) ? `正在生成分镜：${analysis.phase || '排队'}…` : analysis?.status === 'completed' || hasShots ? '分镜已生成，可在分镜页查看并编辑。' : ['failed', 'interrupted', 'cancelled'].includes(analysis?.status) ? `生成分镜未完成：${analysis.error || '任务已取消'}，可重试。` : '生成后可在此查看进度，完成后在分镜页查看并编辑。'}</p></div>
+    <div className="redraw-source"><WorkflowRunDetails projectId={project.id} episodeId={episode?.id} job={analysis} reload={reload} onStarted={next => { setAnalysis(next); setRefresh(value => value + 1) }} />{source?.fileId ? <SourcePlayer source={source} /> : <div className="empty"><h2>暂无原视频</h2><p>请先上传原视频。</p></div>}<p className="muted" role={submitError || analysis?.status === 'failed' ? 'alert' : 'status'}>{submitError ? `生成分镜启动失败：${submitError}` : ['queued', 'running'].includes(analysis?.status) ? `正在生成分镜：${analysis.phase || '排队'}…` : analysis?.status === 'completed' || hasShots ? '分镜已生成，可在分镜页查看并编辑。' : ['failed', 'interrupted', 'cancelled'].includes(analysis?.status) ? `生成分镜未完成${analysis.failureStage ? `（${analysis.failureStage}）` : ''}：${analysis.error || '任务已取消'}，可查看任务详情。` : '生成后可在此查看进度，完成后在分镜页查看并编辑。'}</p></div>
   </Workflow>
 }
