@@ -106,6 +106,9 @@ export function App() {
   const agentId = sessions.find(session => session.id === activeId)?.agentId;
   const [effort, setEffort] = useState<string | undefined>();
   const [open, setOpen] = useState(false);
+  const [assistantPosition, setAssistantPosition] = useState<{ x: number; y: number } | null>(null);
+  const assistantDrag = useRef<{ x: number; y: number; left: number; top: number; moved: boolean } | null>(null);
+  const assistantDragged = useRef(false);
   const [studioVisible, setStudioVisible] = useState(true);
   const websiteContext = useRef<Record<string, string>>({});
   const updateWebsiteContext = useCallback((value: Record<string, string>) => { websiteContext.current = value; }, []);
@@ -230,8 +233,11 @@ export function App() {
       if (running.current === controller) { running.current = null; setGenerating(false); }
     };
     try {
-      const usedSkillIds = [...new Set([...request.skillIds, ...history.flatMap(message => message.role === 'user' ? message.modelSkillIds || [] : []),
-        ...skills.filter(skill => history.some(message => message.role === 'user' && message.content.includes(`(skill:${encodeURIComponent(skill.id)})`))).map(skill => skill.id)])];
+      const currentSkills = await loadSkillCatalog(true);
+      setSkills(currentSkills);
+      const availableSkillIds = new Set(currentSkills.map(skill => skill.id));
+      const usedSkillIds = [...new Set([...request.skillIds, ...history.flatMap(message => message.role === 'user' ? (message.modelSkillIds || []).filter(id => availableSkillIds.has(id)) : []),
+        ...currentSkills.filter(skill => history.some(message => message.role === 'user' && message.content.includes(`(skill:${encodeURIComponent(skill.id)})`))).map(skill => skill.id)])];
       const apiMessages = history.filter((message) => message.content || message.outputs?.length || message.attachments?.length || ('toolCalls' in message && message.toolCalls?.length)).map((message) => {
         const { role, attachments } = message;
         const fileContext = (attachments || []).flatMap((attachment) => typeof attachment !== 'string' && attachment.fileId ? [{ fileId: attachment.fileId, name: attachment.name, mimeType: attachment.type }] : []);
@@ -413,11 +419,14 @@ export function App() {
     try {
       const draftOnly = task.draftOnly === true;
       const selectedId = typeof task.agentId === 'string' && task.agentId ? task.agentId : agentId || 'default';
-      const session = draftOnly ? sessions.find(item => activeLoaded && item.id === activeId && item.agentId === selectedId && !item.messages.length) || newSession(selectedId) : newSession(selectedId);
+      const continueCurrentSession = task.continueCurrentSession === true;
+      if (continueCurrentSession && !activeLoaded) throw new Error('请等待当前对话加载完成');
+      const currentSession = continueCurrentSession ? sessions.find(item => item.id === activeId && item.agentId) : undefined;
+      const session = currentSession || (draftOnly ? sessions.find(item => activeLoaded && item.id === activeId && item.agentId === selectedId && !item.messages.length) : undefined) || newSession(selectedId);
       const selections = task.modelSelections as Record<string, string> | undefined;
       const selectedModel = selections?.text || availableModelId;
       if (!draftOnly && !selectedModel) throw new Error('请先配置并启用文本模型');
-      const payload = studioAgentPayload(task, await loadSkillCatalog());
+      const payload = studioAgentPayload(task, await loadSkillCatalog(true));
       if (!sessions.some(item => item.id === session.id)) setSessions(current => [session, ...current]);
       setActiveId(session.id); setOpen(true);
       if (draftOnly) {
@@ -425,7 +434,7 @@ export function App() {
         setDrafts(current => ({ ...current, [session.id]: payload.content }));
         return;
       }
-      await run({ sessionId: session.id, agentId: selectedId, content: payload.content, skillIds: payload.context.modelSkillIds, applicationIds: [], modelId: selectedModel, reasoningEffort: activeEffort }, undefined, session, payload.context);
+      await run({ sessionId: session.id, agentId: session.agentId, content: payload.content, skillIds: payload.context.modelSkillIds, applicationIds: [], modelId: selectedModel, reasoningEffort: activeEffort }, undefined, session, payload.context);
     } finally { studioRequesting.current = false; }
   };
   const studioNavigate = (page: string) => {
@@ -443,6 +452,10 @@ export function App() {
       {!studioVisible && (plazaVisible ? <main className="example-settings example-agent-plaza"><AgentPlaza agents={agents} selectedAgentId={agentId} onSelect={(agent) => { const session = newSession(agent.id); setSessions(current => [session, ...current.filter(item => item.agentId || item.messages.length || item.messageCount)]); setActiveId(session.id); setPlazaVisible(false); setOpen(true); }} /></main> : mediaJobsVisible ? <MediaGenerationPage initialTaskId={mediaTaskToOpen} onBack={() => { setMediaJobsVisible(false); setMediaTaskToOpen(undefined); }} /> : projectsVisible ? <ProjectsPage onBack={() => setProjectsVisible(false)} /> : guide ? <Guide onBack={() => { setGuide(false); setOpen(true); }} /> : settings ? <main className="example-settings"><button className={buttonClass} onClick={leaveSettings}><ArrowLeft size={15} />{settingsReturn === 'studio' ? '返回短剧工作台' : settingsReturn === 'media' ? '返回媒体生成' : '返回聊天'}</button><SettingsPage title="设置" activeSection={settingsSection} onSectionChange={setSettingsSection} sections={[{ id: 'models', label: '模型', icon: <Settings2 /> }, { id: 'requests', label: '请求记录', icon: <History /> }, { id: 'prompts', label: '提示词', icon: <FileText /> }, { id: 'voice', label: '语音', icon: <MessageSquare /> }, { id: 'storage', label: '存储', icon: <Database /> }, { id: 'tools', label: 'Tools', icon: <Wrench /> }, { id: 'skills', label: 'Skills', icon: <Sparkles /> }, { id: 'agents', label: 'Agents', icon: <Bot /> }, { id: 'applications', label: '应用 / MCP', icon: <Blocks /> }, { id: 'approvals', label: '审批模式', icon: <Settings2 /> }]}>{settingsSection === 'requests' ? <RequestRecordsPage onOpenSession={(id) => { if (!sessions.some(session => session.id === id)) { setError('关联对话已删除'); return; } selectSession(id); setSettings(false); setOpen(true); }} onOpenTask={(id) => { setMediaTaskToOpen(id); setSettings(false); setMediaJobsVisible(true); setOpen(false); }} /> : settingsSection === 'prompts' ? promptsSettings : settingsSection === 'agents' ? agentsSettings : settingsSection === 'voice' ? <VoiceSettings settings={fishVoice.settings} onSave={fishVoice.save} /> : settingsSection === 'storage' ? <StorageSettings /> : settingsSection === 'skills' ? skillsSettings : settingsSection === 'tools' ? <ToolsSettings /> : settingsSection === 'applications' ? <McpSettings applications={applications} onChanged={() => setApplicationRevision((value) => value + 1)} /> : settingsSection === 'approvals' ? approvalSettings : modelSettings}</SettingsPage></main> : <main className="example-home"><span className="example-eyebrow">AGENT CHAT EXAMPLE</span><h1>让网站助手<br />真正开始工作。</h1><p>使用现有聊天 UI，连接真实模型。对话、历史和 Skills 保存在本机 SQLite。</p><div className="example-actions"><button className="darl-button darl-button--default darl-button-size--default" onClick={() => setOpen(true)}><MessageSquare size={16} />打开助手</button><button className={buttonClass} onClick={showPlaza}><Bot size={16} />Agent 广场</button><button className={buttonClass} onClick={showSettings}><Settings2 size={16} />模型设置</button></div><div className="example-info"><div><span>模型</span><strong>{models.find((model) => model.id === availableModelId)?.name || '尚未配置'}</strong></div><div><span>会话</span><strong>{sessions.length}</strong></div><div><span>Skills</span><strong>{skills.length}</strong></div></div><small>支持文本和图片消息与 MCP 工具调用。用 @ 引用一次即可在本对话持续使用；通过输入框的审批模式控制执行前确认。Skills 按需加载；命令在本机后端执行，文件产物可下载。</small></main>)}
 
     </div>
+    {studioVisible && !open && <button className="studio-assistant-floating" aria-label="打开 AI 助手" title="打开 AI 助手，可拖动位置" style={assistantPosition ? { left: assistantPosition.x, top: assistantPosition.y, right: 'auto', bottom: 'auto' } : undefined}
+      onPointerDown={(event) => { const rect = event.currentTarget.getBoundingClientRect(); assistantDragged.current = false; assistantDrag.current = { x: event.clientX, y: event.clientY, left: rect.left, top: rect.top, moved: false }; event.currentTarget.setPointerCapture(event.pointerId); }}
+      onPointerMove={(event) => { const start = assistantDrag.current; if (!start) return; const dx = event.clientX - start.x, dy = event.clientY - start.y; if (Math.abs(dx) + Math.abs(dy) > 6) start.moved = true; if (start.moved) setAssistantPosition({ x: Math.max(0, Math.min(window.innerWidth - 52, start.left + dx)), y: Math.max(0, Math.min(window.innerHeight - 52, start.top + dy)) }); }}
+      onPointerUp={() => { assistantDragged.current = assistantDrag.current?.moved || false; assistantDrag.current = null; }} onPointerCancel={() => { assistantDrag.current = null; }} onClick={() => { if (!assistantDragged.current) openStudioChat(); assistantDragged.current = false; }}><Bot size={25} /></button>}
     <AgentSidebar hideEmptySessions voice={fishVoice.voice} approvalMode={approvalMode} onApprovalModeChange={updateApprovalMode} approvalModePending={!approvalReady || approvalSaving || !hydrated || !activeLoaded} open={open} onOpenChange={setOpen} sessions={sessions} activeSessionId={activeId} onSessionChange={selectSession} onSessionRename={renameSession} onSessionDelete={deleteSession}
       messageHeader={historyLoading ? <p role="status">正在加载聊天记录…</p> : loadError ? <p role="alert">{loadError} <button onClick={() => void retryLoad()}>重新加载</button></p> : undefined}
       composerHeader={saveError ? <p role="alert">{saveError} <button onClick={retrySave}>重试保存</button></p> : undefined}

@@ -144,6 +144,30 @@ export class FileStore {
     const config = this.fileConfig(item);
     return publicCosUrl(config.publicBaseUrl, config.scheme || 'https', config.bucket || '', config.region || 'ap-guangzhou', item.objectKey);
   }
+  async ensureCosUrl(id: string, signal: AbortSignal) {
+    signal.throwIfAborted();
+    const file = this.get(id);
+    if (!file) throw new Error('原视频文件不存在');
+    if (file.backend === 'cos') return this.originalUrl(file)!;
+    if (!this.cos || !this.bucket) throw new Error('本地原片需要上传至 COS，请先在设置中配置 COS 存储');
+    const value = await this.getBytes(id);
+    if (!value) throw new Error('原视频文件读取失败');
+    signal.throwIfAborted();
+    const cos = this.cos, config: FileStoreOptions = { root: this.root, prefix: this.prefix, region: this.region, bucket: this.bucket, scheme: this.scheme, publicBaseUrl: this.publicBaseUrl, secretId: this.cosSecretId, secretKey: this.cosSecretKey };
+    const objectKey = `${this.prefix}/${file.sha256}.${file.extension}`;
+    const params = { Bucket: this.bucket, Region: this.region, Key: objectKey };
+    await new Promise<void>((resolve, reject) => cos.putObject({ ...params, Body: value.bytes, ContentType: file.mimeType }, error => error ? reject(error) : resolve()));
+    signal.throwIfAborted();
+    const remote = await new Promise<{ Body?: Buffer | Uint8Array }>((resolve, reject) => cos.getObject(params, (error, data) => error ? reject(error) : resolve(data)));
+    const bytes = Buffer.from(remote.Body || []);
+    if (bytes.length !== file.size || createHash('sha256').update(bytes).digest('hex') !== file.sha256) throw new Error('原片上传 COS 后校验不一致，本地文件已保留');
+    signal.throwIfAborted();
+    // Preserve the file ID, hash and local copy so all existing references remain valid.
+    this.db.prepare("UPDATE file_assets SET backend='cos', object_key=?, config_json=? WHERE id=? AND backend='local'").run(objectKey, JSON.stringify(config), id);
+    const saved = this.get(id);
+    if (!saved || saved.backend !== 'cos') throw new Error('原片 COS 存储记录未保存');
+    return this.originalUrl(saved)!;
+  }
   thumbnailUrl(file: StoredFile | string, width: 160 | 320 | 640 | 1024) {
     const item = typeof file === 'string' ? this.get(file) : file;
     if (!item || !IMAGE_MIMES.has(item.mimeType)) return this.originalUrl(item || '');

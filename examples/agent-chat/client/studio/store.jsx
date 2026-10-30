@@ -1,5 +1,4 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react'
-import redrawPrompts from '../../prompts/video-redraw.json'
 import { emptyStudioData, studioFields, studioPositions } from '../../studio-schema'
 import { styleOptionsFromCatalog } from '../workspace-styles'
 import { startPolling } from '../polling'
@@ -124,11 +123,6 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
     const episode = item.episodeId && state.current.episodes.find(episode => episode.id === item.episodeId)
     const project = state.current.projects.find(project => project.id === (item.projectId || episode?.projectId))
     if (project?.creationMode === 'video-redraw') {
-      if (target.resource === 'assets') {
-        const entry = state.current.prompts.find(entry => entry.id === '4-1')
-        const directive = entry?.mode === 'replace' ? entry.text : entry?.defaultText || redrawPrompts.asset
-        prompt = [directive, `目标地区：${project.targetRegion}；目标语言：${project.targetLanguage}`, prompt].join('\n')
-      }
       if (!preview && target.resource === 'clips') {
         const missing = state.current.assets.filter(asset => item.assetIds.includes(asset.id) && !asset.image)
         if (missing.length) throw new Error(`请先准备目标资产图片：${missing.map(asset => asset.name).join('、')}`)

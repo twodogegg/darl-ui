@@ -2,14 +2,22 @@ import { imageUrl } from '../../image-url'
 import { useState } from 'react'
 import { ReferencePicker, MediaPreview } from './ui'
 import { useStore } from '../store'
-import { clipMediaReferences, clipVoices, referenceKey } from '../storyboard'
+import { clipMediaReferences, clipVoices, referenceKey, CLIP_IMAGE_COLUMNS } from '../storyboard'
 
 export default function ClipReferences({ clip, projectId }) {
   const { data, patch } = useStore()
   const [picker, setPicker] = useState(null)
   const [preview, setPreview] = useState(null)
-  const { assets, additional, images, frames } = clipMediaReferences(clip, data)
+  const { assets, additional, images } = clipMediaReferences(clip, data)
   const voices = clipVoices(clip, data)
+  const excludedFrameUrls = new Set(clip.excludedFrameUrls || [])
+  const frameColumns = CLIP_IMAGE_COLUMNS.filter((column) => clip[column.key])
+  const setFrameExcluded = (url, excluded) =>
+    patch('clips', clip.id, {
+      excludedFrameUrls: excluded
+        ? [...new Set([...(clip.excludedFrameUrls || []), url])]
+        : (clip.excludedFrameUrls || []).filter((item) => item !== url),
+    })
   return (
     <>
       <div className="sb-ref-summary-row">
@@ -60,7 +68,21 @@ export default function ClipReferences({ clip, projectId }) {
           </button>
         </div>
       ))}
-      {frames.length > 0 && <div className="sb-ref-row-wrap"><span className="sb-asset-label">分镜参考图</span>{frames.map(frame => <button className="sb-asset-chip" key={frame.id} onClick={() => setPreview(frame)}><img loading="lazy" className="sb-asset-chip__thumb" src={imageUrl(frame.url, 160)} alt="" /><span>{frame.name}</span></button>)}</div>}
+      {frameColumns.length > 0 && <div className="sb-ref-row-wrap"><span className="sb-asset-label">分镜参考图</span>{frameColumns.map((column) => {
+        const url = clip[column.key]
+        const excluded = excludedFrameUrls.has(url)
+        return (
+          <span className={`sb-asset-chip${excluded ? ' is-excluded' : ''}`} key={column.key}>
+            <button className="sb-chip-open" onClick={() => setPreview({ name: column.label, url, kind: 'image' })}>
+              <img loading="lazy" className="sb-asset-chip__thumb" src={imageUrl(url, 160)} alt="" />
+              <span className="sb-asset-chip__name">{column.label}</span>
+            </button>
+            {excluded
+              ? <button className="sb-asset-chip__restore" aria-label={`恢复${column.label}引用`} title={`恢复${column.label}引用`} onClick={() => setFrameExcluded(url, false)}>＋</button>
+              : <button className="sb-asset-chip__remove" aria-label={`移除${column.label}引用`} title={`移除${column.label}引用`} onClick={() => setFrameExcluded(url, true)}>×</button>}
+          </span>
+        )
+      })}</div>}
       <fieldset className="clip-voices">
         <legend>音色引用</legend>
         {voices.map((voice) => <div className="clip-voice-row" key={voice.id}>

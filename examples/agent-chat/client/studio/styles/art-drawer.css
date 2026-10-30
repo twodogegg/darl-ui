@@ -31,6 +31,10 @@
   font-size: 20px;
   font-weight: 600;
 }
+.page-art .asset-drawer__name-label { display: inline-flex; align-items: center; gap: 4px; color: var(--br-text-primary); }
+.page-art .asset-drawer__name-label span { color: var(--br-text-decorative); font-size: 14px; }
+.page-art .asset-drawer__name { width: 8em; max-width: 100%; padding: 2px 5px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: inherit; font: inherit; }
+.page-art .asset-drawer__name:hover, .page-art .asset-drawer__name:focus { border-color: var(--br-border); background: var(--br-input-bg); }
 .page-art .asset-drawer__episodes { color: var(--br-text-decorative); font-size: 13px; }
 .page-art .asset-drawer__episodes b { color: var(--br-text-primary); }
 .page-art .asset-drawer__header-actions { display: flex; align-items: center; gap: 8px; }

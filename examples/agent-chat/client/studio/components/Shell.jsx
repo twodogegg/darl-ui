@@ -20,13 +20,13 @@ import {
 import { useStore } from '../store'
 import { projectSteps } from '../data'
 
-const stepIcons = [IconNotebook, IconScript, IconPhoto, IconLayoutList, IconVideo]
-const redrawStepIcons = [IconFileText, IconScript, IconPhoto, IconLayoutList, IconVideo, IconMovie]
+const stepIcons = [IconNotebook, IconScript, IconPhoto, IconVideo, IconMovie]
+const redrawStepIcons = [IconFileText, IconScript, IconPhoto, IconVideo, IconMovie]
 // 项目级步骤：整个项目共用同一份内容，不按集拆分
-const projectLevelPaths = ['/source', '/outline', '/script', '/art', '/film']
+const projectLevelPaths = ['/source', '/outline', '/script', '/art']
 const isProjectPath = (path, project) => projectLevelPaths.includes(path) && !(project?.creationMode === 'video-redraw' && ['/source', '/film'].includes(path))
 // 分集步骤：进入后才选择具体剧集
-const episodeLevelPaths = ['/dialogue', '/storyboard', '/video']
+const episodeLevelPaths = ['/dialogue', '/storyboard', '/video', '/film']
 
 const nav = [
   { to: '/', label: '工作台', mobile: '工作台', icon: IconHome },
@@ -113,6 +113,7 @@ export default function Shell({ children }) {
                     : '本集'}
               </span>
             </div>
+            {!isProjectLevel && activeProject.creationMode === 'video-redraw' && activeEpisodeList.length > 1 && <select className="br-flow-episode" aria-label="选择剧集" value={activeEpisode?.id || ''} onChange={event => navigate(`${pathname}?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(event.target.value)}`)}>{activeEpisodeList.map(episode => <option key={episode.id} value={episode.id}>第{episode.number}集 · {episode.title}</option>)}</select>}
             <p className="br-group-title">创作流程</p>
             {flowSteps.map((s, i) => {
               const Icon = (activeProject.creationMode === 'video-redraw' ? redrawStepIcons : stepIcons)[i]
@@ -230,7 +231,7 @@ export default function Shell({ children }) {
             <IconMovie className="br-mobile-mark" size={20} />
             <span>本入剧出</span> / <strong>{crumb}</strong>
           </div>
-          <div className="br-top-actions"><button onClick={() => onNavigate('chat')}>AI 助手</button><button onClick={() => onNavigate('agents')}>Agents</button><button onClick={() => navigate(mediaLink)}>独立生成</button><button onClick={() => onNavigate('settings')}>设置</button></div>
+          <div className="br-top-actions"><button onClick={() => onNavigate('agents')}>Agents</button><button onClick={() => navigate(mediaLink)}>独立生成</button><button onClick={() => onNavigate('settings')}>设置</button></div>
         </header>
         <main
           id="main-content"

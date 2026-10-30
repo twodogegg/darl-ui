@@ -5,7 +5,7 @@ export const studioFields = {
   dialogues: 'projectId episodeId idCode sourceText sourceSpeaker sourceStart sourceEnd targetText targetSpeaker tone timingStatus estimatedSeconds plannedSeconds note',
   assets: 'projectId episodeIds name type role alias description appearance costume voiceDescription image prompt variants history voiceId references dependencies imageDependencies source',
   shots: 'episodeId sceneId description scale camera transition dialogue effects duration source assetIds image imageHistory storyboardPrompt clipId',
-  clips: 'episodeId sceneId title shotIds sourceSignature description duration prompt assetIds references disabledVoiceIds lastGenerationVoiceIds image imageHistory imageSource storyboardPrompt blocking blockingImage blockingHistory videos currentVideo model resolution ratio mode firstFrame lastFrame',
+  clips: 'episodeId sceneId title shotIds sourceSignature description duration prompt assetIds references disabledVoiceIds lastGenerationVoiceIds image imageHistory storyboardImage storyboardHistory imageSource blocking blockingImage blockingHistory excludedFrameUrls videos currentVideo model resolution ratio mode firstFrame lastFrame',
   films: 'projectId episodeId title name url',
   history: 'projectId episodeId message time',
   folders: 'name',
@@ -110,14 +110,14 @@ export const studioDefaults: Partial<Record<StudioResource, Record<string, unkno
   dialogues: { projectId: '', episodeId: '', idCode: '', sourceText: '', sourceSpeaker: '', sourceStart: 0, sourceEnd: 0, targetText: '', targetSpeaker: '', tone: '', timingStatus: 'estimate_not_measured', estimatedSeconds: 0, plannedSeconds: 0, note: '' },
   assets: { episodeIds: [], name: '', type: '角色', role: '', alias: '', description: '', appearance: '', costume: '', voiceDescription: '', image: '', prompt: '', variants: [], history: [], voiceId: '', references: [], dependencies: [], imageDependencies: {} },
   shots: { description: '', scale: '中景', camera: '固定', transition: '硬切', dialogue: [], effects: '', duration: 3, assetIds: [], image: '', imageHistory: [], storyboardPrompt: '', clipId: '' },
-  clips: { title: '新片段', shotIds: [], sourceSignature: '', description: '', duration: 5, prompt: '', assetIds: [], references: [], disabledVoiceIds: [], lastGenerationVoiceIds: [], image: '', imageHistory: [], imageSource: 'clip', storyboardPrompt: '', blocking: '', blockingImage: '', blockingHistory: [], videos: [], model: '', resolution: '', ratio: '9:16', mode: '参考生成', firstFrame: '', lastFrame: '' },
+  clips: { title: '新片段', shotIds: [], sourceSignature: '', description: '', duration: 5, prompt: '', assetIds: [], references: [], disabledVoiceIds: [], lastGenerationVoiceIds: [], image: '', imageHistory: [], storyboardImage: '', storyboardHistory: [], imageSource: 'clip', blocking: '', blockingImage: '', blockingHistory: [], excludedFrameUrls: [], videos: [], model: '', resolution: '', ratio: '9:16', mode: '参考生成', firstFrame: '', lastFrame: '' },
 };
 export function studioResource(value: unknown): StudioResource {
   if (typeof value !== 'string' || !Object.hasOwn(studioFields, value)) throw new Error('不支持的资源类型');
   return value as StudioResource;
 }
 const idFields = new Set(['projectId', 'episodeId', 'sceneId', 'voiceId', 'folderId', 'clipId']);
-const arrayFields = new Set(['episodeIds', 'scenes', 'variants', 'history', 'references', 'dependencies', 'dialogue', 'shotIds', 'assetIds', 'disabledVoiceIds', 'lastGenerationVoiceIds', 'imageHistory', 'storyboardHistory', 'blockingHistory', 'videos']);
+const arrayFields = new Set(['episodeIds', 'scenes', 'variants', 'history', 'references', 'dependencies', 'dialogue', 'shotIds', 'assetIds', 'disabledVoiceIds', 'lastGenerationVoiceIds', 'imageHistory', 'storyboardHistory', 'blockingHistory', 'excludedFrameUrls', 'videos']);
 const numericFields = new Set(['number', 'duration', 'stage', 'planned', 'durationMin', 'durationMax', 'updated', 'group', 'style_catalog_id', 'sourceStart', 'sourceEnd', 'estimatedSeconds', 'plannedSeconds']);
 const objectFields = new Set(['outline', 'sourceVideo', 'source', 'imageDependencies']);
 const frameSchema = { type: 'object', additionalProperties: false, properties: { fileId: { type: 'string' }, time: { type: 'number', minimum: 0 }, url: { type: 'string' } }, required: ['fileId', 'time', 'url'] };
@@ -150,13 +150,13 @@ const dialogueSchema = {
 const sceneSchema = {
   type: 'object', additionalProperties: false,
   properties: {
-    id: { type: 'string', minLength: 1 }, location: { type: 'string' }, setting: { type: 'string', enum: ['内', '外', '内外'] }, time: { type: 'string' },
+    id: { type: 'string', minLength: 1 }, location: { type: 'string' }, assetId: { type: 'string' }, variantId: { type: 'string' }, setting: { type: 'string', enum: ['内', '外', '内外'] }, time: { type: 'string' },
     suggestedDuration: { type: ['number', 'string', 'null'], description: '本场预计秒数，可留空。' },
     content: { type: 'string', description: '页面显示和编辑的完整场次正文。按剧情顺序交错保存动作、人物名（表演提示）和每句台词，保留 Markdown 格式。场次没有独立 dialogue 字段；不可把对白从正文拆走。' },
   }, required: ['id', 'location', 'setting', 'time', 'content'],
 };
 const dependencyImagesSchema = { type: 'object', additionalProperties: { type: 'array', items: { type: 'object', properties: { assetId: { type: 'string' }, variantId: { type: 'string' }, purpose: { type: 'string' }, image: { type: 'string' }, name: { type: 'string' } }, required: ['assetId', 'purpose', 'image', 'name'], additionalProperties: false } } };
-const dependenciesSchema = { type: 'array', items: { type: 'object', properties: { assetId: { type: 'string', minLength: 1 }, variantId: { type: 'string' }, purpose: { type: 'string', minLength: 1 } }, required: ['assetId', 'purpose'], additionalProperties: false }, description: '融合资产依赖的同项目资产及具体形态。purpose 说明参考用途；引用图片准备好后才能生成。禁止自引用和循环引用。' };
+const dependenciesSchema = { type: 'array', items: { type: 'object', properties: { assetId: { type: 'string', minLength: 1 }, variantId: { type: 'string' }, purpose: { type: 'string', description: '可选的参考用途' } }, required: ['assetId'], additionalProperties: false }, description: '融合资产依赖的同项目资产及具体形态。purpose 可选，用于说明参考用途；引用图片准备好后才能生成。禁止自引用和循环引用。' };
 const variantSchema = {
   type: 'object', additionalProperties: false,
   properties: {
@@ -192,7 +192,7 @@ export function studioValueSchema(resource: StudioResource): Record<string, unkn
     if (resource === 'assets' && key === 'imageDependencies') schema = dependencyImagesSchema;
     if (resource === 'assets' && key === 'variants') schema = { type: 'array', items: variantSchema };
     if (resource === 'assets' && key === 'prompt') schema.description = '生图提示词。场景、道具主形象生图时必填；衍生形态另存 variants[].prompt。角色填写后优先用于生成，留空则按 appearance 与当前 costume/形态 description 生成，均不回退叙事描述或声音。最终提示词由生图模板提示词与项目全局风格在生成时自动追加。';
-    if (resource === 'episodes' && key === 'scenes') schema = { type: 'array', items: sceneSchema, description: '剧本页按此数组显示场次。每场 content 包含完整动作与对白；修改剧本时同步维护 scenes 与 script，保留已有场次 ID。' };
+    if (resource === 'episodes' && key === 'scenes') schema = { type: 'array', items: sceneSchema, description: '剧本项目场次的 content 保存完整动作与对白；视频转绘按连续地点和时间划分场次，assetId 与 variantId 关联同项目场景资产和状态，镜头以 sceneId 关联，保留已有场次 ID。' };
     if (resource === 'episodes' && key === 'script') schema.description = '整集完整文学剧本。仅修改 script 不会更新已有 scenes 的页面正文；须同时更新对应 scenes.content。';
     return [key, schema];
   })) };
@@ -223,7 +223,7 @@ export function validateStudioValues(resource: StudioResource, values: unknown):
     if (resource === 'clips' && key === 'imageSource' && value !== 'clip') throw new Error('视频分镜图来源只支持片段自己的分镜图');
     if (resource === 'assets' && key === 'dependencies' && Array.isArray(value)) {
       value.forEach((item, index) => {
-        if (!item || typeof item !== 'object' || Array.isArray(item) || typeof item.assetId !== 'string' || !item.assetId.trim() || typeof item.purpose !== 'string' || !item.purpose.trim() || (item.variantId !== undefined && typeof item.variantId !== 'string') || Object.keys(item).some(key => !['assetId', 'variantId', 'purpose'].includes(key))) throw new Error(`assets.dependencies[${index}] 字段无效`);
+        if (!item || typeof item !== 'object' || Array.isArray(item) || typeof item.assetId !== 'string' || !item.assetId.trim() || (item.purpose !== undefined && typeof item.purpose !== 'string') || (item.variantId !== undefined && typeof item.variantId !== 'string') || Object.keys(item).some(key => !['assetId', 'variantId', 'purpose'].includes(key))) throw new Error(`assets.dependencies[${index}] 字段无效`);
       });
     }
     if (resource === 'assets' && key === 'variants' && Array.isArray(value)) {

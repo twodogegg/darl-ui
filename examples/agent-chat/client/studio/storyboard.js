@@ -30,13 +30,14 @@ export function videoDuration(seconds, model) {
   return supported
 }
 export { referenceKey, assetMentionCandidates }
-export function clipMediaReferences(clip, data) {
+export function clipMediaReferences(clip, data, { includeFrames = true } = {}) {
   const episode = data.episodes?.find(episode => episode.id === clip.episodeId)
   const projectAssets = episode ? data.assets.filter(asset => asset.projectId === episode.projectId) : data.assets
   const mentions = mentionedAssets(clip.prompt, projectAssets)
   const assets = projectAssets.filter(asset => (clip.assetIds || []).includes(asset.id) || mentions.some(mention => mention.assetId === asset.id))
   const references = Array.isArray(clip.references) ? clip.references.filter(ref => !ref?.h3PromptReference || isH3FormattedPrompt(clip.prompt)) : []
-  const frames = CLIP_IMAGE_COLUMNS.filter(column => clip[column.key]).map(column => ({ id: `${clip.id}-${column.key}`, name: column.label, kind: 'image', url: clip[column.key] }))
+  const excludedFrames = new Set((clip.excludedFrameUrls || []).filter(Boolean))
+  const frames = includeFrames ? CLIP_IMAGE_COLUMNS.filter(column => clip[column.key] && !excludedFrames.has(clip[column.key])).map(column => ({ id: `${clip.id}-${column.key}`, name: column.label, kind: 'image', url: clip[column.key] })) : []
   const imageRefs = [
     ...frames,
     ...assets.filter(asset => asset.image && (!mentions.some(mention => mention.assetId === asset.id && mention.variantId) || mentions.some(mention => mention.assetId === asset.id && !mention.variantId))).map(asset => ({ id: asset.id, name: asset.name, kind: 'image', url: asset.image })),
@@ -148,8 +149,6 @@ export function clipImagePrompt(clip, shots, scenes = [], label = '') {
     ...shots.map((shot) => shotLines(shot, shots, scenes).filter(line => !line.startsWith('音效：')).join('\n')),
   ].filter(Boolean).join('\n\n')
 }
-/** 片段图片字段对应的提示词字段；三张图各自独立维护，互不覆盖。 */
-export const imageColumnPrompt = (key) => key === 'storyboardImage' ? 'storyboardPrompt' : key === 'blockingImage' ? 'blockingPrompt' : 'storyboardPrompt'
 export function shotPrompt(shot) {
   return [`画面：${shot.description || '—'}`, ...(Array.isArray(shot.dialogue) ? shot.dialogue : []).map(formatDialogue)].join('\n')
 }

@@ -84,3 +84,43 @@
 .redraw-supplement figure { margin:0; min-width:0; }
 .redraw-supplement figcaption { margin-bottom:6px; font-size:12px; color:var(--br-text-secondary); }
 .redraw-supplement img,.redraw-supplement video { display:block; width:100%; border-radius:6px; }
+.redraw-shot-list { padding: 12px; min-width: 0; }
+.redraw-shot-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
+.redraw-shot-table th, .redraw-shot-table td { border-bottom: 1px solid var(--br-border); padding: 8px 6px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.redraw-shot-table th { color: var(--br-muted); font-weight: 500; }
+.redraw-shot-table th:nth-child(1) { width: 12%; } .redraw-shot-table th:nth-child(2) { width: 12%; }
+.redraw-shot-table th:nth-child(3) { width: 7%; } .redraw-shot-table th:nth-child(4) { width: 27%; }
+.redraw-shot-table th:nth-child(5) { width: 18%; } .redraw-shot-table th:nth-child(6) { width: 11%; }
+.redraw-shot-table th:nth-child(7) { width: 13%; }
+.redraw-shot-table input, .redraw-shot-table textarea { width: 100%; min-width: 0; box-sizing: border-box; font-size: 13px; }
+.redraw-shot-table textarea { min-height: 56px; resize: vertical; }
+.redraw-shot-table .asset-mention-editor { min-height: 56px; font-size: 13px; }
+.redraw-shot-table video { display: block; width: 100%; aspect-ratio: 16/9; object-fit: contain; margin-top: 6px; background: #000; }
+.redraw-shot-times { display: flex; align-items: center; gap: 3px; }
+.redraw-shot-times input { width: 50%; padding: 4px 3px; font-size: 12px; }
+.redraw-shot-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.redraw-shot-actions button { padding: 5px 9px; border: 1px solid var(--br-border); border-radius: 6px; background: var(--br-surface-raised); color: var(--br-text-primary); cursor: pointer; white-space: nowrap; }
+.redraw-shot-actions button:hover:not(:disabled) { border-color: var(--br-accent); }
+.redraw-shot-actions button:disabled { opacity: .4; cursor: not-allowed; }
+.redraw-dialogue-summary { border: 1px solid var(--br-border); background: var(--br-input-bg); }
+.redraw-shot-preview { position: relative; display: block; width: 100%; aspect-ratio: 16/9; min-height: 55px; margin-top: 5px; padding: 0; overflow: hidden; background: #171717; color: #eee; border: 1px solid var(--br-border); border-radius: 6px; cursor: pointer; }
+.redraw-shot-preview img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.redraw-shot-play { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: #0009; }
+.redraw-shot-preview small { position: absolute; bottom: 0; left: 0; right: 0; padding: 4px; background: #000a; font-size: 10px; }
+.redraw-shot-source { margin-top: 8px; white-space: pre-wrap; line-height: 1.5; }
+.redraw-shot-source > span { color: var(--br-text-secondary); font-size: 11px; }
+.redraw-shot-source p { margin: 4px 0; }
+.redraw-dialogue-summary .redraw-dialogue-description { color: var(--br-text-secondary); font-size: 12px; white-space: pre-wrap; }
+@media (max-width: 760px) {
+  .redraw-shot-table, .redraw-shot-table tbody, .redraw-shot-table tr, .redraw-shot-table td { display: block; width: 100%; box-sizing: border-box; }
+  .redraw-shot-table thead { display: none; }
+  .redraw-shot-table tr { border: 1px solid var(--br-border); border-radius: 8px; margin-bottom: 10px; }
+  .redraw-shot-table td { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 8px; border: 0; padding: 5px 8px; }
+  .redraw-shot-table td > * { grid-column: 2; min-width: 0; }
+  .redraw-shot-table td::before { content: attr(data-label); color: var(--br-muted); }
+}
+
+.redraw-scene-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.redraw-shot-table .redraw-scene-row td { background: var(--br-surface); padding: 10px; }
+.redraw-scene-header input, .redraw-scene-header select { width: auto; min-width: 90px; max-width: 220px; }
+@media (max-width: 760px) { .redraw-shot-table .redraw-scene-row td { display: block; } .redraw-shot-table .redraw-scene-row td::before { content: none; } }

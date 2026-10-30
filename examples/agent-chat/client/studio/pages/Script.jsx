@@ -79,7 +79,7 @@ function ScriptImport({ context }) {
 
 function ScriptList({ context }) {
   const { project, episodes } = context
-  const { data, patch, notify, log, update } = useStore()
+  const { data, patch, notify, log, update, requestAgent } = useStore()
   const navigate = useNavigate()
   const [activeId, setActiveId] = useState(context.episode?.id || episodes[0]?.id)
   const active = episodes.find((e) => e.id === activeId) || episodes[0]
@@ -91,6 +91,7 @@ function ScriptList({ context }) {
   const script = scenesToScript(scenes)
   const [duration, setDuration] = useState(active?.duration || 60)
   const [regen, setRegen] = useState(false)
+  const [transitioning, setTransitioning] = useState(false)
   const [notes, setNotes] = useState('')
   const { busy, run, cancel } = useAgentTask()
 
@@ -149,12 +150,27 @@ function ScriptList({ context }) {
     setActiveId(episodeId)
   }
   function addEpisode() { const episodeId = id(); update(draft => draft.episodes.push({ id: episodeId, projectId: project.id, number: Math.max(0, ...episodes.map(episode => episode.number)) + 1, title: '新剧集', cover: '', script: '', scenes: [], duration: project.duration || 120, stage: 1 })); setActiveId(episodeId) }
-  function confirmAll() {
-    if (!episodes.length) return notify('暂无剧集，请先在项目大纲中规划分集')
+  async function confirmAll() {
+    if (transitioning) return
+    if (!episodes.length) return notify('暂无剧集，请先编写剧本')
     if (dirty && !save(true)) return
-    update(draft => draft.episodes.filter(episode => episode.projectId === project.id).forEach(episode => { episode.stage = Math.max(episode.stage, 2) }))
-    navigate(`/video?projectId=${project.id}&episodeId=${episodes[0].id}`)
-    notify('全部剧集已确认，进入视频制作')
+    setTransitioning(true)
+    try {
+      const redraw = project.creationMode === 'video-redraw'
+      const saved = await update(draft => {
+        draft.episodes.filter(episode => episode.projectId === project.id).forEach(episode => { episode.stage = Math.max(episode.stage, 2) })
+        if (redraw) draft.projects.find(item => item.id === project.id).adaptation = '忠实'
+      })
+      if (!saved) return
+      if (redraw) {
+        navigate(`/art?projectId=${encodeURIComponent(project.id)}`)
+        await requestAgent({ action: 'redraw-assets', projectId: project.id, episodeId: active.id, continueCurrentSession: true })
+      } else {
+        navigate(`/video?projectId=${encodeURIComponent(project.id)}&episodeId=${encodeURIComponent(episodes[0].id)}`)
+        notify('全部剧集已确认，进入视频制作')
+      }
+    } catch (reason) { notify(`进入下一步失败：${reason.message}`) }
+    finally { setTransitioning(false) }
   }
 
   return (
@@ -163,7 +179,7 @@ function ScriptList({ context }) {
         <div>
           <h2>剧本</h2>
           <p className="muted">
-            全项目共 {episodes.length} 集 · 逐集按场次编写，确认后进入视频制作，在同一页面设计镜头并制作视频
+            全项目共 {episodes.length} 集 · 逐集按场次编写，确认后进入{project.creationMode === 'video-redraw' ? '转绘资产' : '视频制作'}
           </p>
         </div>
         <Field label="本集目标时长（秒）">
@@ -247,8 +263,8 @@ function ScriptList({ context }) {
           <Button disabled={busy || !active} onClick={() => setRegen(true)}>
             重新生成本集
           </Button>
-          <Button primary disabled={busy || !episodes.length} onClick={confirmAll}>
-            确认全部剧本，进入视频制作 ↗
+          <Button primary disabled={busy || transitioning || !episodes.length} onClick={confirmAll}>
+            {transitioning ? '正在进入下一步…' : project.creationMode === 'video-redraw' ? '确认剧本，进入转绘资产 ↗' : '确认全部剧本，进入视频制作 ↗'}
           </Button>
         </div>
       </footer>

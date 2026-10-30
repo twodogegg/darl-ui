@@ -1,5 +1,5 @@
 import { OpenCutProjects, handleOpenCut } from './opencut';
-import { createVoiceApi, loadVoiceGuide, voiceGuideForTurn, transcribeVideoAudio } from './voice';
+import { createVoiceApi, loadVoiceGuide, voiceGuideForTurn } from './voice';
 import { VoiceOutputParser, voiceOutputFormat } from './voice-output';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -93,7 +93,7 @@ export const MEDIA_TOOLS = [
       duration: { type: 'integer', minimum: 4, maximum: 15, description: '视频时长（秒），仅视频' },
       referenceVideos: { type: 'array', maxItems: 3, items: { type: 'string' }, description: 'H3 视频参考，支持站内 /api/files/ URL 或公网 HTTP(S) URL，数量以模型能力为准。' },
       referenceAudios: { type: 'array', maxItems: 3, items: { type: 'string' }, description: 'H3 音频或音色试听参考，支持站内 /api/files/ URL 或公网 HTTP(S) URL；须搭配图片或视频参考。' },
-      studioTarget: { type: 'object', description: '可选：完成后由后台自动关联真实结果；先读取目标最新版本。镜头（shots）只支持 image（镜头分镜图）；片段（clips）支持自己的 image、storyboardImage、blockingImage 和 videos。融合资产必须传此目标，后台检查 dependencies 并自动加入当前依赖图片与用途说明；依赖未出图会拒绝生成。', properties: { resource: { type: 'string', enum: ['assets','shots','clips'] }, id: { type: 'string' }, version: { type: 'integer', minimum: 1 }, field: { type: 'string', enum: ['image','storyboardImage','blockingImage','videos'] }, variantId: { type: 'string' } }, required: ['resource','id','version','field'], additionalProperties: false },
+      studioTarget: { type: 'object', description: '可选：完成后由后台自动关联真实结果；先读取目标最新版本。片段（clips）支持自己的 image、storyboardImage、blockingImage 和 videos。融合资产必须传此目标，后台检查 dependencies 并自动加入当前依赖图片与用途说明；依赖未出图会拒绝生成。', properties: { resource: { type: 'string', enum: ['assets','clips'] }, id: { type: 'string' }, version: { type: 'integer', minimum: 1 }, field: { type: 'string', enum: ['image','storyboardImage','blockingImage','videos'] }, variantId: { type: 'string' } }, required: ['resource','id','version','field'], additionalProperties: false },
     }, additionalProperties: false } },
   required: ['modelId','prompt'], additionalProperties: false } },
   { name: 'builtin_get_media_task', description: '按后台生成任务 ID 查询图片或视频的真实状态与结果（含结果 URL、供应商原始返回）。不会触发新的付费生成。', parameters: { type: 'object', properties: { taskId: { type: 'string', minLength: 36, maxLength: 36 } }, required: ['taskId'], additionalProperties: false } },
@@ -268,7 +268,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const fileConfig = validateStorageConfig(storage.getConfig<unknown>('storageConfiguration') || storageConfigFromEnv(env, storage.path));
   const files = new FileStore(storage.path, fileOptions(fileConfig));
   const optimization = createPromptOptimization(storage, files);
-  const requestRecords = new RequestRecordStore(storage, files, () => [env.AGENT_CHAT_API_KEY || '', env.FISH_API_KEY || '', ...((storage.getConfig<StoredProvider[]>('providers') || []).map(provider => provider.apiKey)), storage.getConfig<{ apiKey?: string }>('voiceConfiguration')?.apiKey || '']);
+  const requestRecords = new RequestRecordStore(storage, files, () => [env.AGENT_CHAT_API_KEY || '', env.VIDEO_ANALYSIS_API_KEY || '', env.FISH_API_KEY || '', ...((storage.getConfig<StoredProvider[]>('providers') || []).map(provider => provider.apiKey)), storage.getConfig<{ apiKey?: string }>('voiceConfiguration')?.apiKey || '']);
   const voiceApi = createVoiceApi(storage, env, requestRecords);
   const skillLibrary = new SkillLibrary(storage);
   const chatSessions = new ChatSessionStore(storage);
@@ -277,12 +277,30 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const projectStore = new ProjectStore(storage.path, files);
   const studio = new StudioStore(projectStore);
   const videoRedraw = new VideoRedraw(studio, {
-    transcribe: (bytes, language, signal) => transcribeVideoAudio(storage, env, bytes, language, signal, requestRecords),
+    analysisCredentials: () => env.VIDEO_ANALYSIS_BASE_URL && env.VIDEO_ANALYSIS_API_KEY ? { baseUrl: env.VIDEO_ANALYSIS_BASE_URL, apiKey: env.VIDEO_ANALYSIS_API_KEY } : undefined,
+    videoDurations: () => {
+      const modelId = validateDefaultMediaSelection(storage.getConfig<unknown>('defaultMediaModels') || defaultMediaSelection).video.modelId;
+      const configuration = storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration();
+      const model = configuration.models.find(item => item.id === modelId && item.type === 'video' && item.enabled !== false);
+      const binding = model && enabledBindings(configuration, model)[0];
+      const capabilities = model && binding && effectiveCapabilities(configuration, model, binding);
+      const durations = capabilities && 'durations' in capabilities ? capabilities.durations : undefined;
+      const seconds = Array.isArray(durations) ? durations : durations ? Array.from({ length: Math.max(0, Math.min(15, Math.floor(durations.max)) - Math.max(1, Math.ceil(durations.min)) + 1) }, (_, index) => Math.max(1, Math.ceil(durations.min)) + index) : [];
+      return { modelId, seconds: [...new Set(seconds.filter(value => Number.isInteger(value) && value > 0 && value <= 15))].sort((a, b) => a - b) };
+    },
+    model: modelId => {
+      const configuration = storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration();
+      const logical = configuration.models.find(item => item.id === modelId && item.type === 'text' && item.enabled !== false);
+      const binding = logical && enabledBindings(configuration, logical)[0];
+      const selected = binding && resolveTextModel(storage.getConfig<StoredProvider[]>('providers') || [], configuration, binding.providerId, binding.upstreamModelId);
+      if (!selected?.provider.apiKey) throw new Error(`请在模型设置中配置并启用 ${modelId} 及其提供方凭证`);
+      return selected;
+    },
   });
   const videoEditing = new VideoEditing(files);
   const openCut = new OpenCutProjects(studio, files);
   const publicBaseUrl = env.AGENT_CHAT_PUBLIC_BASE_URL || (env.AGENT_CHAT_PUBLIC_HOST ? `${String(env.AGENT_CHAT_PUBLIC_HOST).startsWith('http') ? env.AGENT_CHAT_PUBLIC_HOST : `https://${env.AGENT_CHAT_PUBLIC_HOST}`}` : undefined);
-  const mediaJobs = createMediaJobsApi(storage.path, () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), () => storage.getConfig<StoredProvider[]>('providers') || [], files, { target: (value, type) => studio.mediaTarget(value, type), prepare: (input, type) => studio.prepareMedia(input, type), completed: job => studio.attachMedia(job), publicBaseUrl }, requestRecords);
+  const mediaJobs = createMediaJobsApi(storage.path, () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), () => storage.getConfig<StoredProvider[]>('providers') || [], files, { target: (value, type) => studio.mediaTarget(value, type), prepare: (input, type) => studio.prepareMedia(input, type), completed: job => studio.attachMedia(job), publicBaseUrl, imageDownloadProxy: env.IMAGE_DOWNLOAD_PROXY?.trim() }, requestRecords);
   if (!storage.getConfig<boolean>('requestRecordsInitialized')) {
     for (const job of mediaJobs.store.list()) {
       const provider = storage.getConfig<StoredProvider[]>('providers')?.find(item => item.id === job.providerId);
@@ -401,7 +419,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       const markdownPreview = new URL(request.url, 'http://localhost').searchParams.get('preview') === 'markdown';
       if (markdownPreview && (!/\.md(?:own)?$/i.test(fileRecord.name || '') || fileRecord.size > 5 * 1024 * 1024)) return send(422, { error: '只能预览不超过 5MB 的 Markdown 文件' });
       if (width && ![160, 320, 640, 1024].includes(width)) return send(422, { error: '仅支持 160、320、640 或 1024 像素缩略图' });
-      if (fileRecord.backend === 'cos' && !markdownPreview) {
+      if (fileRecord.backend === 'cos' && !markdownPreview && new URL(request.url, 'http://localhost').searchParams.get('download') !== '1') {
         response.writeHead(302, { Location: (width ? files.thumbnailUrl(fileRecord, width as 160 | 320 | 640 | 1024) : files.originalUrl(fileRecord))!, 'Cache-Control': 'private,no-cache' });
         response.end(); return;
       }
@@ -463,7 +481,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       const defaultAgent: StoredAgent = { id: 'default', name: savedDefault?.name || '网站助手', avatar: savedDefault?.avatar || '/agent-default-avatar.png', description: savedDefault?.description || '系统默认 Agent', type: 'main_agent', source: 'system_default', selectable: true, callable: true, contextStrategy: 'inherit_filtered', instructions: savedDefault?.instructions || await loadPrompt(), websiteInstructions: savedDefault?.websiteInstructions ?? readFileSync(new URL('../prompts/website.md', import.meta.url), 'utf8'), skillIds: [], contextPolicy: savedDefault?.contextPolicy || { childContext: 'task-only', historyMode: 'summary', toolResultMode: 'standard' }, enabled: true, isDefault: true, builtIn: true };
       const agents = [defaultAgent, ...configuredAgents.filter((agent) => agent.id !== defaultAgent.id)];
       const path = request.url.split('?')[0];
-      if (path === '/api/tools' && request.method === 'GET') return send(200, [...MEDIA_TOOLS, ...RUNTIME_TOOLS, ...STUDIO_TOOLS, ...REDRAW_TOOLS, USER_INPUT_TOOL].map((tool) => ({ ...tool, inputSchema: tool.parameters, parameters: undefined })));
+      if (path === '/api/tools' && request.method === 'GET') return send(200, [...MEDIA_TOOLS.filter(tool => tool.name !== 'builtin_generate_media'), ...RUNTIME_TOOLS, ...STUDIO_TOOLS, ...REDRAW_TOOLS, USER_INPUT_TOOL].map((tool) => ({ ...tool, inputSchema: tool.parameters, parameters: undefined })));
       if (path === '/api/approval-settings' && request.method === 'GET') return send(200, storage.getConfig('approvalSettings') || { mode: DEFAULT_APPROVAL_MODE });
       if (path === '/api/approval-settings' && request.method === 'POST') {
         if (!isLocalOrLanAddress(request.socket.remoteAddress) || (origin && new URL(origin).host !== host)) return send(403, { error: '仅允许本机或局域网同源修改审批模式' });
@@ -904,8 +922,8 @@ export function createApi(directory: string, env: Record<string, string>, prompt
           }
           const functions = ownedConnections.flatMap((connection, appIndex) => connection.tools.map((tool, index) => ({ name: `mcp_${appIndex}_${index}`, connection, tool })));
           if (functions.length > 128) throw new Error('所选应用合计超过 128 个工具，请减少应用数量');
-          const mediaTools = MEDIA_TOOLS;
-          const hostTools = [...RUNTIME_TOOLS.map(tool => ({ ...tool, execute: (args: Record<string, unknown>, context: Parameters<typeof runtime.execute>[2]) => runtime.execute(tool.name, args, context) })), ...STUDIO_TOOLS.map(tool => ({ ...tool, execute: async (args: Record<string, unknown>) => tool.risk === 'read' ? studio.query(args) : studio.apply(String(args.requestId), args.changes as import('../studio-schema').StudioChange[]) })), ...REDRAW_TOOLS.map(tool => ({ ...tool, execute: async (args: Record<string, unknown>) => tool.risk === 'read' ? videoRedraw.read(args) : videoRedraw.edit(args) }))];
+          const mediaTools = MEDIA_TOOLS.filter(tool => tool.name !== 'builtin_generate_media');
+          const hostTools = [...RUNTIME_TOOLS.map(tool => ({ ...tool, execute: (args: Record<string, unknown>, context: Parameters<typeof runtime.execute>[2]) => runtime.execute(tool.name, args, context) })), ...STUDIO_TOOLS.map(tool => ({ ...tool, execute: async (args: Record<string, unknown>) => tool.risk === 'read' ? studio.query(args) : studio.apply(String(args.requestId), args.changes as import('../studio-schema').StudioChange[]) })), ...REDRAW_TOOLS.map(tool => ({ ...tool, execute: async (args: Record<string, unknown>, context: Parameters<typeof runtime.execute>[2]) => 'waitForCompletion' in tool && tool.waitForCompletion ? videoRedraw.wait(args, context.signal) : tool.risk === 'read' ? videoRedraw.read(args) : ['apply', 'edit-shot', 'merge-shots'].includes(String(args.action)) ? Promise.reject(new Error('镜头操作工具已移除')) : videoRedraw.edit(args) }))];
           const execution: ToolExecution = {
           maxSteps: 100,
           tools: [...functions.map(({ name, connection, tool }) => ({ name, description: `${connection.app.name} / ${tool.title || tool.name} (${tool.name}): ${tool.description || ''}`, parameters: tool.inputSchema })), ...mediaTools, USER_INPUT_TOOL, ...(runtimeAllowed ? hostTools : [])],
@@ -958,7 +976,9 @@ export function createApi(directory: string, env: Record<string, string>, prompt
                 }
                 callSignal.throwIfAborted();
                 call.status = 'running'; call.startedAt = new Date().toISOString(); publishRuntimeCall();
-                const result = await runtimeTool.execute(args as Record<string, unknown>, { sessionId, agentId: ownerAgentId || selectedAgent?.id, runId: executionRunId, skills: skillsForAgent(ownerAgentId), signal: callSignal });
+                const resumeTimeout = 'waitForCompletion' in runtimeTool && runtimeTool.waitForCompletion ? timeout.pause() : () => {};
+                let result;
+                try { result = await runtimeTool.execute(args as Record<string, unknown>, { sessionId, agentId: ownerAgentId || selectedAgent?.id, runId: executionRunId, skills: skillsForAgent(ownerAgentId), signal: callSignal }); } finally { resumeTimeout(); }
                 if (runtimeTool.appId === 'builtin:studio' && runtimeTool.risk === 'write') response.write(`${JSON.stringify({ type: 'studio-changed' })}\n`);
                 if (request.name === 'builtin_create_skill') response.write(`${JSON.stringify({ type: 'skills-changed' })}\n`);
                 callSignal.throwIfAborted();
@@ -998,7 +1018,8 @@ export function createApi(directory: string, env: Record<string, string>, prompt
               return JSON.stringify({ isError: true, error: message });
             };
             const mediaFailure = (message: string, code: string, args: unknown, toolName: string) => failBuiltin(toolName, args, message, code);
-            if (request.name === 'builtin_generate_media' || request.name === 'builtin_get_media_task') {
+            if (request.name === 'builtin_generate_media') return mediaFailure('媒体生成工具已暂时禁用', 'MEDIA_TOOL_DISABLED', {}, 'generate_media');
+            if (request.name === 'builtin_get_media_task') {
               const args = JSON.parse(request.arguments || '{}') as { modelId?: string; prompt?: string; options?: Record<string, unknown>; taskId?: string; requestId?: string };
               if (request.name === 'builtin_get_media_task') {
                 const job = mediaJobs.store.get(String(args.taskId || ''));

@@ -228,3 +228,7 @@ body { margin: 0; background: #101113; }
 
 .example-default-model-grid > label { display: grid; gap: 8px; min-width: 0; margin-bottom: 16px; }
 .example-default-model-grid select { width: 100%; min-width: 0; padding: 9px; border: 1px solid var(--darl-border); border-radius: 8px; background: var(--darl-background); color: var(--darl-text); }
+
+.studio-assistant-floating { position: fixed; right: 24px; bottom: 24px; z-index: 65; display: grid; place-items: center; width: 52px; height: 52px; border: 1px solid var(--darl-border); border-radius: 50%; background: var(--darl-surface); color: var(--darl-primary); box-shadow: 0 6px 24px rgb(0 0 0 / .3); cursor: grab; touch-action: none; }
+.studio-assistant-floating:active { cursor: grabbing; }
+@media (max-width: 749px) { .studio-assistant-floating { bottom: 76px; right: 14px; } }

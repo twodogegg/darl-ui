@@ -1,5 +1,6 @@
 import { MediaJobStore, type MediaJob } from './media-job-store';
 import { generateImages, generateGeminiImages, submitVideo, checkVideo } from './media-adapters';
+import { fetch as proxyFetch, ProxyAgent } from 'undici';
 
 
 type Credentials = { baseUrl: string; apiKey: string };
@@ -11,7 +12,7 @@ export class MediaJobRunner {
   private active = new Set<string>();
   private timer: ReturnType<typeof setInterval> | undefined;
   private busy = false;
-  constructor(readonly store: MediaJobStore, private credentials: CredentialsResolver, private onFailure: FailureReporter = () => {}, private onCompleted: (job: MediaJob) => void = () => {}, private publicBaseUrl?: string) {}
+  constructor(readonly store: MediaJobStore, private credentials: CredentialsResolver, private onFailure: FailureReporter = () => {}, private onCompleted: (job: MediaJob) => void = () => {}, private publicBaseUrl?: string, private imageDownloadProxy?: string) {}
 
   start() {
     this.store.recover();
@@ -39,7 +40,7 @@ export class MediaJobRunner {
       for(const job of [...all].reverse()){
         if(job.status!=='queued'||this.active.has(job.id))continue;
         const count=running.get(job.modelId)||0;
-        if(count>=this.store.limit(job.modelId))continue;
+        if(job.options.batchUnlimited !== true && count>=this.store.limit(job.modelId))continue;
         running.set(job.modelId,count+1);
         job.status='running';job.phase='submitting';job.attempts++;
         this.store.put(job);
@@ -65,22 +66,42 @@ export class MediaJobRunner {
         };
         const result=job.protocolKey==='gemini-generate-content'?await generateGeminiImages(job,config.apiKey,localMedia):await generateImages(job,config.apiKey,localMedia);
         job.resultFileIds=[];
+        job.phase='downloading';
+        job.resultForm=result.images[0]?.kind==='url'?'url':'b64_json';
+        job.providerResponse=result.provider as Record<string,unknown>;
+        this.store.put(job);
         for (const [index, image] of result.images.entries()) {
-          let bytes: Buffer;
-          let mime: string;
+          let bytes: Buffer | undefined;
+          let mime: string | undefined;
           if (image.kind === 'b64') { bytes=image.data; mime=`image/${image.ext === 'jpeg' ? 'jpeg' : image.ext}`; }
           else {
-            const response = await fetch(image.url, { signal: AbortSignal.timeout(180000) });
-            if (!response.ok) throw new Error(`图片结果下载失败（HTTP ${response.status}）`);
-            bytes = Buffer.from(await response.arrayBuffer());
-            mime = response.headers.get('content-type')?.split(';')[0] || 'image/png';
+            for (let attempt = 0; attempt < 3; attempt++) {
+              const useProxy = attempt > 0 && Boolean(this.imageDownloadProxy);
+              let agent: ProxyAgent | undefined;
+              try {
+                if (useProxy) agent = new ProxyAgent(this.imageDownloadProxy!);
+                const response = agent
+                  ? await proxyFetch(image.url, { dispatcher: agent, signal: AbortSignal.timeout(180000) })
+                  : await fetch(image.url, { signal: AbortSignal.timeout(this.imageDownloadProxy ? 15000 : 180000) });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                bytes = Buffer.from(await response.arrayBuffer());
+                mime = response.headers.get('content-type')?.split(';')[0] || 'image/png';
+                break;
+              } catch (error) {
+                if (attempt === 2) {
+                  const detail = error instanceof Error ? [error.message, error.cause instanceof Error ? error.cause.message : ''].filter(Boolean).join('：') : String(error);
+                  throw new Error(`图片结果下载失败${useProxy ? '（代理）' : ''}：${this.imageDownloadProxy ? detail.replaceAll(this.imageDownloadProxy, '[代理地址]') : detail}${this.imageDownloadProxy ? '' : '；可配置 IMAGE_DOWNLOAD_PROXY'}`);
+                }
+              } finally {
+                await agent?.destroy();
+              }
+            }
           }
+          if (!bytes || !mime) throw new Error('图片结果下载失败');
           const file = await this.store.saveFile(bytes, mime, `generated-${index}.${mime.split('/')[1] || 'bin'}`);
           job.resultFileIds.push(file.id);
         }
         job.status='completed';job.phase='completed';job.error=undefined;
-        job.resultForm=result.images[0]?.kind==='url'?'url':'b64_json';
-        job.providerResponse=result.provider as Record<string,unknown>;
       }else{
         const id=await submitVideo(job,config.apiKey,(url)=>{
           const match=/^\/api\/files\/([^/?]+)/.exec(url);

@@ -13,40 +13,6 @@ type StoredVoiceSettings = VoiceSettings & { apiKey?: string };
 const MAX_AUDIO = 25 * 1024 * 1024;
 export type TimedTranscript = { text: string; language: string; segments: Array<{ text: string; start: number; end: number }>; speakerTurns?: Array<{ speaker: string; text: string; start: number; end: number }> };
 
-/** Video analysis needs source-language timing; chat dictation keeps its existing text-only contract. */
-export async function transcribeVideoAudio(storage: LocalStorage, env: Record<string, string>, bytes: Buffer, language: string, signal: AbortSignal, records?: RequestRecordStore): Promise<TimedTranscript> {
-  const settings = storage.getConfig<StoredVoiceSettings>('voiceConfiguration');
-  const key = settings?.apiKey || env.FISH_API_KEY;
-  if (!key) throw new Error('有声原片需要先在设置 → 语音配置 Fish Audio API Key，或明确选择仅分析画面');
-  if (!bytes.length || bytes.length > MAX_AUDIO) throw new Error('原片音轨为空或超过 25 MB');
-  if (language && !/^[a-z]{2}$/.test(language)) throw new Error('原片语言应为两位语言代码或留空自动识别');
-  const form = new FormData();
-  form.set('audio', new Blob([Uint8Array.from(bytes)], { type: 'audio/wav' }), 'source.wav');
-  form.set('ignore_timestamps', 'false'); form.set('diarize', 'true'); form.set('tag_audio_events', 'false');
-  if (language) form.set('language', language);
-  const record = records?.begin({ type: 'audio', modelId: 'transcribe-1-pro', modelName: 'Fish 原片转写', providerId: 'fish', providerName: 'Fish Audio', method: 'POST', url: 'https://api.fish.audio/v1/asr', parameters: { language, ignore_timestamps: false, size: bytes.length } });
-  try {
-    const response = await fetch('https://api.fish.audio/v1/asr', { method: 'POST', signal, headers: { Authorization: `Bearer ${key}`, model: 'transcribe-1-pro' }, body: form });
-    if (!response.ok) throw new Error(`Fish Audio 转写 HTTP ${response.status}`);
-    const data = await response.json();
-    if (typeof data.text !== 'string' || !Array.isArray(data.segments)) throw new Error('转写接口未返回文本和时间戳');
-    const segments = data.segments.map((segment: Record<string, unknown>) => {
-      if (typeof segment.text !== 'string' || !Number.isFinite(segment.start) || !Number.isFinite(segment.end) || Number(segment.start) < 0 || Number(segment.end) < Number(segment.start)) throw new Error('转写时间戳无效');
-      return { text: segment.text, start: Number(segment.start), end: Number(segment.end) };
-    });
-    const speakerTurns = Array.isArray(data.speaker_turns) ? data.speaker_turns.map((turn: Record<string, unknown>) => {
-      if (typeof turn.speaker !== 'string' || typeof turn.text !== 'string' || !Number.isFinite(turn.start) || !Number.isFinite(turn.end) || Number(turn.start) < 0 || Number(turn.end) < Number(turn.start)) throw new Error('说话人时间戳无效');
-      return { speaker: turn.speaker, text: turn.text, start: Number(turn.start), end: Number(turn.end) };
-    }) : undefined;
-    const result = { text: data.text, language: String(data.language_code || data.language || language), segments, ...(speakerTurns ? { speakerTurns } : {}) };
-    if (record) records!.finish(record.id, { status: 'success', text: result.text, response: result });
-    return result;
-  } catch (error) {
-    if (record) records!.finish(record.id, { status: requestFailureStatus(error, signal), error: error instanceof Error ? error.message : '转写失败' });
-    throw error;
-  }
-}
-
 /** Keep full guidance out of repeated requests; compact rules remain available each turn. */
 export function loadVoiceGuide(promptFile: string) {
   const guide = JSON.parse(readFileSync(join(dirname(promptFile), 'voice-tags.json'), 'utf8')) as { title: string; summary: string; instructions: string[]; source: string };

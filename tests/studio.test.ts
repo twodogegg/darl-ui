@@ -38,6 +38,29 @@ describe('shared short drama business service', () => {
     expect(videoImageReferences({ ...clip, image: '' }, references, '分镜图')).toEqual([]);
     expect(videoImageReferences(clip, references, '参考生成')).toBe(references.images);
   });
+  it('removes excluded clip images from reference frames without deleting the image', () => {
+    const clip = { id: 'clip-1', image: '/api/files/a', storyboardImage: '/api/files/b', blockingImage: '/api/files/c', assetIds: [], excludedFrameUrls: ['/api/files/b'] };
+    const refs = clipMediaReferences(clip, { assets: [], episodes: [], voices: [] } as never);
+    expect(refs.frames.map((frame: { url: string }) => frame.url)).toEqual(['/api/files/a', '/api/files/c']);
+    expect(refs.images.map((ref: { url: string }) => ref.url)).toEqual(['/api/files/a', '/api/files/c']);
+  });
+  it('persists storyboard images and excluded reference urls on clips', () => {
+    store.apply('create-ref-clip', [{ resource: 'clips', op: 'create', id: 'clip-ref', values: { episodeId: 'episode-1', sceneId: 'scene-1', duration: 5, prompt: '她推门走进房间。' } }]);
+    const before = store.snapshot().clips.find(clip => clip.id === 'clip-ref')!;
+    store.apply('clip-images', [{
+      resource: 'clips', op: 'update', id: 'clip-ref', version: before._version as number,
+      values: {
+        image: '/api/files/a', imageHistory: ['/api/files/a'],
+        storyboardImage: '/api/files/b', storyboardHistory: ['/api/files/b'],
+        blockingImage: '/api/files/c', blockingHistory: ['/api/files/c'],
+        excludedFrameUrls: ['/api/files/b'],
+      },
+    }]);
+    const saved = new StudioStore(store.projects).snapshot();
+    const clip = saved.clips.find(item => item.id === 'clip-ref')!;
+    expect(clip).toMatchObject({ storyboardImage: '/api/files/b', storyboardHistory: ['/api/files/b'], blockingImage: '/api/files/c', excludedFrameUrls: ['/api/files/b'] });
+    expect(clipMediaReferences(clip, saved).frames.map((frame: { url: string }) => frame.url)).toEqual(['/api/files/a', '/api/files/c']);
+  });
   it('keeps the merged video workspace on clip own image or the shots in order and separates both image owners', () => {
     const clip = { id: 'clip-1', image: '/api/files/clip-own', assetIds: [], references: [] };
     const shots = [{ id: 'shot-1', image: '/api/files/shot-1' }, { id: 'shot-2', image: '' }, { id: 'shot-3', image: '/api/files/shot-3' }];
@@ -179,10 +202,10 @@ describe('shared short drama business service', () => {
     expect(payload.context.modelContext).toContain('加强冲突');
     expect(payload.content).not.toContain('加强冲突');
     expect(payload.context.modelContext).not.toContain('不传递');
-    expect(() => studioAgentPayload({ action: 'redraw-analyze', projectId }, [])).toThrow('short-drama-video-breakdown');
+    expect(() => studioAgentPayload({ action: 'redraw-analyze', projectId }, [])).toThrow('darl-studio');
     const skills = [{ id: 'redraw', name: '视频转绘', slug: 'video-redraw' }, { id: 'studio', name: '网站操作', slug: 'darl-studio' }];
-    expect(studioAgentPayload({ action: 'storyboard', projectId, projectMode: 'video-redraw' }, skills).context.modelSkillIds).toEqual(['redraw', 'studio']);
-    expect(studioAgentPayload({ action: 'storyboard', projectId, projectMode: 'script' }, skills).context.modelSkillIds).toEqual([]);
+    expect(studioAgentPayload({ action: 'video-description', projectId, projectMode: 'video-redraw' }, skills).context.modelSkillIds).toEqual(['studio']);
+    expect(studioAgentPayload({ action: 'video-description', projectId, projectMode: 'script' }, skills).context.modelSkillIds).toEqual([]);
   });
   it('refreshes default prompt text without overwriting a custom prompt', () => {
     store.apply('custom-prompt', [{ resource: 'prompts', op: 'update', id: '0-0', version: 1, values: { mode: 'replace', text: '我的大纲提示词' } }]);

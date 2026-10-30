@@ -1,4 +1,5 @@
 import { imageUrl } from '../../image-url'
+import { assetMentionCandidates, parseAssetMentions } from '../../../asset-mentions'
 import { resolveAssetDependencies, assetDependenciesChanged, validateAssetDependencies } from '../../../asset-dependencies'
 import { useEffect, useRef, useState } from 'react'
 import { AssetSourceEvidence } from './VideoRedraw'
@@ -121,11 +122,26 @@ export default function ArtAssetDrawer({
     const exists = data.assets.find(item => item.id === form.id)
     if (!exists && form._version) throw new Error('资产已被删除，请关闭后重新选择')
     if (exists && exists._version !== form._version) throw new Error('资产已被其他操作修改，草稿已保留，请核对后重新打开')
-    const result = { ...form, name: form.name.trim(), ...(selected ? { variants: form.variants.map(v => v.id === selected ? { ...v, image } : v) } : { image }) }
+    const name = form.name.trim()
+    if (data.assets.some(item => item.id !== form.id && item.projectId === projectId && item.type === form.type && item.name.trim() === name)) throw new Error('同类型同名资产已存在，请使用其他名称')
+    if (exists && exists.name !== name && /[<>|\n]/.test(name)) throw new Error('资产名称不能包含 <、> 或 |')
+    if (exists && exists.name !== name && data.assets.some(item => item.id !== form.id && item.projectId === projectId && item.name.trim() === name)) throw new Error('项目中已有同名资产，请使用其他名称以保持引用明确')
+    const oldName = exists?.name
+    const candidates = assetMentionCandidates(data.assets.filter(item => item.projectId === projectId))
+    const renameMentions = value => parseAssetMentions(value || '', candidates).map(part => part.candidate?.assetId === form.id ? `<${name}${part.candidate.variantName ? `|${part.candidate.variantName}` : ''}>` : part.protocol || part.text || '').join('')
+    const result = { ...form, name, ...(selected ? { variants: form.variants.map(v => v.id === selected ? { ...v, image } : v) } : { image }) }
     const saved = await update(draft => {
       const index = draft.assets.findIndex(item => item.id === result.id)
       if (index >= 0) draft.assets[index] = result
       else draft.assets.push(result)
+      if (oldName && oldName !== name) {
+        const episodeIds = new Set(draft.episodes.filter(item => item.projectId === projectId).map(item => item.id))
+        draft.shots.filter(item => episodeIds.has(item.episodeId)).forEach(shot => {
+          shot.description = renameMentions(shot.description)
+          shot.dialogue = (shot.dialogue || []).map(line => line.assetId === form.id ? { ...line, speaker: name } : line)
+        })
+        draft.clips.filter(item => episodeIds.has(item.episodeId)).forEach(clip => { clip.prompt = renameMentions(clip.prompt) })
+      }
     })
     if (!saved) throw new Error('资产未保存，请先处理保存错误')
     const latest = (await reload()).assets.find(item => item.id === form.id)
@@ -146,7 +162,7 @@ export default function ArtAssetDrawer({
     setBusy(true)
     try {
       if (dependencyError) throw new Error(dependencyError)
-      const request = assetImageRequest(form, { variantId: selected, view, customPrompt: current.prompt || '', ...(editImage ? { editPrompt, image } : {}) })
+      const request = assetImageRequest(form, { variantId: selected, view, customPrompt: current.prompt || '', project: data.projects.find(item => item.id === projectId), ...(editImage ? { editPrompt, image } : {}) })
       const latest = await persist()
       await generateMedia({ ...request, target: { resource: 'assets', id: latest.id, field: 'image', ...(selected ? { variantId: selected } : {}) }, options })
       setEditImage(false)
@@ -168,7 +184,7 @@ export default function ArtAssetDrawer({
           <header className="asset-drawer__header">
             <div>
               <h3>
-                {form.name || `添加${form.type}`}
+                {liveAsset ? <label className="asset-drawer__name-label"><input className="asset-drawer__name" aria-label={`${form.type}名称`} title="修改名称，确认后保存" maxLength={100} value={form.name} disabled={generating} onChange={e => change('name', e.target.value)} /><span aria-hidden="true">✎</span></label> : (form.name || `添加${form.type}`)}
                 {variant && `｜${variant.name}`}
               </h3>
               <div className="asset-drawer__episodes">项目共享资产</div>
@@ -355,7 +371,7 @@ export default function ArtAssetDrawer({
               <Field label={`依赖形象 ${index + 1}`}><select aria-label={`依赖形象 ${index + 1}`} value={JSON.stringify({ assetId: dependency.assetId, ...(dependency.variantId ? { variantId: dependency.variantId } : {}) })} onChange={event => {
                 const value = JSON.parse(event.target.value); edit({ ...value, variantId: value.variantId || '' })
               }}><option value="" disabled>选择资产与形态</option>{dependencyChoices.map(({ name, ...value }) => <option key={JSON.stringify(value)} value={JSON.stringify(value)}>{name}</option>)}</select></Field>
-              <Field label={`参考用途 ${index + 1}`}><input aria-label={`参考用途 ${index + 1}`} placeholder="例如：仅作为照片内人物的身份参考" value={dependency.purpose} maxLength={1000} onChange={event => edit({ purpose: event.target.value })} /></Field>
+              <Field label={`参考用途 ${index + 1}（选填）`}><input aria-label={`参考用途 ${index + 1}`} placeholder="例如：仅作为照片内人物的身份参考" value={dependency.purpose || ''} maxLength={1000} onChange={event => edit({ purpose: event.target.value })} /></Field>
               <Button onClick={() => change('dependencies', form.dependencies.filter((_, i) => i !== index))}>移除依赖 {index + 1}</Button>
               {!reference?.image && <p role="status">等待依赖图片</p>}
             </div>
@@ -373,7 +389,7 @@ export default function ArtAssetDrawer({
                   ['appearance', '外貌特征（五官 / 体型 / 发型 / 肤色）'],
                   ['costume', `服饰（${variant?.name || '主形象'}）`],
                   ['prompt', `${variant?.name || '主形象'}生图提示词`],
-                  ['voiceDescription', '声音描述（音色 / 语速 / 语气）'],
+                  ['voiceDescription', '音色'],
                 ]
               : [
                   ['description', `${form.type}描述`],

@@ -31,7 +31,8 @@ const target = () => store.mediaTarget({ resource: 'assets', id: 'photo', field:
 async function image(color: string) { const file = await files.put(await sharp({ create: { width: 2, height: 2, channels: 4, background: color } }).png().toBuffer(), 'image/png', 'test.png'); return file; }
 it('persists a specific dependency, rejects bad schemas and blocks generation until that variant is ready', async () => {
   const schema = new AjvJsonSchemaValidator().getValidator(STUDIO_TOOLS[1].parameters);
-  expect(schema({ requestId: 'bad', changes: [{ resource: 'assets', id: 'photo', op: 'update', version: 1, values: { dependencies: [{ assetId: 'chloe' }] } }] }).valid).toBe(false);
+  expect(schema({ requestId: 'optional', changes: [{ resource: 'assets', id: 'photo', op: 'update', version: 1, values: { dependencies: [{ assetId: 'chloe' }] } }] }).valid).toBe(true);
+  expect(schema({ requestId: 'bad', changes: [{ resource: 'assets', id: 'photo', op: 'update', version: 1, values: { dependencies: [{ assetId: 'chloe', purpose: null }] } }] }).valid).toBe(false);
   expect(new StudioStore(store.projects).snapshot().assets.find(item => item.id === 'photo')?.dependencies).toEqual(asset('photo').dependencies);
   const file = await image('white');
   update('chloe', { image: `/api/files/${file.id}` });
@@ -42,6 +43,21 @@ it('persists a specific dependency, rejects bad schemas and blocks generation un
   expect(prepared.prompt).toContain('参考图 1：Chloe / 19岁');
   expect(prepared.prompt).toContain('仅作为照片内人物的身份参考');
   expect(prepared.options.aspectRatio).toBe('16:9');
+});
+it('allows an omitted or empty purpose while preserving reference identity and image requirements', async () => {
+  for (const dependency of [{ assetId: 'chloe', variantId: 'young' }, { assetId: 'chloe', variantId: 'young', purpose: '' }]) {
+    update('photo', { dependencies: [dependency] });
+    expect(() => target()).toThrow('19岁');
+  }
+  const file = await image('white'), url = `/api/files/${file.id}`;
+  update('chloe', { variants: [{ id: 'young', name: '19岁', image: url }] });
+  for (const dependency of [{ assetId: 'chloe', variantId: 'young' }, { assetId: 'chloe', variantId: 'young', purpose: '' }]) {
+    update('photo', { dependencies: [dependency] });
+    const prepared = store.prepareMedia({ prompt: '只画旧照片', options: { studioTarget: target() } }, 'image');
+    expect(prepared.options.references).toEqual([url]);
+    expect(prepared.prompt).toContain('参考图 1：Chloe / 19岁');
+    expect(prepared.prompt).not.toContain('用途：');
+  }
 });
 it('rejects cycles, foreign projects, deleted variants and referenced asset deletion atomically', () => {
   expect(() => update('chloe', { dependencies: [{ assetId: 'photo', purpose: '参考' }] })).toThrow('循环');

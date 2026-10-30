@@ -420,6 +420,8 @@
   cursor: pointer;
 }
 .page-art .next-btn { border: 1px solid var(--br-cta-border); background: var(--br-cta-gradient); color: var(--br-on-accent); }
+.page-art .next-btn:disabled { opacity: .45; cursor: not-allowed; }
+.page-art .next-hint { color: var(--br-text); background: var(--br-surface); border: 1px solid var(--br-border); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
 .page-art .modal-mask,
 .page-art .image-preview {
   position: fixed;

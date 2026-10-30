@@ -1,9 +1,10 @@
 import { useProject, Workflow } from '../components/Shell'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useStore } from '../store'
-import { SourcePlayer, sourceTime } from '../components/VideoRedraw'
-import { imageUrl } from '../../image-url'
+import { studioApi, useStore } from '../store'
+import { startPolling } from '../../polling'
+import { SourcePlayer } from '../components/VideoRedraw'
+import { studioDefaults } from '../../../studio-schema'
 
 export default function Source() {
   const context = useProject()
@@ -39,54 +40,59 @@ export default function Source() {
 
 function RedrawSource({ context }) {
   const { project, episode, episodes } = context
-  const { data, patch, requestAgent, notify } = useStore()
+  const { data, reload, notify, update } = useStore()
   const navigate = useNavigate()
-  const [selected, setSelected] = useState('')
-  const [view, setView] = useState('镜头')
-  const [starting, setStarting] = useState(false)
+  const [starting, setStarting] = useState(false), [uploading, setUploading] = useState(false)
+  const [analysis, setAnalysis] = useState(null), [refresh, setRefresh] = useState(0), [submitError, setSubmitError] = useState('')
+  const input = useRef(null)
   const source = episode?.sourceVideo || (episode?.id === episodes[0]?.id ? project.sourceVideo : null)
-  const shots = data.shots.filter(shot => shot.episodeId === episode?.id && shot.source)
-  const segments = [...(source?.segments || [])].sort((a, b) => a.start - b.start)
-  // 切镜列表以剧集原片为准；只有区间一致的分析才能附到该镜头。
-  const items = segments.length ? segments.map(segment => {
-    const matches = shots.filter(shot => {
-      const evidence = shot.source
-      return (!evidence.segmentId || evidence.segmentId === segment.id)
-        && Math.abs(Number(evidence.start) - Number(segment.start)) < 0.002
-        && Math.abs(Number(evidence.end) - Number(segment.end)) < 0.002
-    })
-    const shot = matches.length === 1 ? matches[0] : null
-    return { id: segment.id, source: { ...segment, ...(shot ? { description: shot.source.description, dialogue: shot.source.dialogue, notes: shot.source.notes, evidence: shot.source.evidence } : {}) }, shot }
-  }) : shots.sort((a, b) => a.source.start - b.source.start).map(shot => ({ id: shot.id, source: shot.source, shot }))
-  const needsReview = item => /needs_human_review|partially_confirmed|待确认|待核|未定|未确认|不可读/.test(item.source.notes || '')
-  const visible = items.filter(item => view === '镜头' || (view === '对白' ? item.source.dialogue : needsReview(item)))
-  const current = visible.find(item => item.id === selected) || visible[0]
-  const index = current ? items.findIndex(item => item.id === current.id) : -1
-  const analyzed = items.filter(item => item.source.description?.trim()).length
-  const run = action => requestAgent({ action, projectId: project.id, episodeId: episode.id, requestId: crypto.randomUUID() })
-  const next = () => {
-    if (starting) return
-    setStarting(true)
-    run('redraw-dialogue').catch(reason => notify(`对白改编失败：${reason.message}`)).finally(() => setStarting(false))
-    navigate(context.link('/dialogue'))
+  const hasShots = data.shots.some(shot => shot.episodeId === episode?.id)
+  useEffect(() => {
+    if (!episode?.id) return
+    const params = new URLSearchParams({ projectId: project.id, episodeId: episode.id })
+    let completed = false
+    return startPolling(async signal => {
+      const result = await studioApi(`video-redraw/status?${params}`, undefined, signal)
+      const job = result.jobs.find(item => item.kind === 'analyze' && item.sourceFileId === source?.fileId)
+      setAnalysis(job || null)
+      if (job?.status === 'completed' && !completed) { completed = true; await reload(signal) }
+    }, 3000, error => setAnalysis({ status: 'failed', error: `读取进度失败：${error.message}` }))
+  }, [project.id, episode?.id, source?.fileId, refresh, reload])
+  async function addEpisode(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || uploading) return
+    if (!/\.mp4$/i.test(file.name) || file.size > 300 * 1024 * 1024) { notify('请选择不超过 300 MB 的 MP4'); return }
+    setUploading(true)
+    try {
+      const form = new FormData(); form.set('file', file)
+      const response = await fetch('/api/files', { method: 'POST', body: form })
+      const result = await response.json()
+      if (!response.ok || !result.fileId) throw new Error(result.error || '上传失败')
+      const episodeId = crypto.randomUUID()
+      const saved = await update(draft => {
+        const number = Math.max(0, ...draft.episodes.filter(item => item.projectId === project.id).map(item => item.number)) + 1
+        draft.episodes.push({ ...structuredClone(studioDefaults.episodes), id: episodeId, projectId: project.id, number, title: file.name.replace(/\.mp4$/i, ''), sourceVideo: { fileId: result.fileId, url: `/api/files/${result.fileId}`, name: file.name } })
+      })
+      if (!saved) throw new Error('剧集保存失败')
+      navigate(`/source?projectId=${encodeURIComponent(project.id)}&episodeId=${encodeURIComponent(episodeId)}`)
+      notify('剧集已添加，请生成本集分镜')
+    } catch (error) { notify(`添加剧集失败：${error.message}`) }
+    finally { setUploading(false) }
+  }
+  async function generate() {
+    if (!source?.fileId || starting) return
+    setStarting(true); setSubmitError('')
+    try {
+      const latest = await reload()
+      const currentProject = latest.projects.find(item => item.id === project.id)
+      const job = await studioApi('video-redraw/action', { action: 'analyze', projectId: project.id, episodeId: episode.id, requestId: crypto.randomUUID(), version: currentProject._version })
+      setAnalysis(job); setRefresh(value => value + 1)
+    } catch (reason) { setSubmitError(reason.message) }
+    finally { setStarting(false) }
   }
   return <Workflow context={context}>
-    <header className="workspace-toolbar"><div><h2>原片与拉片</h2><p className="muted">第 {episode?.number} 集 · {items.length} 个镜头 · 已有 {analyzed} 条镜头分析</p></div><button className="btn" disabled={!source?.fileId} onClick={() => run('redraw-analyze').catch(reason => notify(`拉片启动失败：${reason.message}`))}>重新开始拉片</button></header>
-    <div className="redraw-source">
-      <nav className="redraw-breakdown-tabs" aria-label="拉片内容">{['镜头', '对白', '待确认'].map(tab => <button key={tab} aria-pressed={view === tab} onClick={() => { setView(tab); setSelected('') }}>{tab}{tab === '待确认' ? ` ${items.filter(needsReview).length}` : ''}</button>)}</nav>
-      {segments.length > analyzed && <p className="muted">切镜已显示完整 {segments.length} 镜，其中 {segments.length - analyzed} 镜暂无对应分析。已有记录会保留，未匹配的描述不会套用到新镜头。</p>}
-      <div className="redraw-breakdown">
-        <section className="redraw-breakdown-list" aria-label="原片镜头">
-          {visible.map(item => { const number = items.indexOf(item) + 1; const frame = item.source.frames?.[0]; return <button key={item.id} className={current?.id === item.id ? 'active' : ''} onClick={() => setSelected(item.id)}>{frame && <img src={imageUrl(frame.url, 160)} alt="" loading="lazy" />}<span><strong>{item.id}</strong><br />{sourceTime(item.source.start)} – {sourceTime(item.source.end)}<br />{item.source.description || `镜头 ${number} · 暂无分析`}</span></button> })}
-          {!visible.length && <p className="muted">{items.length ? `暂无${view}内容` : '拉片结果会在处理后显示，可在 AI 助手中查看进度。'}</p>}
-        </section>
-        <section className="redraw-breakdown-detail">
-          {source?.fileId && <SourcePlayer source={source} start={current?.source.start} end={current?.source.end} />}
-          {current && <><h3>{current.id} · {sourceTime(current.source.start)} – {sourceTime(current.source.end)}</h3><div className="redraw-frame-grid">{current.source.frames?.map(frame => <a href={frame.url} target="_blank" rel="noreferrer" key={frame.fileId}><img src={imageUrl(frame.url, 320)} alt={`原片 ${sourceTime(frame.time)}`} /><span>{sourceTime(frame.time)}</span></a>)}</div>{current.source.evidence?.length > 0 && <><h3>补充证据</h3><div className="redraw-supplement">{current.source.evidence.map(item => <figure key={`${item.fileId}-${item.label}`}><figcaption>第 {item.round} 轮 · {{ single: '单帧', crop: '局部放大', grid4: '四帧拼图', clip: '片段' }[item.kind]} · {item.label}<br />{sourceTime(item.start)} – {sourceTime(item.end)}</figcaption>{item.kind === 'clip' ? <video src={item.url} controls playsInline preload="none" /> : <a href={item.url} target="_blank" rel="noreferrer"><img src={imageUrl(item.url, 640)} alt={item.label} loading="lazy" /></a>}</figure>)}</div></>}<div className="redraw-shot-controls"><button className="btn" disabled={index <= 0} onClick={() => { setView('镜头'); setSelected(items[index - 1].id) }}>上一镜</button><button className="btn" disabled={index >= items.length - 1} onClick={() => { setView('镜头'); setSelected(items[index + 1].id) }}>下一镜</button></div></>}
-        </section>
-        <section className="redraw-breakdown-info"><h3>镜头详情</h3>{current?.shot ? <div className="redraw-breakdown-edit">{[['画面描述', 'description'], ['原片对白', 'dialogue'], ['证据与备注', 'notes']].map(([label, field]) => <label key={field}>{label}<textarea key={`${current.id}-${field}-${current.source[field] || ''}`} defaultValue={current.source[field] || ''} onBlur={event => { if (event.target.value !== (current.source[field] || '')) patch('shots', current.shot.id, { source: { ...current.shot.source, [field]: event.target.value } }) }} /></label>)}</div> : <p className="muted">{current ? '这个镜头尚无对应的分析记录。' : '选择镜头查看详情。'}</p>}</section>
-      </div>
-      <div className="redraw-next"><button className="btn primary" disabled={!analyzed || starting} onClick={next}>下一步：生成对白改编</button>{!analyzed && <small>需要先完成镜头分析。</small>}</div>
-    </div>
+    <header className="workspace-toolbar"><div><h2>原片</h2><p className="muted">自动检测候选切镜，分析原片并生成可编辑分镜表。</p></div><div className="toolbar"><input ref={input} type="file" accept="video/mp4,.mp4" aria-label="上传新剧集原片" hidden onChange={addEpisode} /><button className="btn" disabled={uploading} onClick={() => input.current?.click()}>{uploading ? '正在上传剧集…' : '＋ 添加剧集'}</button><button className="btn" disabled={!source?.fileId || starting || hasShots || ['queued', 'running'].includes(analysis?.status)} onClick={generate}>{starting ? '正在启动…' : '生成分镜'}</button><button className="btn primary" onClick={() => navigate(context.link('/storyboard'))}>查看分镜</button></div></header>
+    <div className="redraw-source">{source?.fileId ? <SourcePlayer source={source} /> : <div className="empty"><h2>暂无原视频</h2><p>请先上传原视频。</p></div>}<p className="muted" role={submitError || analysis?.status === 'failed' ? 'alert' : 'status'}>{submitError ? `生成分镜启动失败：${submitError}` : ['queued', 'running'].includes(analysis?.status) ? `正在生成分镜：${analysis.phase || '排队'}…` : analysis?.status === 'completed' || hasShots ? '分镜已生成，可在分镜页查看并编辑。' : ['failed', 'interrupted', 'cancelled'].includes(analysis?.status) ? `生成分镜未完成：${analysis.error || '任务已取消'}，可重试。` : '生成后可在此查看进度，完成后在分镜页查看并编辑。'}</p></div>
   </Workflow>
 }

@@ -37,6 +37,7 @@
     "pack:local": "npm run build:lib && npm pack",
     "dev:playground": "vite --config vite.playground.config.ts",
     "dev:agent-chat": "vite --config vite.agent-chat.config.ts",
+    "dev:flow": "npm --prefix video-redraw-flow run dev",
     "build:agent-chat": "vite build --config vite.agent-chat.config.ts",
     "preview:agent-chat": "bash scripts/preview-agent-chat.sh",
     "hooks:install": "git config core.hooksPath .githooks && echo \"Git hooks enabled: .githooks\""
@@ -83,6 +84,7 @@
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "sharp": "^0.35.5",
+    "undici": "^7.30.1",
     "yaml": "^2.9.1"
   },
   "license": "MIT"

@@ -1,11 +1,10 @@
-export type AssetDependency = { assetId: string; variantId?: string; purpose: string };
-export type DependencyImage = AssetDependency & { image: string; name: string };
+export type AssetDependency = { assetId: string; variantId?: string; purpose?: string };
+export type DependencyImage = AssetDependency & { purpose: string; image: string; name: string };
 type Asset = { id: string; projectId?: unknown; name?: unknown; image?: unknown; dependencies?: unknown; variants?: unknown; imageDependencies?: unknown };
 
 /** Resolve the selected main/variant image, shared by the UI and generation service. */
 export function resolveAssetDependencies(asset: Asset, assets: Asset[], requireImages = true): DependencyImage[] {
   return ((asset.dependencies || []) as AssetDependency[]).map(dependency => {
-    if (!dependency.purpose?.trim()) throw new Error('请填写依赖图片的参考用途');
     const source = assets.find(item => item.id === dependency.assetId && item.projectId === asset.projectId);
     if (!source) throw new Error('依赖资产不存在或不属于当前项目');
     const variant = dependency.variantId ? (source.variants as Array<{ id: string; name: string; image?: string }> || []).find(item => item.id === dependency.variantId) : undefined;
@@ -13,7 +12,7 @@ export function resolveAssetDependencies(asset: Asset, assets: Asset[], requireI
     const name = `${source.name}${variant ? ` / ${variant.name}` : ' / 主形象'}`;
     const image = String((variant || source).image || '');
     if (requireImages && !image) throw new Error(`请先生成依赖图片：${name}`);
-    return { ...dependency, name, image };
+    return { ...dependency, purpose: dependency.purpose || '', name, image };
   });
 }
 export function sameDependencyImages(left: DependencyImage[], right: DependencyImage[]): boolean {

@@ -58,7 +58,7 @@ function presentJob(job: import('./media-job-store').MediaJob, files: FileStore,
   });
   return resultFiles.length ? { ...safe, resultFiles } : safe;
 }
-export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration, providers:()=>StoredProvider[], files:FileStore, hooks: { target?: (value: unknown, type: string) => Record<string, unknown>; prepare?: (input: { prompt: string; options: Record<string, unknown> }, type: string) => { prompt: string; options: Record<string, unknown> }; completed?: (job: import('./media-job-store').MediaJob) => void; publicBaseUrl?: string } = {}, records?: RequestRecordStore){
+export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration, providers:()=>StoredProvider[], files:FileStore, hooks: { target?: (value: unknown, type: string) => Record<string, unknown>; prepare?: (input: { prompt: string; options: Record<string, unknown> }, type: string) => { prompt: string; options: Record<string, unknown> }; completed?: (job: import('./media-job-store').MediaJob) => void; publicBaseUrl?: string; imageDownloadProxy?: string } = {}, records?: RequestRecordStore){
   const store=new MediaJobStore(dbPath, files, (job) => {
     const provider = providers().find(item => item.id === job.providerId);
     records?.syncMedia(job, { modelName: config().models.find(item => item.id === job.modelId)?.displayName, providerName: provider?.name, secret: provider?.apiKey });
@@ -69,7 +69,7 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
   const runner=new MediaJobRunner(store,(job)=>{
     const provider=providers().find(p=>p.id===job.providerId);
     return provider&&provider.apiKey?{apiKey:provider.apiKey,baseUrl:provider.baseUrl}:undefined;
-  }, (job, message, secret) => logFailure({ appId: 'builtin:media', appName: '媒体生成', toolName: job.modelId, stage: 'mcp-tool', code: job.status === 'uncertain' ? 'MEDIA_TASK_UNCERTAIN' : 'MEDIA_TASK_FAILED', message, secret }), hooks.completed, hooks.publicBaseUrl);
+  }, (job, message, secret) => logFailure({ appId: 'builtin:media', appName: '媒体生成', toolName: job.modelId, stage: 'mcp-tool', code: job.status === 'uncertain' ? 'MEDIA_TASK_UNCERTAIN' : 'MEDIA_TASK_FAILED', message, secret }), hooks.completed, hooks.publicBaseUrl, hooks.imageDownloadProxy);
   runner.start();
   const submit = async (input: Record<string, unknown>) => {
         if(typeof input.taskId!=='string'||!input.taskId.trim()||input.taskId.length>120)throw new Error('任务 ID 无效');

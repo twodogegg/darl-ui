@@ -1,6 +1,6 @@
 ---
 name: darl-studio
-description: 通过本入剧出网站现有 Tools，分类查询和修改项目、剧本、资产、镜头（分镜记录）、视频片段、提示词，操作媒体任务、工作区文件和 Skills；按“大纲→剧本→资产→分镜表→视频制作”创作工作流程衔接各站内创作 Skill。
+description: 通过本入剧出网站现有 Tools，分类查询和修改项目、剧本、资产、视频片段、提示词，操作媒体任务、工作区文件和 Skills；按“大纲→剧本→资产→分镜→短片”创作工作流程衔接各站内创作 Skill。
 ---
 
 # 本入剧出网站 Tools
@@ -9,22 +9,22 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 ## 网站创作工作流程
 
-剧本类项目按固定流程推进：**小说/原文 → 改编大纲 → 影视剧本 → 美术资产提取 → 分镜表 → 视频制作**。每个阶段由站内已安装的创作 Skill 决定“写什么、怎么写”，由本 Skill 的 Tools 把内容写入网站；进入某阶段时先加载对应创作 Skill，再按本 Skill 操作数据。
+剧本类项目按固定流程推进：**小说/原文 → 改编大纲 → 影视剧本 → 美术资产提取 → 分镜 → 短片**。每个阶段由站内已安装的创作 Skill 决定“写什么、怎么写”，由本 Skill 的 Tools 把内容写入网站；进入某阶段时先加载对应创作 Skill，再按本 Skill 操作数据。
 
 | 阶段 | 站内创作 Skill | 主要读写数据 |
 | --- | --- | --- |
 | 1. 小说/原文 → 改编大纲 | `short-drama-outline`（AI 短剧改编大纲） | `projects.outline`（含 `adaptation` 改编幅度、`props` 关键叙事道具）、`projects.requirements` |
 | 2. 大纲 → 影视剧本 | `short-drama-screenplay`（AI 短剧影视剧本） | `episodes.script` 与 `episodes.scenes[].content`（见“剧本与场次写入”） |
 | 3. 大纲+剧本 → 美术资产 | `short-drama-asset-extraction`（AI 短剧影视资产提取） | `assets`：角色、场景、道具的 description、appearance、costume、prompt 与 `variants` |
-| 4. 分镜表 | 按剧本与现有创作要求设计镜头 | `shots`：景别、运镜、切镜、画面、对白、音效和时长 |
-| 5. 视频制作 | `video-prompt-writer`（通用视频提示词编写） | 参考已确认分镜整理 `clips.prompt`、`clips.duration`、`assetIds`、`references`，按需生成片段图片与视频 |
+
+| 4. 分镜与视频制作 | 按剧本编写视频描述 | `clips.prompt`、`clips.duration`、`assetIds`、`references`，按需生成片段图片与视频 |
 
 流程约束：
 
-- **上游确认后进下一阶段**：改编骨架与分集梗概经用户确认后才写剧本；已确认的大纲和剧本共同作为资产提取依据；资产就绪后编写分镜表，再根据已确认的分镜在“视频制作”页编写片段视频描述。
+- **上游确认后进下一阶段**：改编骨架与分集梗概经用户确认后才写剧本；已确认的大纲和剧本共同作为资产提取依据；资产就绪后在分镜页编写片段视频描述。
 - **阶段产物落库才算完成**：每阶段用编辑工具把正文写入对应资源，只在聊天输出不算写入；保存后按 ID 回读核对再报告完成。
 - **创作与操作分工**：站内创作 Skill 决定各阶段正文写法；本 Skill 只负责把内容完整写入网站并维持字段分工（见下文各章节）。
-- 视频转绘项目（`creationMode=video-redraw`）不走此流程，按“视频转绘”章节和 `video-redraw` Skill 操作。
+- 视频转绘项目（`creationMode=video-redraw`）不走此流程，按“视频转绘”章节操作。
 
 ## 创作数据
 
@@ -35,7 +35,7 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 | 项目与大纲 | `projects` | 项目信息、`sourceScript`（用户提交的原始素材，不是剧集正文）、`requirements`、`outline` |
 | 剧本与场次 | `episodes` | 剧集、`script`、嵌套 `scenes` |
 | 美术资产 | `assets` | 角色、场景、道具、`variants`、单项资产 `prompt` |
-| 镜头（分镜） | `shots` | 景别、运镜、切镜方式、画面、对白、音效、时长、镜头分镜图、`clipId` |
+| 原片分镜 | `shots` | 镜头来源区间、时长、景别、画面、对白、音效与资产关联 |
 | 视频片段 | `clips` | 视频描述 `prompt`、独立时长 `duration`、资产和参考、片段图片及视频历史 |
 | 成片 | `films` | 成片记录 |
 | 操作记录 | `history` | 项目操作记录 |
@@ -46,17 +46,15 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 剧本项目的 `projects.adaptation` 保存改编幅度（`忠实` / `抽核` / `借壳`）；项目 `outline` 另外包含 `props:[{id,name,purpose,involvement}]`，只记录确实影响剧情的关键叙事道具。
 
-视频制作以视频片段为单位。每段的镜头顺序、初始站位、动作、运镜、切镜、对白、音效和时间安排统一写在页面可见的 `clips.prompt`（视频描述）中。
+视频制作以视频片段为单位。每段的镜头顺序、初始站位、动作、对白、音效和时间安排统一写在页面可见的 `clips.prompt`（视频描述）中。
 
 - `clips.prompt` 是视频生成的内容依据；`clips.duration` 是独立维护的计划秒数，必须大于 0，单条片段最多 15 秒。生成请求按模型支持的时长向上取整；不改写片段和来源镜头凑整秒，超过上限先缩短或拆分。
 - `clips.assetIds`、描述中的 `<资产名称>` / `<资产名称|形态名称>` 与 `clips.references` 决定参考素材。音色来自片段关联角色、描述中引用的角色和显式音色引用，`disabledVoiceIds` 保存取消勾选项；不从历史 shot 对白补入角色音色。
-- 分镜表按剧集与场次展示和编辑 `shots`。可通过查询和编辑工具读取、创建、排序或修改镜头。`clips.shotIds`、`blocking`、`sourceSignature` 保留已有数据；镜头不会自动推导或覆盖片段时长、描述、图片或音色。
-- 片段图片分为分镜图 `image/imageHistory`、故事板 `storyboardImage/storyboardHistory`、站位图 `blockingImage/blockingHistory`。转绘图片统一依据当前视频描述生成，旧 `storyboardPrompt`、隐藏站位文本不覆盖它；原图和各自历史继续保留。视频的“分镜图”方式使用片段当前分镜图，“参考生成”方式使用页面所选的参考素材。
-- 转绘镜头的来源时间和原片证据用于追溯；保留原片依据及已有目标分镜。
+- 片段图片分为分镜图 `image/imageHistory`、故事板 `storyboardImage/storyboardHistory`、站位图 `blockingImage/blockingHistory`。片段图片依据当前视频描述生成；原图和各自历史继续保留。视频的“分镜图”方式使用片段当前分镜图，“参考生成”方式使用页面所选的参考素材。`excludedFrameUrls` 保存被“移除引用”的片段图片 URL：这些图片仍保留在片段图片区，但不再作为“参考生成”的参考素材；把某张图片重新设为当前图或删除该图片时会同步清除对应 URL。
+- 保留原片依据和已有用户内容。
 
 视频转绘项目与剧本项目共用这些资源。资产属于项目并跨集共用；分析新集前读取已有资产，优先引用真实 ID，不覆盖已有资产设定。`projects.creationMode` 为 `script`（默认）或 `video-redraw`。`targetRegion`（`japan` / `western`）、`targetLanguage`（`ja` / `en`）属于视频转绘项目，原片优先保存在 `episodes.sourceVideo`，旧项目的第一集兼容读取 `projects.sourceVideo`；剧本项目查询不返回这些字段，也不接受写入，不得据此推断改编地区或语言。转绘项目才使用默认 `japan / ja`，或显式选择 `western / en`。`sourceVideo` 保存原视频 `fileId/url/name`、真实 `duration/width/height/fps/hasAudio`、`segments`（每项 `id/start/end/frames`）；每帧是 `fileId/time/url`。先上传 MP4，再保存对应剧集引用，用转绘工具取得真实元数据，不能编造时长或抽帧结果。
 
-`assets.source` 与 `shots.source` 保存原片 `fileId/start/end/frames`，可含原始 `name/description/dialogue/notes/confirmed`；镜头的 `source.segmentId` 指向原片候选镜头 ID，业务镜头 ID 按项目隔离，不与 segment ID 混用。目标设定继续使用现有资产与镜头字段。`shots.assetIds` 为本镜人物、场景、道具的稳定关联。原片与目标版本分别保留；资产必须有原片依据。完整字段和嵌套类型仍以 describe 为准。
 
 `source.evidence` 可保存补充取证文件：每项包含 `fileId`、`url`、`round`、`kind`（`single`、`crop`、`grid4`、`clip`）、原片 `start/end` 和 `label`。图片使用已保存的 JPEG，视频使用已保存的 MP4；区间与该来源镜头相交。拼图和片段不能填成单一时刻的 `frames`。更新来源时保留已有证据，使用实际文件和时间，当前字段以 describe 为准。
 
@@ -85,7 +83,7 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 ### 剧本与场次写入
 
-剧本页显示 `episodes.scenes[].content`，不是直接显示整集 `script`。每场为 `{id,location,setting,time,suggestedDuration?,content}`；`content` 必须保留按剧情顺序交错的动作、人物名（表演提示）和完整台词，可保存 Markdown 段落与加粗。不要把台词从正文抽到 `scenes[].dialogue`：该字段不受支持，结构化 `dialogue` 属于镜头 `shots`。
+剧本页显示 `episodes.scenes[].content`，不是直接显示整集 `script`。每场为 `{id,location,setting,time,suggestedDuration?,content}`；`content` 必须保留按剧情顺序交错的动作、人物名（表演提示）和完整台词，可保存 Markdown 段落与加粗。不要把台词从正文抽到 `scenes[].dialogue`：该字段不受支持，正文直接保留对白。
 
 修改文学剧本时同步保存整集 `script` 与对应场次 `content`，保留已有场次 ID、动作对白顺序和用户未要求改动的内容。只更新 `script`、只导出文件或只在聊天输出不算写入页面。保存后回读目标场次 `content`，核对人物台词与关键动作确实存在，再报告完成。
 
@@ -118,27 +116,25 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 | `values` | 创建所需字段或本次要修改的字段；删除省略；结构从 describe 获取 |
 | `position` | 可选，调整记录排序 |
 
-项目创建后返回实际编号，后续查询和编辑使用返回值。角色对白的 `assetId` 引用角色资产；镜头与片段引用真实剧集和场次。
+项目创建后返回实际编号，后续查询和编辑使用返回值。片段引用真实剧集和场次。
 
-### 分镜表与视频片段
+### 视频片段
 
-分镜表使用 `shots`：按场次填写景别、运镜、切镜、画面、对白、音效和时长。先通过 describe 获取字段，角色对白引用真实角色资产；转绘镜头保留原片来源。编辑后回读核对。
+根据已确认剧本创建 `clips`，填写真实 `episodeId`、`sceneId`、`title`、`prompt`、`duration` 和所需资产引用。片段最长 15 秒；画面、动作与对白写入 `prompt`。保存后回读，再使用最新版本生成图片或视频。短片页用于剪辑成片。
 
 
-创建 `clips` 时传真实的 `episodeId`、`sceneId`、`title`、`prompt`、`duration`，并填写所需 `assetIds` 和 `references`；`shotIds` 可省略或留空。更新仅提交改变字段并传最新版本。根据分镜整理视频描述并明确保存到片段；后续修改镜头不会自动同步视频描述。修改 `duration` 会真实保存，来源镜头改变或删除不会重算片段时长。
-
-先编写视频描述和计划时长、准备目标资产与参考，再按需生成片段图片与视频。保存后按 ID 回读 prompt、duration、素材引用，确认没有覆盖用户最新内容；生成任务使用最新片段版本作为 studioTarget。不要把任务提交当成生成完成。
+- 视频转绘进入视频制作时，先让用户在页面选择生成方式并填写可选要求，再使用 `builtin_edit_video_redraw` 的 `video-prompts` 提交文本模型任务（mode 为“参考生成”或“分镜图”，requirements 为补充要求）；用 `builtin_wait_video_redraw` 等待并读取真实结果。原片分镜是参考，可在保留剧情和已确认目标语言对白的前提下合理调整镜头设计、拆合与节奏。结果 `plan` 保存每个片段的原视频来源时间、独立的目标内容时长、片段 ID 和镜头 ID；目标内容时长与生成时长一致，须选用任务提交时默认视频模型支持的整数秒（不超过 15 秒，优先 10–15 秒），可与来源时间差不同；应按目标语言对白的自然语速及停顿安排节奏，每个片段可包含多个镜头。切换视频模型后须核对新模型支持该时长。文本模型基于分镜和资产文字写提示词，不能声称看过图片。已有视频片段时保留用户内容，通过 `builtin_edit_studio` 按用户要求调整，不重复创建。
 
 ### 分镜和视频描述中的资产标签
 
-编写或修改分镜画面 `shots.description` 与视频描述 `clips.prompt` 前，先查询当前项目的 `assets` 及其 `variants`。文字中出现的已登记角色、场景、道具，使用网站资产引用标签，而不是只写普通名称：主形象写 `<资产名称>`，具体形态写 `<资产名称|形态名称>`，名称必须与查询结果完全一致。页面会将标记显示为可识别的 @ 资产标签；不要把页面显示的 `@名称` 当成保存协议。
+编写或修改视频描述 `clips.prompt` 前，先查询当前项目的 `assets` 及其 `variants`。文字中出现的已登记角色、场景、道具，使用网站资产引用标签，而不是只写普通名称：主形象写 `<资产名称>`，具体形态写 `<资产名称|形态名称>`，名称必须与查询结果完全一致。页面会将标记显示为可识别的 @ 资产标签；不要把页面显示的 `@名称` 当成保存协议。
 
-只引用当前项目资产表中真实存在且名称可唯一解析的资产及其真实形态，不能编造资产、形态或引用其他项目的资产。身份、形态不确定或资产尚未入表时，不要猜测标签；保留准确的普通画面描述并说明待确认或待补资产。用户要求补充资产时，先依据已有证据创建并回读，再引用。写入后回读镜头或片段，核对标签名称、形态和上下文，不得因引用而改变原片事实。
+只引用当前项目资产表中真实存在且名称可唯一解析的资产及其真实形态，不能编造资产、形态或引用其他项目的资产。身份、形态不确定或资产尚未入表时，不要猜测标签；保留准确的普通画面描述并说明待确认或待补资产。用户要求补充资产时，先依据已有证据创建并回读，再引用。写入后回读片段，核对标签名称、形态和上下文，不得因引用而改变原片事实。
 
 
 保存前逐条核对每个尖括号：直接复制查询返回的完整 `name`，不要只保留中文名、英文名或别名。例如资产名是 `Rooftop Garden 屋顶露台花园` 时，写 `<Rooftop Garden 屋顶露台花园>`，不能写 `<屋顶露台花园>`。`assetIds` 正确不能替代文字标签中的完整名称。
 
-`builtin_edit_studio` 对新建或修改的 `shots.description`、`clips.prompt` 校验标签；无效、跨项目、形态不存在或名称有歧义时拒绝整批并返回字段和可用资产名称。重新读取资产，用实际完整名称修正后使用新的 requestId 重试；不要把失败报告为已保存。历史标签不会因无关字段更新被强制校验；需要修复历史文本时，先回读记录及其版本，确认映射后只修改目标字段。
+`builtin_edit_studio` 对新建或修改的 `clips.prompt` 校验标签；无效、跨项目、形态不存在或名称有歧义时拒绝整批并返回字段和可用资产名称。重新读取资产，用实际完整名称修正后使用新的 requestId 重试；不要把失败报告为已保存。历史标签不会因无关字段更新被强制校验；需要修复历史文本时，先回读记录及其版本，确认映射后只修改目标字段。
 
 ### 美术资产与衍生形态
 
@@ -153,7 +149,7 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 ### 融合资产与依赖图片
 
-当资产包含另一个已定义的人物或物体（旧照片、证件、合影、肖像画、带角色图像的物品等）时，在 `assets.dependencies` 建立关联，不能只在提示词中写姓名。每项为 `{assetId, variantId?, purpose}`：同项目真实资产 ID，选用主形象时省略 variantId，特定年龄/服装等形态使用真实 variantId，purpose 必填，说明参考图在目标资产中的用途。例如旧学生证照片引用 Chloe 的 19 岁形态，并说明“仅作为照片内人物的身份参考”。
+当资产包含另一个已定义的人物或物体（旧照片、证件、合影、肖像画、带角色图像的物品等）时，在 `assets.dependencies` 建立关联，不能只在提示词中写姓名。每项为 `{assetId, variantId?, purpose?}`：同项目真实资产 ID，选用主形象时省略 variantId，特定年龄/服装等形态使用真实 variantId；purpose 可留空或省略，需要时用于说明参考图在目标资产中的用途。例如旧学生证照片引用 Chloe 的 19 岁形态，并说明“仅作为照片内人物的身份参考”。
 
 主形象和该资产所有衍生形态共用这些依赖。禁止自引用、循环、跨项目引用；被引用资产/形态删除前先解除关联。更新 dependencies 时保留未修改条目。图片不存在时可以保存关系，但不能生成；必须先生成依赖的具体形态并查询其真实 image，不能以成人主图替代缺失的年轻形态。
 
@@ -167,48 +163,26 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 | Tool | 参数与返回 |
 | --- | --- |
-| `builtin_generate_media` | `modelId`、`prompt`，可选 `requestId`、`options`；返回任务 `id`、`status` |
+| `builtin_generate_media` | 暂时禁用，不可通过 Agent 提交媒体生成任务 |
 | `builtin_get_media_task` | `taskId`；返回任务真实状态和结果 |
 
 `modelId` 与生成参数采用当轮 Tool schema。`options` 可含 `resolution`、`aspectRatio`、`duration`、`references`。参考编辑时将指定图片放入 `references`。H3 视频另支持 `referenceVideos`（视频 URL 数组）、`referenceAudios`（音频或音色试听 URL 数组），各最多 3 个且以模型能力为准；音频须搭配图片或视频。支持站内 `/api/files/` 与公网 HTTP(S) URL；已有可访问的 HTTPS/HTTP 素材直接传引用，本地素材由文件服务提供可访问 URL，无法直接访问时才上传到模型供应商。音色引用传真实音频地址，不传音色 ID；是否保持目标声音须试听真实生成结果。
 
 H3 视频模型支持 `minimax-h3-flash` 与 `minimax-h3-standard`；视频清晰度使用 `480P`、`768P`，Flash 另支持 `1080P`，不能继续提交旧值 `480` / `768`。本地参考素材通过新版 `/v1/h3/assets` 上传，宿主将返回的素材 ID 写入新协议，无需 Agent 手工上传或拼接上游字段。
 
-资产提取后按 describe 分别填写 description（身份/用途）、appearance（外貌/空间/材质）、costume（主服饰）、voiceDescription（有原声依据的声音）、prompt（可执行的资产图指令）；原片证据放 source。不要把一句描述塞进所有字段，或把剧情截图换脸当成角色一致性资产。详细步骤见 video-redraw 的 references/asset-production.md。
+资产提取后按 describe 分别填写 description（身份/用途）、appearance（外貌/空间/材质）、costume（主服饰）、voiceDescription（有原声依据的声音）、prompt（可执行的资产图指令）；原片证据放 source。不要把一句描述塞进所有字段，或把剧情截图换脸当成角色一致性资产。原片证据不足的内容标记待确认。
 
-自动关联生成结果使用 `options.studioTarget`，字段为 `resource`（`assets`、`shots` 或 `clips`）、`id`、最新 `version`、`field`，形态另传 `variantId`。图片字段为资产 `image`、镜头 `image`（单镜分镜图）或片段 `image`、`storyboardImage`、`blockingImage`；视频字段为片段 `videos`。单镜分镜图只作用于该镜头，片段分镜图不覆盖镜头图片。提交后用任务查询 Tool 获取结果。
+自动关联生成结果使用 `options.studioTarget`，字段为 `resource`（`assets` 或 `clips`）、`id`、最新 `version`、`field`，形态另传 `variantId`。图片字段为资产 `image`或片段 `image`、`storyboardImage`、`blockingImage`；视频字段为片段 `videos`。提交后用任务查询 Tool 获取结果。
 
-## 视频转绘
+## 视频转绘：原视频生成分镜
 
-资产 source.start/end 是可追溯的原片区间，source.fileId 必须是原视频 ID，frames[].fileId/url/time 使用实际原片帧记录。资产可同时引用本集 sourceVideo.segments 中其他时间点的真实帧；镜头的参考帧须位于该镜头区间。原片 duration 等元数据缺失时，先读取真实切镜结果并按最新版本保存；禁止猜测时间或将拼图 ID 冒充单帧。
+流程：原视频 → 候选切镜与视频模型分析 → 可编辑原片分镜表 → 转绘资产 → 视频制作。视频转绘不要求先生成剧本。
 
-具体创作规则按需加载 `video-redraw`；开始/继续制作读其 references/production-control.md，资产提取与生图读 references/asset-production.md；此处只说明网站操作。发现当轮转绘查询/操作能力后调用，不按名称猜测旧定义。
-
-拉片任务返回的 `sheets[].fileId`、原片帧及资产图可用通用 `builtin_read_image` 查看：传 `fileId`，或在 `path` 传工作区路径、网站已保存的图片 URL（二选一），将真实图片传给模型，内部参考图不自动显示在聊天中。未知外部 URL 不能直接读取。`builtin_read_file` 默认读取图片也返回视觉内容，显式 `encoding=base64` 才按二进制文本分页读取。不能将 JPG 当 UTF-8 文本，不能仅凭图片 URL 声称看过画面。结合 `sheets[].frames` 的帧号、时间与行列映射分析；读取失败先处理实际错误，不因此改走旧分析流程。
-
-| Tool | 用法 |
-| --- | --- |
-| `builtin_read_video_redraw` | `describe=true` 查询能力、地区与限制；否则以 `projectId` 和 `episodeId` 查询本集原片、持久化任务、草稿和错误；传 `jobId` 分页获取 prepare/breakdown 切镜或 transcribe 结果，`detail` 仅用于已有转写 |
-| `builtin_edit_video_redraw` | `projectId`、`episodeId`、`action`，其他参数依操作及当前 schema；省略 episodeId 兼容第一集 |
-
-| action | 参数与行为 |
-| --- | --- |
-| `prepare` | `requestId`、最新项目 `version`；检测切镜并抽帧，成功后保存原片真实元数据和 `segments` |
-| `breakdown` | `requestId`、`version`；检测切镜，保存每镜中间帧及拼图，缺少原片元数据或来源镜头时自动保存；查询任务分页取得真实帧、时间和拼图映射 |
-| `transcribe` | `requestId`、`version`，可选 `sourceLanguage`；只转写原声，结果通过任务查询读取 |
-| `apply` | `jobId`，可选 `shotIds` 为历史草稿的 segment ID，留空应用全部；应用历史分析草稿，同批写入镜头、关联资产和场次，镜头再按需加入片段。新资产写入草稿 targetAppearance/targetCostume/targetVoiceDescription/targetPrompt 对应的现有字段；已有资产跳过保护，不自动补字段，可用编辑工具按最新版本补齐。保护人工修改，项目设置或版本冲突时重新读取 |
-| `cancel` | `jobId`；取消本项目运行中的转绘任务 |
-| `frame` | `start/end`；返回中间真实帧及 `source`，供手工补资产或镜头；返回截图本身不创建业务记录 |
-| `edit-shot` | `shotId`、`shotVersion`、`start/end`；更新原片切点与参考帧。另传 `split` 在指定原片时间拆分，已有片段引用时先调整关联 |
-| `merge-shots` | `fromId/toId/fromVersion/toVersion`；合并同场、原片时间相邻的两个镜头，保留 fromId，迁移内容。已有片段引用时阻止操作 |
-| `merge-assets` | `fromId/toId/fromVersion/toVersion`；确认是同一主体后合并同项目同类型资产，迁移镜头/片段引用，保留来源证据及目标图片历史；先处理源资产的衍生形态 |
-| `export` | `requestId`、`version`、`selections:[{clipId,start?,end?}]`；按数组顺序合成已选用的真实视频，裁剪点基于实际媒体时长。保留生成音轨，不加入原片声音；成功后写入 `films` |
-
-提交后读取任务真实状态：`queued/running/completed/failed/cancelled/interrupted`；提交返回任务不代表完成。原样重试沿用 requestId；继续失败/取消/中断的切镜或转写任务用新 requestId 和 `resumeJobId`，并复用已有结果。历史分析草稿仍可查询和应用。项目内同时一个转绘任务，全站同时两个。
-
-视频转绘创建页选择地区/语言后直接启动拉片与对白整理，并进入对白对照页；先查询当前任务和 segments 复用已有结果，失败在对白页重试。首版原片仅 MP4、300 MB、300 秒、自动检测最多160镜头。无声视频跳过转写；有声视频默认用现有 Fish 配置获取真实时间戳，缺配置/调用失败如实报告。仅画面分析不会推断对白。H3视频生成已接入图片、视频和音频参考；原片片段只有实际放入 referenceVideos 才参与生成，音色试听使用 referenceAudios。输入支持不等于连续动作逐帧还原或精确口型，需检查实际结果。
-
-助手直接用 `builtin_read_image` 读取切镜结果中的拼图或来源帧，结合真实转写分析，再用工作台工具按授权保存。复用已有切镜及转写，使用资源 describe 核对字段；不单独提交视觉分析任务。
+1. 读取项目、剧集、来源视频与已有 `shots`、`assets`。项目已选地区和语言即为有效设定：欧美未指定具体国家时采用通用语境，不为此提问。
+2. 查询 `builtin_read_video_redraw`；没有可复用结果时通过 `builtin_edit_video_redraw` 提交 `analyze`，再调用 `builtin_wait_video_redraw`。服务端自动检测候选切点，直接使用文件服务中原片的 COS 地址，交模型校正并保存镜头及资产条目。已有 COS 原片不重复上传，本地原片需先配置 COS，上传并校验后保留同一 fileId；不依赖网关文件接口；失败时报告真实错误，不重复运行独立切镜或转写。
+3. 回读 `shots` 和 `assets`。根据用户要求使用 `builtin_edit_studio` 调整相应镜头，保留其他镜头和用户修改；画面中的资产以 `<完整资产名称>` 或 `<完整资产名称|状态名称>` 存储，页面显示 @ 标签。 场次的 `assetId` 与可选 `variantId` 关联场景及其状态，连续的同地点同时间镜头属于同一场次；场景无法确认时保留待确认。生成视频片段时必须将所属场次的场景资产和状态带入片段引用与提示词。对白角色必须引用真实角色 ID，原片内容保存在 `source`，目标对白保存在 `dialogue`。
+4. 修改时间时同时维护相邻镜头区间与时长。拆分、合并时检查对白分配，证据不足标记待确认；不要覆盖已完成的媒体。保存后按 ID 回读。
+5. 确认分镜后使用 `builtin_edit_video_redraw` 的 `extract-assets` 提交资产提取，可在 `requirements` 中提供本次补充要求（最多 2000 字），再通过 `builtin_wait_video_redraw` 等待结果。接口使用独立配置的文本模型（assetExtractionModel，默认 deepseek-v4.1-flash）处理分镜、场次、原片分析和已有资产，不重新调用视频理解模型；结果含实际 model 与 providerId，保留既有设定、图片与非空提示词，新增缺失资产、必要状态和镜头关联，并补全本集已有衍生状态的空生图提示词。模型漏掉需要补全的状态时任务失败，报告错误并用新的 requestId 重试。原片分析阶段可先留下空提示词，由资产提取阶段补齐。用户要求调整时使用 studio 工具修改已有资产；不要求提供单独剧本。
 
 ## 工作区文件与命令
 

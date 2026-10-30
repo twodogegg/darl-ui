@@ -9,13 +9,17 @@ export type MediaImage =
 /** A provider may answer with inline base64 or with a URL to fetch. Both are valid. */
 export type ImageForm = 'b64_json' | 'url';
 
-export function promptFor(job: Pick<MediaJob, 'prompt' | 'style' | 'type' | 'modelId' | 'upstreamModelId' | 'protocolKey'>): string {
+export function promptFor(job: Pick<MediaJob, 'prompt' | 'style' | 'type' | 'modelId' | 'upstreamModelId' | 'protocolKey'> & Partial<Pick<MediaJob, 'options'>>): string {
   const style = job.style;
   // 名称带 h3 的视频模型提示词格式严格，画风只能作为提示词优化的输入、由优化
-  // 结果织入正文；其余视频模型与图片提示词仍为自由格式，在此追加风格。
+  // 结果织入正文；其他模型使用自由格式的风格描述。
   if (!style || isH3VideoJob(job)) return job.prompt;
   const description = style.description?.trim();
-  return `${job.prompt}\n\n视觉风格：${style.name}${description ? `。${description}` : ''}`;
+  const stylePrompt = `视觉风格：${style.name}${description ? `。${description}` : ''}`;
+  const target = job.options?.studioTarget as { resource?: string } | undefined;
+  return job.type === 'image' && target?.resource === 'assets'
+    ? `${stylePrompt}\n\n${job.prompt}`
+    : `${job.prompt}\n\n${stylePrompt}`;
 }
 
 function isH3VideoJob(job: Pick<MediaJob, 'type' | 'modelId' | 'upstreamModelId' | 'protocolKey'>): boolean {

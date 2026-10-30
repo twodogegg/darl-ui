@@ -6,13 +6,12 @@ import Home from './pages/Home'
 import { Projects } from './pages/Projects'
 import Script, { Outline } from './pages/Script'
 import Source from './pages/Source'
-import Dialogue from './pages/Dialogue'
 import Art from './pages/Art'
 import VideoProduction from './pages/VideoProduction'
-import Storyboard from './pages/Storyboard'
 import Assets from './pages/Assets'
 import Prompts from './pages/Prompts'
-import { RedrawFilm } from './components/VideoRedraw'
+import Film from './pages/Film'
+import RedrawStoryboard from './pages/RedrawStoryboard'
 import { MediaGenerationPage } from '../MediaGenerationPage'
 import { ReferencePicker } from './components/ui'
 import './styles/brand-tokens.css'
@@ -27,6 +26,7 @@ import './styles/migration.css'
 import './styles/production.css'
 import './styles/integration.css'
 import './styles/video-redraw.css'
+import './styles/film.css'
 
 function StudioMediaPage() {
   const navigate = useNavigate()
@@ -59,12 +59,12 @@ function Pages({ onContextChange }) {
     <Route path="/projects/:id" element={<Navigate to="/projects" replace />} />
     <Route path="/outline" element={<Outline key={data.projects.map(item => item.id).join(',')} />} />
     <Route path="/source" element={<Source key={data.projects.map(item => item.id).join(',')} />} />
-    <Route path="/dialogue" element={<Dialogue />} />
+    <Route path="/dialogue" element={<Navigate to={`/script${location.search}`} replace />} />
     <Route path="/script" element={<Script />} />
     <Route path="/art" element={<Art />} />
-    <Route path="/storyboard" element={<Storyboard />} />
+    <Route path="/storyboard" element={data.projects.find(item => item.id === new URLSearchParams(location.search).get('projectId'))?.creationMode === 'video-redraw' ? <RedrawStoryboard /> : <Navigate to={`/video${location.search}`} replace />} />
     <Route path="/video" element={<VideoProduction />} />
-    <Route path="/film" element={<RedrawFilm />} />
+    <Route path="/film" element={<Film />} />
     <Route path="/assets" element={<Assets />} />
     <Route path="/media" element={<StudioMediaPage />} />
     <Route path="/settings/prompts" element={<Prompts />} />

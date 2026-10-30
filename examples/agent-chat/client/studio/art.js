@@ -5,7 +5,7 @@ export const assetViews = type => type === '角色'
   ? ['一致性图', '面部特写', '四视图', '自定义']
   : type === '场景' ? ['场景空镜', '场景四视图', '自定义'] : ['道具图', '四视图', '自定义']
 
-export function assetImageRequest(asset, { variantId = '', view = '', customPrompt = '', editPrompt = '', image = '' } = {}) {
+export function assetImageRequest(asset, { variantId = '', view = '', customPrompt = '', editPrompt = '', image = '', project } = {}) {
   const variant = variantId && asset.variants.find(item => item.id === variantId)
   if (variantId && !variant) throw new Error('当前形态已被删除，请重新选择')
   if (editPrompt.trim()) {
@@ -14,7 +14,7 @@ export function assetImageRequest(asset, { variantId = '', view = '', customProm
   }
   const selectedView = !view || view === '按资产默认方案' ? assetViews(asset.type)[0] : view
   if (selectedView === '自定义' && !customPrompt.trim()) throw new Error('请输入自定义提示词')
-  // 最终生图提示词 = 生图提示词（角色有值优先）+ 生图模板提示词；全局风格由服务端追加。
+  // 最终生图提示词 = 全局风格 + 生图模板提示词 + 生图提示词。
   // 角色未填写生图提示词时回退可见的 appearance 与当前服饰（主形象 costume、衍生形态 description），
   // 叙事描述 description 与声音 voiceDescription 始终不进入生图请求。
   const characterPrompt = (variant || asset).prompt?.trim() || ''
@@ -23,9 +23,12 @@ export function assetImageRequest(asset, { variantId = '', view = '', customProm
       ? characterPrompt || [asset.appearance, variant ? variant.description : asset.costume].filter(value => value?.trim()).join('\n')
       : (variant || asset).prompt?.trim() || ''
   if (!prompt.trim()) throw new Error(asset.type === '角色' ? '请填写角色生图提示词，或至少填写外貌与当前服饰设定' : `请填写${asset.type}生图提示词`)
+  const language = { en: '英语', ja: '日语' }[project?.targetLanguage]
+  const region = { western: '欧美', japan: '日本' }[project?.targetRegion]
+  const localization = language && region && prompts['asset-image-localization'].replace('{language}', language).replace('{region}', region)
   return {
-    prompt: [prompt, selectedView === '自定义' ? '' : prompts['asset-image-views'][selectedView]].filter(Boolean).join('\n'),
-    references: [...new Set([...(asset.dependencies?.length ? [] : [asset.image]), ...(!asset.image ? asset.source?.frames?.map(frame => frame.url) || [] : []), ...(asset.references || []).map(item => typeof item === 'string' ? item : item.url)].filter(Boolean))],
+    prompt: [!variantId && localization, selectedView === '自定义' ? '' : prompts['asset-image-views'][selectedView], prompt].filter(Boolean).join('\n'),
+    references: variantId ? [...new Set([...(asset.dependencies?.length ? [] : [asset.image]), ...(!asset.image ? asset.source?.frames?.map(frame => frame.url) || [] : []), ...(asset.references || []).map(item => typeof item === 'string' ? item : item.url)].filter(Boolean))] : [],
   }
 }
 
@@ -83,7 +86,8 @@ export async function generateAssetBatch(assets, { jobs, generateMedia, readJob,
     const task = (async () => {
       const submit = async (current, variantId) => {
         signal.throwIfAborted()
-        const job = await generateMedia({ ...assetImageRequest(current, { variantId, view, customPrompt }), styleId, target: { resource: 'assets', id: current.id, field: 'image', ...(variantId ? { variantId } : {}) } })
+        const project = (await reload()).projects.find(item => item.id === current.projectId)
+        const job = await generateMedia({ ...assetImageRequest(current, { variantId, view, customPrompt, project }), styleId, target: { resource: 'assets', id: current.id, field: 'image', ...(variantId ? { variantId } : {}) } })
         submitted.push(job.id)
         return job
       }

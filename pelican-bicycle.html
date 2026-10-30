@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>鹈鹕的骑行日记</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; overflow: hidden; background: #f5e8d1; color: #393e37; font-family: Georgia, 'Songti SC', serif; }
+  main { width: min(100%, 1200px); padding: clamp(16px, 4vw, 48px); }
+  .card { position: relative; overflow: hidden; border: 1px solid #d8c7a7; border-radius: 8px; background: #f8f1de; box-shadow: 0 18px 60px #806a4930; }
+  .heading { position: absolute; z-index: 1; top: 7%; left: 7%; pointer-events: none; }
+  .eyebrow { font: 700 clamp(8px, 1vw, 12px)/1.4 sans-serif; letter-spacing: .24em; color: #a67b56; }
+  h1 { margin: .25em 0; font-size: clamp(22px, 4vw, 48px); font-weight: 400; letter-spacing: .04em; }
+  .heading p { margin: 0; font-size: clamp(10px, 1.3vw, 15px); color: #8b8b76; letter-spacing: .1em; }
+  svg { display: block; width: 100%; height: auto; }
+  .wheel { transform-box: fill-box; transform-origin: center; animation: spin 2s linear infinite; }
+  .rider { animation: bob 1s ease-in-out infinite alternate; }
+  .cloud { animation: drift 24s linear infinite; }
+  .cloud.two { animation-duration: 34s; animation-delay: -14s; }
+  .land { animation: landscape 8s linear infinite; }
+  .grass { animation: landscape 3s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes bob { to { transform: translateY(-3px) rotate(-.4deg); } }
+  @keyframes drift { from { transform: translateX(160px); } to { transform: translateX(-1100px); } }
+  @keyframes landscape { to { transform: translateX(-400px); } }
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <div class="heading"><div class="eyebrow">A LITTLE ADVENTURE · NO. 01</div><h1>鹈鹕的骑行日记</h1><p>沿着海风，慢慢出发。</p></div>
+    <svg viewBox="0 0 1000 650" role="img" aria-labelledby="title desc" xmlns="http://www.w3.org/2000/svg">
+      <title id="title">骑自行车的鹈鹕</title><desc id="desc">一只白色鹈鹕骑着红色自行车，沿着海边的小路前行。</desc>
+      <defs>
+        <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#f8efdd"/><stop offset="1" stop-color="#dcebdc"/></linearGradient>
+        <linearGradient id="sea" x2="0" y2="1"><stop stop-color="#a4c6bc"/><stop offset="1" stop-color="#c9d9c0"/></linearGradient>
+        <pattern id="spokes" width="1" height="1"/>
+        <g id="wheel"><circle r="92" fill="#f6eedc" stroke="#384841" stroke-width="10"/><circle r="83" fill="none" stroke="#d3b789" stroke-width="2"/><g stroke="#a6a99a" stroke-width="1.5"><path d="M-82 0H82 M0-82V82 M-58-58L58 58 M58-58L-58 58 M-76-31L76 31 M-76 31L76-31 M-31-76L31 76 M31-76L-31 76"/></g><circle r="7" fill="#50635b"/></g>
+        <g id="shrub"><path d="M0 0q5-32 13-5 4-39 13-5 9-22 15 10" fill="#829e7e"/><path d="M20 0v-19" stroke="#69876d" fill="none"/></g>
+      </defs>
+      <rect width="1000" height="650" fill="url(#sky)"/>
+      <circle cx="817" cy="127" r="48" fill="#e8bf78" opacity=".7"/>
+      <g fill="#fffaf0" opacity=".75"><g class="cloud"><path d="M710 128q14-22 38-10 13-29 42-13 19-9 31 12 24-1 28 14H704q0-2 6-3Z"/></g><g class="cloud two"><path d="M1050 194q14-20 35-9 12-25 37-11 19-7 29 12 22-2 27 12h-133Z"/></g></g>
+      <path d="M0 335 Q160 306 315 330 T650 325 T1000 327 V500 H0Z" fill="url(#sea)"/>
+      <g stroke="#e8f0dd" stroke-width="3" stroke-linecap="round" opacity=".65"><path d="M58 370h94 m30 18h58 m408-27h112 m65 31h85 M330 404h94"/></g>
+      <path d="M0 448 Q210 421 380 443 T760 437 T1000 442 V650H0Z" fill="#c6d3ac"/>
+      <g class="land"><use href="#shrub" x="55" y="463"/><use href="#shrub" x="245" y="449"/><use href="#shrub" x="410" y="459"/><use href="#shrub" x="610" y="448"/><use href="#shrub" x="805" y="459"/><use href="#shrub" x="1005" y="463"/><use href="#shrub" x="1205" y="449"/></g>
+      <path d="M0 535 Q500 505 1000 535 V650H0Z" fill="#dfc69b"/><path d="M0 574 Q500 552 1000 574" fill="none" stroke="#eddbb8" stroke-width="3"/>
+      <g class="grass" stroke="#b29c77" stroke-width="3" stroke-linecap="round" opacity=".55"><path d="M35 597h38 m145 20h25 m180-17h45 m160 20h28 m180-18h42 m168 16h35 m165-16h45 m160 20h28"/></g>
+      <ellipse cx="512" cy="556" rx="250" ry="14" fill="#958a70" opacity=".17"/>
+      <!-- Bicycle -->
+      <g class="wheel" style="transform-origin: 330px 454px; transform-box: view-box"><use href="#wheel" x="330" y="454"/></g>
+      <g class="wheel" style="transform-origin: 690px 454px; transform-box: view-box"><use href="#wheel" x="690" y="454"/></g>
+      <g fill="none" stroke="#bc5e4e" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"><path d="M330 454 L420 322 L507 454 Z M420 322 L613 330 L507 454 M613 330 L690 454"/><path d="M403 300l31 53 M600 307l17 34"/></g>
+      <g fill="none" stroke="#46564e" stroke-width="8" stroke-linecap="round"><path d="M600 308l-5-20h38q14 0 14-13"/><path d="M385 300h67"/></g>
+      <path d="M370 293q15-12 43-7l27 9q4 5-4 7h-65q-9-2-1-9Z" fill="#4b5145"/>
+      <circle cx="507" cy="454" r="28" fill="#e4d4b8" stroke="#56665b" stroke-width="4"/><circle cx="507" cy="454" r="4" fill="#56665b"/>
+      <!-- Rear leg is drawn dynamically in sync with the crank -->
+      <path id="backLeg" fill="none" stroke="#c78845" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+      <path id="backFoot" fill="none" stroke="#c78845" stroke-width="8" stroke-linecap="round"/>
+      <g class="rider">
+        <!-- Tail, body and wing -->
+        <path d="M379 267q-32 5-51-14 5 27 33 38Z" fill="#d8dfd1" stroke="#67776b" stroke-width="3"/>
+        <path d="M367 263q-3-61 57-74 45-10 75 17 24 20 13 53-15 43-69 48-54 5-76-44Z" fill="#fff9e9" stroke="#67776b" stroke-width="3"/>
+        <path d="M384 239q30-39 95-22-7 38-49 52-33 9-46-30Z" fill="#e6eadb" stroke="#a4b2a1" stroke-width="2"/>
+        <path d="M404 240q24 8 51-5 M411 251q21 6 38-3" fill="none" stroke="#bdcbb8" stroke-width="2" stroke-linecap="round"/>
+        <!-- Neck and head -->
+        <path d="M471 221q31 1 41-21 8-17 0-47-6-27 12-45 15-15 38-10 28 5 31 30 2 22-18 33-12 7-10 23 3 35-19 58-24 25-61 23Z" fill="#fff9e9" stroke="#67776b" stroke-width="3"/>
+        <!-- Pelican's characteristic long bill and pouch -->
+        <path d="M564 134q42-7 112 11 7 2 5 6-3 4-10 3l-106-4Z" fill="#e7a354" stroke="#986a3d" stroke-width="2"/>
+        <path d="M567 150q30 5 101 4-20 27-57 32-29 3-44-36Z" fill="#eebd7e" stroke="#bc8b58" stroke-width="2"/>
+        <circle cx="563" cy="122" r="4" fill="#3d4841"/><circle cx="564" cy="121" r="1.2" fill="white"/>
+        <path d="M528 105q17-14 41-5" fill="none" stroke="#d0d9c8" stroke-width="3" stroke-linecap="round"/>
+        <!-- Scarf -->
+        <path d="M509 175q28 10 54-4l5 15q-28 14-59 4Z" fill="#c65d4c"/><path d="M514 185q-27 9-44 1 12 20 37 14l13-7Z" fill="#d46f58"/>
+        <path d="M470 186q-18-3-30-12" fill="none" stroke="#d46f58" stroke-width="7" stroke-linecap="round"/>
+      </g>
+      <path id="frontLeg" fill="none" stroke="#d49a51" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+      <path id="frontFoot" fill="none" stroke="#d49a51" stroke-width="8" stroke-linecap="round"/>
+      <g id="crank" stroke="#56665b" stroke-width="5" stroke-linecap="round"><path id="crankLine"/><path id="pedals" stroke-width="6"/></g>
+      <g fill="#f7ecd2" opacity=".8"><circle cx="145" cy="480" r="2"/><circle cx="875" cy="485" r="2"/><circle cx="94" cy="515" r="2"/></g>
+      <text x="944" y="616" text-anchor="end" fill="#a99370" font-family="Georgia, serif" font-size="12" letter-spacing="3">KEEP WANDERING</text>
+    </svg>
+  </div>
+</main>
+<script>
+  const backLeg = document.getElementById('backLeg');
+  const backFoot = document.getElementById('backFoot');
+  const frontLeg = document.getElementById('frontLeg');
+  const frontFoot = document.getElementById('frontFoot');
+  const crankLine = document.getElementById('crankLine');
+  const pedals = document.getElementById('pedals');
+  function animate(time) {
+    const angle = time * Math.PI / 1000;
+    const dx = Math.cos(angle) * 35, dy = Math.sin(angle) * 35;
+    const x = 507 + dx, y = 454 + dy, bx = 507 - dx, by = 454 - dy;
+    frontLeg.setAttribute('d', `M 443 292 Q ${x - 55} ${y - 35} ${x} ${y}`);
+    backLeg.setAttribute('d', `M 425 293 Q ${bx - 58} ${by - 37} ${bx} ${by}`);
+    frontFoot.setAttribute('d', `M ${x - 10} ${y} h 26`);
+    backFoot.setAttribute('d', `M ${bx - 10} ${by} h 26`);
+    crankLine.setAttribute('d', `M ${bx} ${by} L ${x} ${y}`);
+    pedals.setAttribute('d', `M ${x - 12} ${y + 5} h 24 M ${bx - 12} ${by + 5} h 24`);
+    requestAnimationFrame(animate);
+  }
+  requestAnimationFrame(animate);
+</script>
+</body>
+</html>

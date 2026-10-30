@@ -38,7 +38,7 @@ export class StudioStore {
     const insert = this.db.prepare("INSERT OR IGNORE INTO studio_records(resource,id,data,version,position) VALUES('prompts',?,?,1,?)");
     const current = this.db.prepare("SELECT data,version FROM studio_records WHERE resource='prompts' AND id=?");
     const update = this.db.prepare("UPDATE studio_records SET data=?,version=? WHERE resource='prompts' AND id=?");
-    const catalog = [...promptCatalog, ...Object.entries(redrawPrompts).map(([key, defaultText], index) => ({ id: `4-${index}`, action: `redraw-${key}`, group: 4, name: { analysis: '视频拉片与改编', asset: '转绘资产', clip: '转绘镜头' }[key] || key, mode: 'default', text: '', defaultText }))];
+    const catalog = [...promptCatalog, ...(['asset', 'clip'] as const).map((key, index) => ({ id: `4-${index + 1}`, action: `redraw-${key}`, group: 4, name: { asset: '转绘资产', clip: '转绘镜头' }[key], mode: 'default', text: '', defaultText: redrawPrompts[key] }))];
     catalog.forEach(({ id, action: _, ...values }, index) => {
       insert.run(id, JSON.stringify(values), index);
       const saved = current.get(id) as { data: string; version: number } | undefined;
@@ -51,7 +51,9 @@ export class StudioStore {
   snapshot(): StudioData {
     const data = emptyStudioData();
     for (const row of this.db.prepare('SELECT * FROM studio_records ORDER BY position,rowid').all() as Array<{ resource: StudioResource; id: string; data: string; version: number; position: number }>) {
-      data[row.resource].push({ ...JSON.parse(row.data), id: row.id, _version: row.version, _position: row.position });
+      const values = JSON.parse(row.data);
+      if (row.resource === 'clips') delete values.storyboardPrompt;
+      data[row.resource].push({ ...values, id: row.id, _version: row.version, _position: row.position });
     }
     const extras = new Map(data.projects.map(project => [project.id, project]));
     data.projects = this.projects.list().map(project => projectForMode({ ...structuredClone(studioDefaults.projects), ...extras.get(String(project.id)), id: String(project.id), _version: extras.get(String(project.id))?._version || 1,
@@ -66,7 +68,7 @@ export class StudioStore {
   query(input: Record<string, unknown>) {
     if (input.resource === 'styles') return { resource: 'styles', ...this.projects.styles() };
     const resource = studioResource(input.resource);
-    if (input.describe === true) return { resource, fields: ['id', '_version', '_position', ...studioFields[resource].split(' ')], defaults: studioDefaults[resource] || {}, requiredOnCreate: studioRequiredOnCreate[resource] || [], valuesSchema: studioValueSchema(resource), versionField: '_version', operations: ['create', 'update', 'delete'], batchSemantics: 'atomic', maxBatch: 500, structures: { scenes: ['id', 'location', 'setting:内/外/内外', 'time', 'suggestedDuration:秒或空字符串', 'content:完整场次正文，动作、人物名和台词按发生顺序交错，保留Markdown；场次不支持独立dialogue字段'], dialogue: ['id', 'type:角色/旁白', 'assetId:角色类型必填，须引用当前项目的真实角色资产；旁白可省略', 'speaker', 'description', 'text'], outline: ['core', 'story', 'keep', 'remove', 'merge', 'risks', 'episodes', 'roles:[{id,name,position,relationships,arc}]', 'scenes:[{id,name,purpose}]', 'props:[{id,name,purpose,involvement}]'], dependencies: ['assetId:同项目资产ID', 'variantId:可选，引用具体形态', 'purpose:参考用途'], variants: ['id', 'name', 'description', 'prompt:场景道具形态独立生图提示词，生图必填且不回退描述；角色默认使用外貌与当前服饰设定', 'image', 'history:图片URL数组'] } };
+    if (input.describe === true) return { resource, fields: ['id', '_version', '_position', ...studioFields[resource].split(' ')], defaults: studioDefaults[resource] || {}, requiredOnCreate: studioRequiredOnCreate[resource] || [], valuesSchema: studioValueSchema(resource), versionField: '_version', operations: ['create', 'update', 'delete'], batchSemantics: 'atomic', maxBatch: 500, structures: { scenes: ['id', 'location', 'setting:内/外/内外', 'time', 'suggestedDuration:秒或空字符串', 'content:完整场次正文，动作、人物名和台词按发生顺序交错，保留Markdown；场次不支持独立dialogue字段'], dialogue: ['id', 'type:角色/旁白', 'assetId:角色类型必填，须引用当前项目的真实角色资产；旁白可省略', 'speaker', 'description', 'text'], outline: ['core', 'story', 'keep', 'remove', 'merge', 'risks', 'episodes', 'roles:[{id,name,position,relationships,arc}]', 'scenes:[{id,name,purpose}]', 'props:[{id,name,purpose,involvement}]'], dependencies: ['assetId:同项目资产ID', 'variantId:可选，引用具体形态', 'purpose:可选，参考用途'], variants: ['id', 'name', 'description', 'prompt:场景道具形态独立生图提示词，生图必填且不回退描述；角色默认使用外貌与当前服饰设定', 'image', 'history:图片URL数组'] } };
     const data = this.snapshot();
     let items = data[resource];
     if (input.projectId !== undefined) {
@@ -129,6 +131,11 @@ export class StudioStore {
           if (resource === 'clips' && Object.hasOwn(values, 'duration') && !finitePositive(values.duration)) throw new Error('片段时长须为大于 0 的秒数');
           const after = { ...structuredClone(studioDefaults[resource] || {}), ...before, ...values, id, _version: before?._version || 0, _position: change.position ?? before?._position ?? collection.reduce((max, item) => Math.max(max, item._position ?? 0), -1) + 1 } as StudioRecord;
           if (resource === 'projects' && after.creationMode !== 'video-redraw' && redrawProjectFields.some(key => Object.hasOwn(values, key))) throw failure('tool-validation', 'STUDIO_FIELD_INVALID', 'targetRegion、targetLanguage、sourceVideo 仅适用于视频转绘项目，剧本项目不能设置这些字段。', false);
+          if (resource === 'shots') {
+            const episode = data.episodes.find(item => item.id === after.episodeId);
+            const owner = data.projects.find(item => item.id === episode?.projectId);
+            if (owner?.creationMode === 'video-redraw') { delete after.camera; delete after.transition; }
+          }
           const saved = resource === 'projects' ? projectForMode(after) : after;
           if (before) collection[collection.indexOf(before)] = saved; else collection.push(saved);
         }
@@ -229,12 +236,31 @@ export class StudioStore {
   }
   prepareMedia(input: { prompt: string; options: Record<string, unknown> }, type: string) {
     const target = input.options.studioTarget as Record<string, unknown> | undefined;
-    if (type !== 'image' || target?.resource !== 'assets') return input;
-    const dependencies = target.dependencyImages as DependencyImage[] || [];
-    const references = [...new Set([...(input.options.references as string[] || []), ...dependencies.map(item => item.image)])];
-    const notes = dependencies.map(item => `参考图 ${references.indexOf(item.image) + 1}：${item.name}；用途：${item.purpose}`).join('\n');
-    const prompt = dependencies.length ? `${input.prompt}\n${actionPrompts['asset-dependencies'].replace('{references}', notes)}` : input.prompt;
-    return { prompt, options: { ...input.options, references, aspectRatio: input.options.aspectRatio || '16:9' } };
+    if (type !== 'image') return input;
+    const dependencies = target?.resource === 'assets' ? target.dependencyImages as DependencyImage[] || [] : [];
+    const provided = Array.isArray(input.options.references) ? input.options.references : [];
+    const references = dependencies.length ? [...new Set([...provided, ...dependencies.map(item => item.image)])] : provided;
+    if (!references.length) return { ...input, options: { ...input.options, ...(target?.resource === 'assets' ? { references, aspectRatio: input.options.aspectRatio || '16:9' } : {}) } };
+    const notes = dependencies.map(item => `参考图 ${references.indexOf(item.image) + 1}：${item.name}${item.purpose.trim() ? `；用途：${item.purpose.trim()}` : ''}`).join('\n');
+    const state = this.snapshot();
+    const resource = target?.resource;
+    const item = resource === 'assets' || resource === 'clips' || resource === 'shots' ? state[resource].find(row => row.id === target?.id) : undefined;
+    const episode = state.episodes.find(row => row.id === item?.episodeId);
+    const projectId = item?.projectId || episode?.projectId;
+    const assets = projectId ? state.assets.filter(asset => asset.projectId === projectId) : [];
+    const mapping = references.map((reference, index) => {
+      const image = typeof reference === 'string' ? reference : reference && typeof reference === 'object' ? (reference as { url?: unknown }).url : undefined;
+      const names = typeof image !== 'string' ? [] : assets.flatMap(asset => [
+        ...(asset.image === image || (Array.isArray(asset.history) && asset.history.includes(image)) ? [`<${asset.name}>`] : []),
+        ...((asset.variants as Array<{ name: string; image?: string; history?: string[] }> | undefined) || []).filter(variant => variant.image === image || variant.history?.includes(image)).map(variant => `<${asset.name}|${variant.name}>`),
+      ]);
+      const extra = (Array.isArray(item?.references) ? item.references : []).filter((ref: unknown) => ref && typeof ref === 'object' && (ref as { url?: unknown }).url === image).map((ref: { name?: string }) => ref.name).filter(Boolean);
+      const dependencyNames = dependencies.filter(dependency => dependency.image === image).map(dependency => dependency.name);
+      const labels = [...new Set([...names, ...extra, ...dependencyNames])];
+      return `图片${index + 1}：${labels.length ? labels.join('、') : '用户提供的参考图片'}`;
+    }).join('\n');
+    const prompt = [input.prompt, dependencies.length && actionPrompts['asset-dependencies'].replace('{references}', notes), mapping && actionPrompts['image-reference-mapping'].replace('{references}', mapping)].filter(Boolean).join('\n\n');
+    return { prompt, options: { ...input.options, references, ...(resource === 'assets' ? { aspectRatio: input.options.aspectRatio || '16:9' } : {}) } };
   }
   attachMedia(job: import('./media-job-store').MediaJob) {
     const target = job.options.studioTarget as Record<string, unknown> | undefined;
@@ -328,6 +354,11 @@ export class StudioStore {
           if (ids.has(id) || typeof scene.content !== 'string' || typeof scene.location !== 'string' || !['内', '外', '内外'].includes(String(scene.setting)) || typeof scene.time !== 'string') throw new Error('场次字段或编号无效');
           if (scene.suggestedDuration !== '' && scene.suggestedDuration != null && !finitePositive(Number(scene.suggestedDuration))) throw new Error('场次建议时长无效');
           ids.add(id);
+          if (scene.assetId) {
+            const asset = required('assets', scene.assetId, `${path}.scenes[${id}].assetId`);
+            if (asset.projectId !== item.projectId || asset.type !== '场景') throw new Error('场次须关联当前项目的场景资产');
+            if (scene.variantId && !(asset.variants as Array<{ id: string }>).some(variant => variant.id === scene.variantId)) throw new Error('场次场景形态不存在');
+          } else if (scene.variantId) throw new Error('场次形态须关联场景资产');
         }
         if (data.episodes.some(other => other.id !== item.id && other.projectId === item.projectId && other.number === item.number)) throw new Error('同一项目的剧集编号重复');
       }
@@ -360,7 +391,7 @@ export class StudioStore {
       if ((resource === 'assets' || resource === 'shots') && item.source !== undefined) {
         const source = item.source as Record<string, unknown>;
         const project = required('projects', resource === 'assets' ? item.projectId : required('episodes', item.episodeId, path).projectId, path);
-        const episode = resource === 'shots' ? required('episodes', item.episodeId, path) : data.episodes.find(e => e.projectId === project.id && (e.sourceVideo as Record<string, unknown> | undefined)?.fileId === source?.fileId);
+        const episode = resource === 'shots' ? required('episodes', item.episodeId, path) : data.episodes.find(e => e.projectId === project.id && (e.sourceVideo as Record<string, unknown> | undefined)?.fileId === source?.fileId && Number.isFinite((e.sourceVideo as Record<string, unknown>)?.duration));
         const video = ((episode?.sourceVideo as Record<string, unknown> | undefined) || (project.sourceVideo as Record<string, unknown>));
         if (!source || !video || !Number.isFinite(video.duration)) throw failure('tool-validation', 'STUDIO_SOURCE_METADATA_MISSING', `${path}.source：原片时长尚未保存。请读取本集真实切镜或探测结果，先保存 sourceVideo 的时长等元数据。`, false);
         if (source.fileId !== video.fileId) throw failure('tool-validation', 'STUDIO_SOURCE_FILE_INVALID', `${path}.source.fileId：须使用本集原视频的 fileId，而不是参考图片 ID。`, false);
@@ -393,7 +424,6 @@ export class StudioStore {
       if (resource === 'clips') {
         // Legacy 'shots' values are inert; video generation always uses the clip image.
         if (item.imageSource !== undefined && !['clip', 'shots'].includes(String(item.imageSource))) throw new Error('视频分镜图来源只支持片段自己的分镜图');
-        if (item.storyboardPrompt !== undefined && typeof item.storyboardPrompt !== 'string') throw new Error('片段分镜图提示词须为文本');
         if (item.blocking !== undefined && typeof item.blocking !== 'string') throw new Error('初始站位与状态须为文本');
         const episode = required('episodes', item.episodeId, `${path}.episodeId`);
         // shotIds 只是历史可追溯参考，不再参与片段生成；仍校验结构合法性以免脏数据，但不据此推导时长。
@@ -415,9 +445,11 @@ export class StudioStore {
   }
 }
 
+const agentResources = Object.keys(studioFields);
+const agentChangeSchema = { ...studioChangeSchema, properties: { ...studioChangeSchema.properties, resource: { type: 'string', enum: agentResources } } };
 export const STUDIO_TOOLS = [
-  { name: 'builtin_read_studio', title: '查询短剧创作数据', description: '按项目/剧集/场次批量读取大纲、剧本场次、资产、镜头（shots）、视频片段（clips）。分镜表编辑 shots；视频制作以 clips.prompt、clips.duration、片段资产和参考素材为生成依据，镜头不会自动覆盖片段描述、时长或音色。先用 describe=true 获取该资源现有字段、默认值与编辑规则。clips 默认不返回 description；需读取时通过 fields 显式指定，页面视频描述使用 prompt。返回真实 ID、_version、total 和 nextCursor；分页未读完不代表全部内容。', risk: 'read' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { resource: { type: 'string', enum: [...Object.keys(studioFields), 'styles'] }, describe: { type: 'boolean' }, projectId: { type: 'string' }, episodeId: { type: 'string' }, sceneId: { type: 'string' }, ids: { type: 'array', items: { type: 'string' }, maxItems: 500 }, fields: { type: 'array', items: { type: 'string' } }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500 } }, required: ['resource'], additionalProperties: false } },
-  { name: 'builtin_edit_studio', title: '批量修改短剧内容', description: '按读取到的字段白名单提交一组原子编辑，最多500项。修改/删除传最新 _version 作为 version；values 只含改变字段。资源字段、类型、创建必填项与默认值先通过查询工具 describe 获取。分镜角色对白必须引用当前项目真实角色资产；可把新资产与分镜放同批创建。剧本页显示 episodes.scenes[].content，须包含完整动作与台词并同步 script，不支持 scenes[].dialogue。创建项目的 id 为临时标识，返回实际编号；同批新剧集可用临时 projectId 关联。position 可调整记录排序。requestId 为唯一请求标识，重试沿用。关联变化放同批，失败整批回滚。分镜表通过 shots 创建和编辑镜头；视频片段直接维护 prompt 与 duration，镜头变化不会自动修改片段。shots.description 和 clips.prompt 的资产标签必须完全匹配当前项目资产的完整 name 或 <完整名称|完整形态名称>；无效或歧义标签会拒绝整批并返回字段及修正提示。不要为凑整秒修改镜头。生成任务用已有媒体工具。', risk: 'write' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { requestId: { type: 'string' }, changes: { type: 'array', minItems: 1, maxItems: 500, items: studioChangeSchema } }, required: ['requestId', 'changes'], additionalProperties: false } },
+  { name: 'builtin_read_studio', title: '查询短剧创作数据', description: '读取项目、剧集、场次、资产、镜头 shots 和视频片段。先用 describe 获取字段与规则；shots 保存原片分镜，clips.prompt 为视频描述。结果含版本与分页信息。', risk: 'read' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { resource: { type: 'string', enum: [...agentResources, 'styles'] }, describe: { type: 'boolean' }, projectId: { type: 'string' }, episodeId: { type: 'string' }, sceneId: { type: 'string' }, ids: { type: 'array', items: { type: 'string' }, maxItems: 500 }, fields: { type: 'array', items: { type: 'string' } }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500 } }, required: ['resource'], additionalProperties: false } },
+  { name: 'builtin_edit_studio', title: '批量修改短剧内容', description: '按查询结果与字段 schema 原子编辑短剧内容；更新和删除传最新版本，requestId 用于安全重试。原片分镜维护 shots 的来源区间、时长、资产关联、画面与对白；视频片段维护 clips.prompt 和 duration。', risk: 'write' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { requestId: { type: 'string' }, changes: { type: 'array', minItems: 1, maxItems: 500, items: agentChangeSchema } }, required: ['requestId', 'changes'], additionalProperties: false } },
 ] as const;
 
 export async function handleStudioRequest(req: IncomingMessage, res: ServerResponse, store: StudioStore): Promise<boolean> {

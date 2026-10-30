@@ -93,3 +93,5 @@
   .br-top-actions { gap: 12px; }
 }
 }
+
+.br-flow-episode { width: 100%; margin: 2px 0 6px; padding: 7px; border: 1px solid var(--br-theme-hairline-10); border-radius: var(--br-radius-md); background: var(--br-theme-surface-raised-soft); color: inherit; font-size: 12px; }
