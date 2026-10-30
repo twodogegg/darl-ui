@@ -480,10 +480,10 @@ function Production({ context }) {
     setPromptEdit(null)
   }
   function openPromptOptimization(backup) {
-    setPromptEdit({ id: active.id, currentPrompt: active.prompt, text: backup?.after ?? active.prompt, before: backup?.before ?? active.prompt, optimization: backup?.optimization || (isH3Model(model) ? 'h3' : 'general') })
+    setPromptEdit({ id: active.id, currentPrompt: active.prompt, currentDuration: active.duration, currentModel: active.model, text: backup?.after ?? active.prompt, before: backup?.before ?? active.prompt, optimization: backup?.optimization || (isH3Model(model) ? 'h3' : 'general') })
   }
   function rememberOptimization(text) {
-    setPromptBackups(current => ({ ...current, [promptEdit.id]: { before: promptEdit.before, after: text, optimization: promptEdit.optimization } }))
+    setPromptBackups(current => ({ ...current, [promptEdit.id]: { before: promptEdit.before, after: text, optimization: promptEdit.optimization, ...(promptEdit.optimizedDuration !== undefined ? { beforeDuration: promptEdit.currentDuration, afterDuration: promptEdit.optimizedDuration } : {}) } }))
   }
   async function savePrompt() {
     if (savingPrompt) return
@@ -494,9 +494,10 @@ function Production({ context }) {
     try {
       const saved = await update(draft => {
         const clip = draft.clips.find(clip => clip.id === promptEdit.id)
-        if (!clip || clip.prompt !== promptEdit.currentPrompt) throw new Error('视频描述已被其他操作修改，当前草稿已保留，请核对后重新打开')
+        if (!clip || clip.prompt !== promptEdit.currentPrompt || (promptEdit.optimizedDuration !== undefined && (clip.duration !== promptEdit.currentDuration || clip.model !== promptEdit.currentModel))) throw new Error('视频描述、时长或模型已被其他操作修改，当前草稿已保留，请核对后重新打开')
         clip.prompt = promptEdit.text
         clip.description = promptEdit.text
+        if (promptEdit.optimizedDuration !== undefined) clip.duration = promptEdit.optimizedDuration
         if (promptEdit.optimizedImages && isH3FormattedPrompt(promptEdit.text)) clip.references = h3ReferenceSnapshot(clip.references, promptEdit.optimizedImages, promptEdit.optimizedAudios)
         else if (!isH3FormattedPrompt(promptEdit.text)) clip.references = (clip.references || []).filter(ref => !ref?.h3PromptReference)
       })
@@ -516,6 +517,7 @@ function Production({ context }) {
         if (!clip || clip.prompt !== promptBackup.after) throw new Error('视频描述已修改，请先打开优化对比核对原文')
         clip.prompt = promptBackup.before
         clip.description = promptBackup.before
+        if (promptBackup.beforeDuration !== undefined && clip.duration === promptBackup.afterDuration) clip.duration = promptBackup.beforeDuration
         clip.references = (clip.references || []).filter(ref => !ref?.h3PromptReference)
       })
       if (saved) notify('已还原优化前的原文')
@@ -529,15 +531,15 @@ function Production({ context }) {
     setOptimizing(true)
     setPromptEdit(current => ({ ...current, error: '' }))
     try {
-      if (durationError) throw new Error(durationError)
+      const optimizationDuration = videoDuration(planned, model)
       if (mode === '分镜图' && !storyboardReference.length) throw new Error('请先生成或上传分镜图')
       const catalog = await studioApi('workspace/styles', undefined, controller.signal)
       const style = styleOptionsFromCatalog(catalog.data).find(style => style.id === String(context.project.style_catalog_id))
       const audios = clipAudioReferences(active, data, references, mode)
-      const text = await optimizeMediaPrompt({ model, modelId: model.id, optimization: promptEdit.optimization, prompt: promptEdit.optimization === 'h3' ? videoPrompt(promptEdit.text, style, selectedImageReferences, audios) : promptEdit.text, mode: 'reference', options: { count: 1, resolution, aspectRatio: ratio, duration }, ...(style ? { style } : {}), ...(selectedImageReferences.length || audios.length ? { references: { ...(selectedImageReferences.length ? { images: selectedImageReferences } : {}), ...(audios.length ? { audios } : {}) } } : {}) }, { signal: controller.signal })
+      const text = await optimizeMediaPrompt({ model, modelId: model.id, optimization: promptEdit.optimization, prompt: promptEdit.optimization === 'h3' ? videoPrompt(promptEdit.text, style, selectedImageReferences, audios) : promptEdit.text, mode: 'reference', options: { count: 1, resolution, aspectRatio: ratio, duration: optimizationDuration }, ...(style ? { style } : {}), ...(selectedImageReferences.length || audios.length ? { references: { ...(selectedImageReferences.length ? { images: selectedImageReferences } : {}), ...(audios.length ? { audios } : {}) } } : {}) }, { signal: controller.signal })
       if (promptEdit.optimization === 'h3' && !isH3FormattedPrompt(text)) throw new Error('H3 优化结果缺少必需的结构字段，请重试或检查优化提示词')
       if (!controller.signal.aborted) {
-        setPromptEdit(current => ({ ...current, text, optimizedImages: current.optimization === 'h3' ? selectedImageReferences : undefined, optimizedAudios: current.optimization === 'h3' ? audios : undefined }))
+        setPromptEdit(current => ({ ...current, text, optimizedDuration: context.project.creationMode === 'video-redraw' ? optimizationDuration : undefined, optimizedImages: current.optimization === 'h3' ? selectedImageReferences : undefined, optimizedAudios: current.optimization === 'h3' ? audios : undefined }))
       }
     } catch (reason) {
       if (!controller.signal.aborted) setPromptEdit(current => ({ ...current, error: reason.message }))
@@ -661,7 +663,7 @@ function Production({ context }) {
       </Modal>}
       {promptPreview !== null && <Modal title="生成视频提示词" wide onClose={() => setPromptPreview(null)}><pre className="production-prompt-preview">{promptPreview}</pre></Modal>}
       {promptEdit && <Modal title={promptEdit.optimization ? '视频提示词优化对比' : '编辑视频描述'} wide onClose={closePrompt} footer={<><Button disabled={savingPrompt} onClick={closePrompt}>取消</Button><Button primary disabled={optimizing || savingPrompt || !promptEdit.text.trim()} onClick={savePrompt}>{savingPrompt ? '正在保存…' : promptEdit.optimization ? '应用结果' : '保存描述'}</Button></>}>
-        {promptEdit.optimization && <><div className="toolbar"><Field label="优化方式"><select aria-label="优化方式" disabled={optimizing || savingPrompt} value={promptEdit.optimization} onChange={event => setPromptEdit({ ...promptEdit, optimization: event.target.value })}><option value="general">普通优化</option>{model && isH3Model(model) && <option value="h3">H3 提示优化</option>}</select></Field><Button disabled={optimizing || savingPrompt || !model || !promptEdit.text.trim()} onClick={optimizePrompt}>开始优化</Button>{optimizing && <Button onClick={() => { optimization.current?.abort(); optimization.current = null; setOptimizing(false) }}>取消优化</Button>}<Button disabled={optimizing || savingPrompt || promptEdit.text === promptEdit.before} onClick={() => setPromptEdit({ ...promptEdit, text: promptEdit.before, error: '' })}>还原原文</Button></div><p className="muted">对照原文检查优化结果，也可继续编辑。点击“应用结果”后更新视频描述。</p><Processing busy={optimizing} text="正在优化提示词…" />{promptEdit.error && <p role="alert">{promptEdit.error}</p>}</>}
+        {promptEdit.optimization && <><div className="toolbar"><Field label="优化方式"><select aria-label="优化方式" disabled={optimizing || savingPrompt} value={promptEdit.optimization} onChange={event => setPromptEdit({ ...promptEdit, optimization: event.target.value })}><option value="general">普通优化</option>{model && isH3Model(model) && <option value="h3">H3 提示优化</option>}</select></Field><Button disabled={optimizing || savingPrompt || !model || !promptEdit.text.trim()} onClick={optimizePrompt}>开始优化</Button>{optimizing && <Button onClick={() => { optimization.current?.abort(); optimization.current = null; setOptimizing(false) }}>取消优化</Button>}<Button disabled={optimizing || savingPrompt || promptEdit.text === promptEdit.before} onClick={() => setPromptEdit({ ...promptEdit, text: promptEdit.before, error: '', optimizedDuration: undefined, optimizedImages: undefined, optimizedAudios: undefined })}>还原原文</Button></div><p className="muted">对照原文检查优化结果，也可继续编辑。点击“应用结果”后更新视频描述。{context.project.creationMode === 'video-redraw' && duration && duration !== planned && ` 优化将按 ${duration} 秒编排，应用结果时同步调整片段时长。`}</p><Processing busy={optimizing} text="正在优化提示词…" />{promptEdit.error && <p role="alert">{promptEdit.error}</p>}</>}
         <div className={promptEdit.optimization ? 'production-prompt-comparison' : ''}>
           {promptEdit.optimization && <Field label="原文"><div className="production-prompt-readonly"><MentionText value={promptEdit.before} candidates={mentionCandidates} /></div></Field>}
           <Field label={promptEdit.optimization ? '优化后' : '视频描述'}><AssetMentionInput value={promptEdit.text} label={promptEdit.optimization ? '优化后' : '视频描述'} candidates={mentionCandidates} onChange={text => setPromptEdit(current => ({ ...current, text }))} /></Field>
