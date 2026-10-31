@@ -2,19 +2,19 @@
 import { expect, it } from 'vitest';
 import { defaultWorkflowAgents, validateWorkflowAgents } from '../examples/agent-chat/server/workflow-agents';
 
-it('keeps five independent workflow agents and removes fixed JSON output from their default instructions', () => {
+it('keeps five independent workflow agents without file-based default instructions', () => {
   const agents = defaultWorkflowAgents();
   expect(agents.map(agent => agent.kind)).toEqual(['analyze', 'write-script', 'extract-assets', 'storyboard', 'video-prompts']);
-  expect(agents.every(agent => !agent.instructions.includes('只输出 JSON 对象'))).toBe(true);
+  expect(agents.every(agent => agent.instructions === '')).toBe(true);
   agents[0].toolNames.push('builtin_read_studio');
   expect(validateWorkflowAgents(agents)[0].toolNames).toEqual(['builtin_read_studio']);
   expect(agents[1].toolNames).toEqual([]);
 });
 
-it('rejects missing stages, duplicate tools and empty instructions', () => {
+it('rejects missing stages and duplicate tools while allowing unconfigured stages to be saved', () => {
   const agents = defaultWorkflowAgents();
   expect(() => validateWorkflowAgents(agents.slice(1))).toThrow();
-  expect(() => validateWorkflowAgents(agents.map((item, index) => index ? item : { ...item, instructions: '' }))).toThrow();
+  expect(validateWorkflowAgents(agents)[0].instructions).toBe('');
   expect(() => validateWorkflowAgents(agents.map((item, index) => index ? item : { ...item, toolNames: ['a', 'a'] }))).toThrow();
 });
 
@@ -27,6 +27,7 @@ it('adds the script stage to existing settings without replacing configured stag
   expect(migrated.find(agent => agent.kind === 'analyze')).toMatchObject({ model: 'existing-model', instructions: 'existing instructions' });
   expect(migrated.find(agent => agent.kind === 'write-script')?.formatterModel).toBeTruthy();
   expect(migrated.find(agent => agent.kind === 'storyboard')?.formatterModel).toBeTruthy();
+  expect(migrated.find(agent => agent.kind === 'write-script')?.instructions).toBe('');
   const four = defaultWorkflowAgents().filter(agent => agent.kind !== 'storyboard');
   four[1].instructions = '已有剧本设置';
   const upgraded = loadWorkflowAgents({ getConfig: () => four } as never);

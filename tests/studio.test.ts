@@ -224,6 +224,14 @@ describe('shared short drama business service', () => {
     expect(restored).toMatchObject({ mode: 'replace', text: '我的大纲提示词' });
     expect(restored?.defaultText).toContain('网站上下文');
   });
+  it('removes the unused redraw prompt settings from existing databases', () => {
+    const insert = store.projects.db.prepare("INSERT INTO studio_records(resource,id,data,version,position) VALUES('prompts',?,?,1,?)");
+    insert.run('4-1', JSON.stringify({ group: 4, name: '转绘资产', mode: 'default', text: '', defaultText: '旧提示词' }), 100);
+    insert.run('4-2', JSON.stringify({ group: 4, name: '转绘镜头', mode: 'replace', text: '自定义旧提示词', defaultText: '旧提示词' }), 101);
+    const prompts = new StudioStore(store.projects).snapshot().prompts;
+    expect(prompts.some(item => item.id === '4-1' || item.id === '4-2')).toBe(false);
+    expect(prompts.some(item => item.id === '0-0')).toBe(true);
+  });
   it('rounds the authored clip duration up to supported whole seconds without shortening an overlong clip', () => {
     const model = toMediaModels(defaultModelConfiguration()).find(model => model.type === 'video');
     expect(videoDuration(11.1, model)).toBe(12);

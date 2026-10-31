@@ -267,6 +267,7 @@ export class VideoRedraw {
     if (['analyze', 'revise-storyboard', 'plan-storyboard', 'write-script', 'extract-assets', 'video-prompts'].includes(action)) {
       const kind = (action === 'revise-storyboard' ? 'analyze' : action === 'plan-storyboard' ? 'storyboard' : action) as WorkflowKind;
       const config = structuredClone(this.dependencies.workflowAgent?.(kind) || defaultWorkflowAgents().find(item => item.kind === kind)!);
+      if (!config.instructions.trim()) throw new Error('请先在设置 → 工作流 Agents 中配置并保存该阶段的系统提示词');
       const skills = structuredClone(this.dependencies.workflowSkills?.(config.skillIds) || []);
       if (skills.length !== config.skillIds.length) throw new Error('工作流 Skill 配置不可用');
       job.workflow = { config, skills, steps: [], outputs: [] };

@@ -2,7 +2,6 @@ import { resolveAssetDependencies, sameDependencyImages, validateAssetDependenci
 import actionPrompts from '../prompts/studio-actions.json';
 import { assetMentionCandidates, validateAssetMentions } from '../asset-mentions.js';
 import promptCatalog from '../prompts/studio-prompt-catalog.json';
-import redrawPrompts from '../prompts/video-redraw.json';
 import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { emptyStudioData, studioChangeSchema, studioDefaults, studioFields, studioRequiredOnCreate, studioResource, studioValueSchema, validateStudioValues, type StudioChange, type StudioData, type StudioRecord, type StudioResource } from '../studio-schema';
@@ -38,8 +37,8 @@ export class StudioStore {
     const insert = this.db.prepare("INSERT OR IGNORE INTO studio_records(resource,id,data,version,position) VALUES('prompts',?,?,1,?)");
     const current = this.db.prepare("SELECT data,version FROM studio_records WHERE resource='prompts' AND id=?");
     const update = this.db.prepare("UPDATE studio_records SET data=?,version=? WHERE resource='prompts' AND id=?");
-    const catalog = [...promptCatalog, ...(['asset', 'clip'] as const).map((key, index) => ({ id: `4-${index + 1}`, action: `redraw-${key}`, group: 4, name: { asset: '转绘资产', clip: '转绘镜头' }[key], mode: 'default', text: '', defaultText: redrawPrompts[key] }))];
-    catalog.forEach(({ id, action: _, ...values }, index) => {
+    this.db.prepare("DELETE FROM studio_records WHERE resource='prompts' AND id IN ('4-1', '4-2')").run();
+    promptCatalog.forEach(({ id, action: _, ...values }, index) => {
       insert.run(id, JSON.stringify(values), index);
       const saved = current.get(id) as { data: string; version: number } | undefined;
       const existing = JSON.parse(saved!.data) as Record<string, unknown>;
