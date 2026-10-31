@@ -427,7 +427,8 @@ export function App() {
       const selections = task.modelSelections as Record<string, string> | undefined;
       const selectedModel = selections?.text || availableModelId;
       if (!draftOnly && !selectedModel) throw new Error('请先配置并启用文本模型');
-      const payload = studioAgentPayload(task, await loadSkillCatalog(true));
+      const [catalog, buttons] = await Promise.all([loadSkillCatalog(true), api<Array<{ action: string; instructions: string }>>('studio-agent-buttons')]);
+      const payload = studioAgentPayload(task, catalog, buttons.find(button => button.action === task.action)?.instructions || '');
       if (!sessions.some(item => item.id === session.id)) setSessions(current => [session, ...current]);
       setActiveId(session.id); setOpen(true);
       if (draftOnly) {

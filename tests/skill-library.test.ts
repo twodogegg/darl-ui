@@ -44,6 +44,16 @@ it('creates a complete website Skill, immediately loads it, persists it and requ
   expect(reopened.list().find(skill => skill.id === created.skillId)?.resources?.find(item => item.path === 'references/format.md')?.content).toBe('Use bullets.');
 });
 
+it('can prepare an installed Skill and run declared self-tests', async () => {
+  await run('write_file', { path: 'prepared/SKILL.md', content: manifest });
+  await run('write_file', { path: 'prepared/scripts/check.py', content: "import sys\nassert '--selftest' in sys.argv\nprint('selftest ok')\n" });
+  const created = await run('create_skill', { path: 'prepared', setup: true }) as unknown as { skillId: string; setup: { status: string; checks: Array<{ path: string; status: string; output: string }> } };
+  expect(created.setup.status).toBe('ready');
+  expect(created.setup.checks).toEqual([expect.objectContaining({ path: 'scripts/check.py', status: 'passed', output: expect.stringContaining('selftest ok') })]);
+  const prepared = await run('prepare_skill', { skillId: created.skillId }) as unknown as { setup: { status: string } };
+  expect(prepared.setup.status).toBe('ready');
+});
+
 it('imports downloaded ZIPs using the website parser without executing scripts', async () => {
   const zip = zipSync({ 'example/SKILL.md': strToU8(manifest), 'example/scripts/test.sh': strToU8('#!/bin/sh\ntouch should-not-exist'), 'example/.git/config': strToU8('ignored') });
   await run('write_file', { path: 'download.zip', content: Buffer.from(zip).toString('base64'), encoding: 'base64' });

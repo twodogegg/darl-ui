@@ -140,3 +140,62 @@ it('keeps source ranges for traceability while allowing independently adjusted c
   expect(studio.snapshot().clips.map(clip => clip.duration)).toEqual([7, 3]);
   expect(studio.snapshot().clips[0].prompt).toBe('重新安排\n第一段节奏');
 });
+
+it('writes a script into existing scenes only when target dialogue is preserved in order', async () => {
+  const { saveRedrawScript } = await import('../examples/agent-chat/server/redraw-script');
+  const projectId = studio.snapshot().projects[0].id;
+  studio.apply('script-setup', [
+    { resource: 'episodes', op: 'create', id: 'script-episode', values: { projectId, title: '第1集', scenes: [{ id: 'script-scene', location: '车内', setting: '内', time: '夜', content: '' }] } },
+    { resource: 'assets', op: 'create', id: 'script-role', values: { projectId, type: '角色', name: 'A' } },
+    { resource: 'shots', op: 'create', id: 'script-shot', values: { episodeId: 'script-episode', sceneId: 'script-scene', description: 'A 看向前方', dialogue: [{ id: 'line-1', type: '角色', assetId: 'script-role', text: 'Hello.' }, { id: 'line-2', type: '角色', assetId: 'script-role', text: 'Wait!' }] } },
+  ]);
+  const episode = studio.snapshot().episodes.find(item => item.id === 'script-episode')!;
+  expect(() => saveRedrawScript(studio, episode, { scenes: [{ sceneId: 'script-scene', content: 'A: Wait! Hello.' }], openItems: [] }, 'bad-order')).toThrow('未按顺序保留');
+  expect(() => saveRedrawScript(studio, episode, { scenes: [{ sceneId: 'other', content: 'A: Hello. Wait!' }], openItems: [] }, 'bad-id')).toThrow('场次 ID');
+  saveRedrawScript(studio, episode, { scenes: [{ sceneId: 'script-scene', content: 'A: Hello.\nA: Wait!' }], openItems: ['确认发声方式'] }, 'good');
+  const saved = studio.snapshot().episodes.find(item => item.id === episode.id)!;
+  expect((saved.scenes as Array<{ id: string; content: string }>)[0]).toMatchObject({ id: 'script-scene', content: 'A: Hello.\nA: Wait!' });
+  expect(saved.script).toContain('Hello.');
+  expect(() => saveRedrawScript(studio, saved, { scenes: [{ sceneId: 'script-scene', content: 'A: Hello. Wait!' }], openItems: [] }, 'overwrite')).toThrow('已有剧本');
+});
+
+
+it('validates formal storyboard suggestions without changing dialogue or source facts', () => {
+  const shots = [{ id: 'shot-1' }] as ReturnType<StudioStore['snapshot']>['shots'];
+  const make = (values: Record<string, unknown>) => ({ changes: [{ shotId: 'shot-1', reason: '调整节奏', values }], notes: '' });
+  expect(validateRevision(make({ camera: '缓慢推近', duration: 2.3 }), shots, true).changes[0].values).toEqual({ camera: '缓慢推近', duration: 2.3 });
+  expect(() => validateRevision(make({ duration: 2.34 }), shots, true)).toThrow();
+  expect(() => validateRevision(make({ sourceDialogue: '改写' }), shots, true)).toThrow();
+  expect(() => validateRevision(make({ dialogue: [] }), shots, true)).toThrow();
+});
+
+it('applies approved camera and target duration without changing original timing or dialogue', async () => {
+  const file = await files.put(Buffer.from('video reference'), 'video/mp4', 'source.mp4');
+  const project = studio.snapshot().projects[0];
+  studio.apply('formal-setup', [
+    { resource: 'projects', id: project.id, op: 'update', version: project._version, values: { creationMode: 'video-redraw', sourceVideo: { fileId: file.id, duration: 5 } } },
+    { resource: 'episodes', id: 'formal-episode', op: 'create', values: { projectId: project.id, title: '第1集', script: '原剧本', scenes: [{ id: 'formal-scene', location: '车内', setting: '内', time: '夜', content: '原剧本' }] } },
+    { resource: 'shots', id: 'formal-shot', op: 'create', values: { episodeId: 'formal-episode', sceneId: 'formal-scene', description: '画面', duration: 2.067, dialogue: [{ id: 'line', type: '旁白', text: '原台词' }], source: { fileId: file.id, start: 0, end: 2.067, frames: [] } } },
+  ]);
+  const state = studio.snapshot(), shot = state.shots.find(item => item.id === 'formal-shot')!;
+  expect(shot.camera).toBe('');
+  const job = { id: 'formal-job', projectId: project.id, episodeId: 'formal-episode', sourceFileId: file.id, kind: 'plan-storyboard', status: 'completed', phase: '完成', projectVersion: state.projects[0]._version, versions: { 'episodes:formal-episode': state.episodes.find(item => item.id === 'formal-episode')!._version, 'shots:formal-shot': shot._version }, input: {}, fingerprint: '', segments: [], draft: { assets: [], shots: [] }, result: { readyToApply: true }, workflow: { outputs: [{ output_type: 'structured', content: JSON.stringify({ changes: [{ shotId: 'formal-shot', reason: '表演节奏', values: { camera: '缓慢推近', duration: 2.5 } }], notes: '' }) }] } };
+  studio.projects.db.prepare('INSERT INTO video_redraw_jobs(id,project_id,data) VALUES(?,?,?)').run(job.id, job.projectId, JSON.stringify(job));
+  await service.edit({ action: 'apply-revision', projectId: project.id, episodeId: 'formal-episode', jobId: job.id });
+  const saved = studio.snapshot().shots.find(item => item.id === 'formal-shot')!;
+  expect(saved).toMatchObject({ camera: '缓慢推近', duration: 2.5, source: { start: 0, end: 2.067 }, dialogue: [{ id: 'line', type: '旁白', text: '原台词' }] });
+});
+
+it('does not invent fixed camera movement when editing a legacy redraw shot', async () => {
+  const file = await files.put(Buffer.from('video reference'), 'video/mp4', 'source.mp4');
+  const project = studio.snapshot().projects[0];
+  studio.apply('legacy-camera-setup', [
+    { resource: 'projects', id: project.id, op: 'update', version: project._version, values: { creationMode: 'video-redraw', sourceVideo: { fileId: file.id, duration: 5 } } },
+    { resource: 'episodes', id: 'legacy-episode', op: 'create', values: { projectId: project.id, title: '第1集', scenes: [{ id: 'legacy-scene', location: '车内', setting: '内', time: '夜', content: '' }] } },
+    { resource: 'shots', id: 'legacy-shot', op: 'create', values: { episodeId: 'legacy-episode', sceneId: 'legacy-scene', source: { fileId: file.id, start: 0, end: 3, frames: [] } } },
+  ]);
+  studio.projects.db.prepare("UPDATE studio_records SET data=json_remove(data,'$.camera') WHERE resource='shots' AND id=?").run('legacy-shot');
+  const legacy = studio.snapshot().shots.find(item => item.id === 'legacy-shot')!;
+  studio.apply('legacy-camera-edit', [{ resource: 'shots', op: 'update', id: legacy.id, version: legacy._version, values: { duration: 2.5 } }]);
+  expect(studio.snapshot().shots.find(item => item.id === legacy.id)?.camera).toBe('');
+});

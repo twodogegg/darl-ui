@@ -30,12 +30,12 @@ export function videoDuration(seconds, model) {
   return supported
 }
 export { referenceKey, assetMentionCandidates }
-export function clipMediaReferences(clip, data, { includeFrames = true } = {}) {
+export function clipMediaReferences(clip, data, { includeFrames = true, selectedOnly = false } = {}) {
   const episode = data.episodes?.find(episode => episode.id === clip.episodeId)
   const projectAssets = episode ? data.assets.filter(asset => asset.projectId === episode.projectId) : data.assets
-  const mentions = mentionedAssets(clip.prompt, projectAssets)
+  const mentions = mentionedAssets(selectedOnly && clip.mode === '分镜图' && clip.storyboardPrompt ? clip.storyboardPrompt : clip.prompt, projectAssets).filter(mention => !selectedOnly || (clip.assetIds || []).includes(mention.assetId))
   const assets = projectAssets.filter(asset => (clip.assetIds || []).includes(asset.id) || mentions.some(mention => mention.assetId === asset.id))
-  const references = Array.isArray(clip.references) ? clip.references.filter(ref => !ref?.h3PromptReference || isH3FormattedPrompt(clip.prompt)) : []
+  const references = Array.isArray(clip.references) ? clip.references.filter(ref => !ref?.h3PromptReference || (!selectedOnly && isH3FormattedPrompt(clip.prompt))) : []
   const excludedFrames = new Set((clip.excludedFrameUrls || []).filter(Boolean))
   const frames = includeFrames ? CLIP_IMAGE_COLUMNS.filter(column => clip[column.key] && !excludedFrames.has(clip[column.key])).map(column => ({ id: `${clip.id}-${column.key}`, name: column.label, kind: 'image', url: clip[column.key] })) : []
   const imageRefs = [

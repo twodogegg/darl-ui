@@ -89,9 +89,9 @@
 .redraw-shot-table th, .redraw-shot-table td { border-bottom: 1px solid var(--br-border); padding: 8px 6px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .redraw-shot-table th { color: var(--br-muted); font-weight: 500; }
 .redraw-shot-table th:nth-child(1) { width: 12%; } .redraw-shot-table th:nth-child(2) { width: 12%; }
-.redraw-shot-table th:nth-child(3) { width: 7%; } .redraw-shot-table th:nth-child(4) { width: 27%; }
-.redraw-shot-table th:nth-child(5) { width: 18%; } .redraw-shot-table th:nth-child(6) { width: 11%; }
-.redraw-shot-table th:nth-child(7) { width: 13%; }
+.redraw-shot-table th:nth-child(3) { width: 7%; } .redraw-shot-table th:nth-child(4) { width: 8%; }
+.redraw-shot-table th:nth-child(5) { width: 23%; } .redraw-shot-table th:nth-child(6) { width: 17%; }
+.redraw-shot-table th:nth-child(7) { width: 9%; } .redraw-shot-table th:nth-child(8) { width: 12%; }
 .redraw-shot-table input, .redraw-shot-table textarea { width: 100%; min-width: 0; box-sizing: border-box; font-size: 13px; }
 .redraw-shot-table textarea { min-height: 56px; resize: vertical; }
 .redraw-shot-table .asset-mention-editor { min-height: 56px; font-size: 13px; }

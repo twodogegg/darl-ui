@@ -52,7 +52,6 @@ export class StudioStore {
     const data = emptyStudioData();
     for (const row of this.db.prepare('SELECT * FROM studio_records ORDER BY position,rowid').all() as Array<{ resource: StudioResource; id: string; data: string; version: number; position: number }>) {
       const values = JSON.parse(row.data);
-      if (row.resource === 'clips') delete values.storyboardPrompt;
       data[row.resource].push({ ...values, id: row.id, _version: row.version, _position: row.position });
     }
     const extras = new Map(data.projects.map(project => [project.id, project]));
@@ -133,8 +132,11 @@ export class StudioStore {
           if (resource === 'projects' && after.creationMode !== 'video-redraw' && redrawProjectFields.some(key => Object.hasOwn(values, key))) throw failure('tool-validation', 'STUDIO_FIELD_INVALID', 'targetRegion、targetLanguage、sourceVideo 仅适用于视频转绘项目，剧本项目不能设置这些字段。', false);
           if (resource === 'shots') {
             const episode = data.episodes.find(item => item.id === after.episodeId);
-            const owner = data.projects.find(item => item.id === episode?.projectId);
-            if (owner?.creationMode === 'video-redraw') { delete after.camera; delete after.transition; }
+            const owner = data.projects.find(item => item.id === (aliases.get(String(episode?.projectId)) || episode?.projectId));
+            if (owner?.creationMode === 'video-redraw') {
+              delete after.transition;
+              if (!Object.hasOwn(values, 'camera') && !Object.hasOwn(before || {}, 'camera')) after.camera = '';
+            }
           }
           const saved = resource === 'projects' ? projectForMode(after) : after;
           if (before) collection[collection.indexOf(before)] = saved; else collection.push(saved);
@@ -167,8 +169,9 @@ export class StudioStore {
       this.validate(data);
       // Validate only newly written text, so unrelated edits remain possible with legacy invalid tags.
       for (const change of changes) {
-        const field = change.resource === 'shots' ? 'description' : change.resource === 'clips' ? 'prompt' : null;
-        if (!field || change.op === 'delete' || !change.values || !Object.hasOwn(change.values, field)) continue;
+        const fields = change.resource === 'shots' ? ['description'] : change.resource === 'clips' ? ['prompt', 'storyboardPrompt'] : [];
+        if (change.op === 'delete' || !change.values) continue;
+        for (const field of fields.filter(field => Object.hasOwn(change.values!, field))) {
         const item = data[change.resource].find(record => record.id === change.id);
         if (!item || typeof item[field] !== 'string') continue;
         const episode = data.episodes.find(record => record.id === item.episodeId);
@@ -178,6 +181,7 @@ export class StudioStore {
         if (error) {
           const names = assets.map(asset => String(asset.name)).join('、');
           throw failure('tool-validation', 'STUDIO_ASSET_MENTION_INVALID', `${change.resource}[${change.id}].${field}：${error}。请读取当前项目 assets，使用完整 name（含英文和中文）或 <完整资产名称|完整形态名称>；当前资产：${names || '无'}。`, false);
+        }
         }
       }
       for (const resource of Object.keys(data) as StudioResource[]) {
@@ -251,15 +255,15 @@ export class StudioStore {
     const mapping = references.map((reference, index) => {
       const image = typeof reference === 'string' ? reference : reference && typeof reference === 'object' ? (reference as { url?: unknown }).url : undefined;
       const names = typeof image !== 'string' ? [] : assets.flatMap(asset => [
-        ...(asset.image === image || (Array.isArray(asset.history) && asset.history.includes(image)) ? [`<${asset.name}>`] : []),
-        ...((asset.variants as Array<{ name: string; image?: string; history?: string[] }> | undefined) || []).filter(variant => variant.image === image || variant.history?.includes(image)).map(variant => `<${asset.name}|${variant.name}>`),
+        ...(asset.image === image || (Array.isArray(asset.history) && asset.history.includes(image)) ? [`${asset.type || '资产'} <${asset.name}>`] : []),
+        ...((asset.variants as Array<{ name: string; image?: string; history?: string[] }> | undefined) || []).filter(variant => variant.image === image || variant.history?.includes(image)).map(variant => `${asset.type || '资产'} <${asset.name}|${variant.name}>`),
       ]);
       const extra = (Array.isArray(item?.references) ? item.references : []).filter((ref: unknown) => ref && typeof ref === 'object' && (ref as { url?: unknown }).url === image).map((ref: { name?: string }) => ref.name).filter(Boolean);
       const dependencyNames = dependencies.filter(dependency => dependency.image === image).map(dependency => dependency.name);
       const labels = [...new Set([...names, ...extra, ...dependencyNames])];
       return `图片${index + 1}：${labels.length ? labels.join('、') : '用户提供的参考图片'}`;
     }).join('\n');
-    const prompt = [input.prompt, dependencies.length && actionPrompts['asset-dependencies'].replace('{references}', notes), mapping && actionPrompts['image-reference-mapping'].replace('{references}', mapping)].filter(Boolean).join('\n\n');
+    const prompt = [mapping && actionPrompts['image-reference-mapping'].replace('{references}', mapping), dependencies.length && actionPrompts['asset-dependencies'].replace('{references}', notes), input.prompt].filter(Boolean).join('\n\n');
     return { prompt, options: { ...input.options, references, ...(resource === 'assets' ? { aspectRatio: input.options.aspectRatio || '16:9' } : {}) } };
   }
   attachMedia(job: import('./media-job-store').MediaJob) {
@@ -449,7 +453,7 @@ const agentResources = Object.keys(studioFields);
 const agentChangeSchema = { ...studioChangeSchema, properties: { ...studioChangeSchema.properties, resource: { type: 'string', enum: agentResources } } };
 export const STUDIO_TOOLS = [
   { name: 'builtin_read_studio', title: '查询短剧创作数据', description: '读取项目、剧集、场次、资产、镜头 shots 和视频片段。先用 describe 获取字段与规则；shots 保存原片分镜，clips.prompt 为视频描述。结果含版本与分页信息。', risk: 'read' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { resource: { type: 'string', enum: [...agentResources, 'styles'] }, describe: { type: 'boolean' }, projectId: { type: 'string' }, episodeId: { type: 'string' }, sceneId: { type: 'string' }, ids: { type: 'array', items: { type: 'string' }, maxItems: 500 }, fields: { type: 'array', items: { type: 'string' } }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500 } }, required: ['resource'], additionalProperties: false } },
-  { name: 'builtin_edit_studio', title: '批量修改短剧内容', description: '按查询结果与字段 schema 原子编辑短剧内容；更新和删除传最新版本，requestId 用于安全重试。原片分镜维护 shots 的来源区间、时长、资产关联、画面与对白；视频片段维护 clips.prompt 和 duration。', risk: 'write' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { requestId: { type: 'string' }, changes: { type: 'array', minItems: 1, maxItems: 500, items: agentChangeSchema } }, required: ['requestId', 'changes'], additionalProperties: false } },
+  { name: 'builtin_edit_studio', title: '批量修改短剧内容', description: '按查询结果与字段 schema 原子编辑短剧内容；更新和删除传最新版本，requestId 用于安全重试。正式分镜维护 shots 的原片来源区间、独立目标时长、景别、运镜、资产关联、画面与对白；视频片段维护 clips.prompt 和 duration。', risk: 'write' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { requestId: { type: 'string' }, changes: { type: 'array', minItems: 1, maxItems: 500, items: agentChangeSchema } }, required: ['requestId', 'changes'], additionalProperties: false } },
 ] as const;
 
 export async function handleStudioRequest(req: IncomingMessage, res: ServerResponse, store: StudioStore): Promise<boolean> {

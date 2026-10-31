@@ -21,7 +21,8 @@ function tool(name: string, title: string, description: string, risk: Risk, prop
 
 export const RUNTIME_TOOLS = [
   tool('list_skills', '查看技能目录', '返回当前可用 Skill 的名称、描述和 ID，不加载完整指令。', 'read', {}),
-  tool('create_skill', '创建 / 安装 Skill', '将生成或下载到工作区的单个 Skill 包安装到网站 Skills 库。path 可为包含 SKILL.md 的目录、单个 SKILL.md 或 ZIP。复用网站导入校验，不执行脚本；成功后所有 Agent 可发现。更新已有自定义技能时同时传 skillId 和 expectedVersion，禁止静默覆盖。', 'write', { path, skillId: string, expectedVersion: string }, ['path'], 'library'),
+  tool('create_skill', '创建 / 安装 Skill', '将生成或下载到工作区的单个 Skill 包安装到网站 Skills 库。path 可为包含 SKILL.md 的目录、单个 SKILL.md 或 ZIP。传 setup=true 时，在保存后展开运行包、检查并准备可识别的运行依赖、执行带 --selftest 的脚本，并返回真实准备结果；不传或为 false 时只导入包。更新已有自定义技能时同时传 skillId 和 expectedVersion，禁止静默覆盖。', 'write', { path, skillId: string, expectedVersion: string, setup: { type: 'boolean', description: '安装后准备运行环境并执行脚本自检' } }, ['path'], 'command'),
+  tool('prepare_skill', '准备 Skill 运行环境', '为已安装的 Skill 展开运行包，检查并准备可识别的 Python/Node 依赖和脚本引用的系统命令（例如 ffmpeg），执行带 --selftest 的脚本；返回真实输出、退出码和未满足的依赖。', 'write', { skillId: string }, ['skillId'], 'command'),
   tool('load_skill', '加载技能', '读取指定 Skill 的完整指令，并将整个技能包放入当前工作区。返回技能目录、文件清单和 SKILL.md；随后可读取资源或执行脚本。', 'read', { skillId: string }, ['skillId']),
   tool('list_files', '列出工作区文件', '列出指定工作区目录中的文件和文件夹，不递归。', 'read', { path }),
   tool('read_file', '读取工作区文件', '分页读取工作区文本文件；读取 PNG/JPEG/WebP/GIF 时直接返回可看见的图片，不当作 UTF-8 文本。二进制文件可显式用 base64 编码分页读取。', 'read', { path, offset: integer(0, 50_000_000), limit: integer(1, 32_000), encoding: { type: 'string', enum: ['utf8', 'base64'] } }, ['path']),
@@ -31,7 +32,7 @@ export const RUNTIME_TOOLS = [
   tool('process_status', '查看命令状态与输出', '查询当前工作区进程。传 processId 可等待并分页读取输出；省略则列出进程。', 'read', { processId: string, offset: integer(0, 100_000_000), waitMs: integer(0, 10_000) }),
   tool('stop_process', '停止命令', '停止当前工作区的指定进程及其进程组。', 'write', { processId: string }, ['processId']),
   tool('publish_file', '交付工作区文件', '将已生成的文件保存到宿主文件服务，返回真实下载链接。HTML 等主动内容以附件下载，不在网站同源执行。', 'write', { path }, ['path']),
-  tool('import_file', '读取聊天附件到工作区', '将宿主文件服务中已有的 fileId 复制到工作区，供脚本、CLI 使用。', 'write', { fileId: string, path }, ['fileId', 'path']),
+  tool('import_file', '读取聊天附件到工作区', '将宿主文件服务中已有的 fileId 复制到工作区，供脚本、CLI 使用。图片、文档等普通文件不超过 50 MiB；MP4 视频不超过 300 MiB，便于本地 ffmpeg/脚本处理。', 'write', { fileId: string, path }, ['fileId', 'path']),
 ] as const;
 
 type Job = {
@@ -42,8 +43,10 @@ type Job = {
   detach: () => void; done: Promise<void>;
 };
 const hash = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 24);
+const quoteShell = (value: string) => "'" + value.replace(/'/g, "'\"'\"'") + "'";
 const MAX_OUTPUT = 1_000_000;
 const MAX_FILE = 50 * 1024 * 1024;
+const MAX_VIDEO_FILE = 300 * 1024 * 1024;
 const PROMPT_FILE = fileURLToPath(new URL('../prompts/skill-runtime.md', import.meta.url));
 const mimeTypes: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf', '.zip': 'application/zip', '.mp4': 'video/mp4', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.txt': 'text/plain', '.md': 'text/plain', '.json': 'text/plain', '.csv': 'text/plain' };
 async function imageResult(bytes: Buffer, name: string) {
@@ -97,6 +100,99 @@ export class SkillRuntime {
     return target;
   }
 
+  private async materializeSkill(root: string, skill: AgentSkill) {
+    validateSkill({ ...skill, description: skill.description || skill.name });
+    const entries = [{ path: 'SKILL.md', content: skillMarkdown({ ...skill, description: skill.description || skill.name }) }, ...(skill.resources || [])];
+    const packagePath = 'skills/' + hash(skill.id) + '-' + hash(JSON.stringify(entries));
+    for (const entry of entries) {
+      if (!skillPathValid(entry.path)) throw new Error('Skill 包含不安全的资源路径');
+      const target = await this.safePath(root, packagePath + '/' + entry.path);
+      await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+      await writeFile(target, decode(entry.content, 'encoding' in entry ? entry.encoding : undefined), { mode: 0o600 });
+      if (!('encoding' in entry && entry.encoding) && (entry.content.startsWith('#!') || /\.(?:sh|bash)$/.test(entry.path))) await chmod(target, 0o700);
+    }
+    return { directory: join(root, packagePath), entries };
+  }
+
+  private async runSetupCommand(command: string, cwd: string, context: { sessionId: string; agentId?: string; runId: string; skills: AgentSkill[]; signal: AbortSignal }) {
+    let result = await this.execute('builtin_run_command', { command, cwd, timeoutMs: 600_000, waitMs: 10_000 }, context) as Record<string, any>;
+    const started = Date.now();
+    while (result.status === 'running' && Date.now() - started < 600_000) {
+      result = await this.execute('builtin_process_status', { processId: result.processId, waitMs: 10_000 }, context) as Record<string, any>;
+    }
+    if (result.status === 'running') {
+      await this.execute('builtin_stop_process', { processId: result.processId }, context);
+      return { ...result, status: 'timed_out', isError: true, output: (result.output || '') + '\n准备命令超过 10 分钟，已停止。' };
+    }
+    return result;
+  }
+
+  private async prepareSkill(skill: AgentSkill, root: string, context: { sessionId: string; agentId?: string; runId: string; skills: AgentSkill[]; signal: AbortSignal }) {
+    const materialized = await this.materializeSkill(root, skill);
+    const resources = materialized.entries.filter((entry) => entry.path !== 'SKILL.md' && !('encoding' in entry && entry.encoding));
+    const packageText = resources.map((entry) => entry.content).join('\n');
+    const checks: Array<Record<string, unknown>> = [];
+    const dependencies: Array<Record<string, unknown>> = [];
+    const lookup = (binary: string) => process.platform === 'win32' ? 'where ' + binary : 'command -v ' + binary;
+
+    const requiredCommands = ['ffmpeg', 'ffprobe'].filter((binary) => new RegExp('(^|[^A-Za-z0-9_])' + binary + '($|[^A-Za-z0-9_])', 'i').test(packageText));
+    for (const binary of requiredCommands) {
+      const check = await this.runSetupCommand(lookup(binary), materialized.directory, context);
+      if (check.status === 'exited' && check.exitCode === 0) {
+        dependencies.push({ type: 'system', name: binary, status: 'available', output: String(check.output || '').trim() });
+        continue;
+      }
+      const install = process.platform === 'darwin'
+        ? 'brew install ffmpeg'
+        : process.platform === 'win32'
+          ? 'winget install --id Gyan.FFmpeg.Shared --silent --accept-source-agreements --accept-package-agreements'
+          : "if [ -f /etc/alpine-release ]; then apk add --no-cache ffmpeg; elif command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y ffmpeg; elif command -v dnf >/dev/null 2>&1; then dnf install -y ffmpeg; else echo '没有可用的系统包管理器来安装 ffmpeg' >&2; exit 127; fi";
+      const installed = await this.runSetupCommand(install, materialized.directory, context);
+      const verified = installed.status === 'exited' && installed.exitCode === 0
+        ? await this.runSetupCommand(lookup(binary), materialized.directory, context)
+        : installed;
+      dependencies.push({ type: 'system', name: binary, status: verified.status === 'exited' && verified.exitCode === 0 ? 'installed' : 'missing', command: install, output: (String(installed.output || '') + (verified === installed ? '' : '\n' + String(verified.output || ''))).trim(), exitCode: verified.exitCode });
+    }
+
+    const rootManifests = new Set(resources.map((entry) => entry.path));
+    if (rootManifests.has('requirements.txt')) {
+      const command = 'python3 -m venv .runtime/venv && .runtime/venv/bin/python -m pip install -r requirements.txt';
+      const result = await this.runSetupCommand(command, materialized.directory, context);
+      dependencies.push({ type: 'python', name: 'requirements.txt', status: result.status === 'exited' && result.exitCode === 0 ? 'installed' : 'failed', command, output: result.output, exitCode: result.exitCode });
+    }
+    if (rootManifests.has('pyproject.toml')) {
+      const command = 'python3 -m venv .runtime/venv && .runtime/venv/bin/python -m pip install .';
+      const result = await this.runSetupCommand(command, materialized.directory, context);
+      dependencies.push({ type: 'python', name: 'pyproject.toml', status: result.status === 'exited' && result.exitCode === 0 ? 'installed' : 'failed', command, output: result.output, exitCode: result.exitCode });
+    }
+    if (rootManifests.has('package.json')) {
+      const command = 'npm install --ignore-scripts --no-audit --no-fund';
+      const result = await this.runSetupCommand(command, materialized.directory, context);
+      dependencies.push({ type: 'node', name: 'package.json', status: result.status === 'exited' && result.exitCode === 0 ? 'installed' : 'failed', command, output: result.output, exitCode: result.exitCode });
+    }
+
+    const python = rootManifests.has('requirements.txt') || rootManifests.has('pyproject.toml') ? '.runtime/venv/bin/python' : 'python3';
+    for (const entry of resources) {
+      const lower = entry.path.toLowerCase();
+      const supportsSelftest = /(?:--selftest|selftest)/i.test(entry.content);
+      if (!supportsSelftest || !/^scripts\//i.test(entry.path)) continue;
+      const command = lower.endsWith('.py') ? python + ' ' + quoteShell(entry.path) + ' --selftest' : lower.endsWith('.mjs') || lower.endsWith('.js') ? 'node ' + quoteShell(entry.path) + ' --selftest' : lower.endsWith('.sh') || lower.endsWith('.bash') ? 'sh ' + quoteShell(entry.path) + ' --selftest' : '';
+      if (!command) continue;
+      const result = await this.runSetupCommand(command, materialized.directory, context);
+      checks.push({ path: entry.path, command, status: result.status === 'exited' && result.exitCode === 0 ? 'passed' : 'failed', output: result.output, exitCode: result.exitCode });
+    }
+
+    const failed = [...dependencies, ...checks].some((item) => ['missing', 'failed'].includes(String(item.status)));
+    const message = failed
+      ? 'Skill 已保存，但仍有依赖或自检未完成。请根据返回的 command/output 修复后重试。'
+      : checks.length
+        ? 'Skill 运行环境已准备，自检通过。'
+        : dependencies.length
+          ? 'Skill 依赖已准备，包内未发现可自动运行的 --selftest 脚本。'
+        : '未发现可自动准备的依赖或 --selftest 脚本；Skill 已展开，可按指令继续执行。';
+    return { status: failed ? 'partial' : 'ready', directory: materialized.directory, dependencies, checks, message };
+  }
+
   private append(job: Job, text: string) {
     job.output += text;
     if (job.output.length > MAX_OUTPUT) {
@@ -138,18 +234,8 @@ export class SkillRuntime {
     if (name === 'builtin_load_skill') {
       const skill = skills.find((item) => item.id === textArg(args, 'skillId'));
       if (!skill) throw new Error('Skill 不存在或未授权');
-      validateSkill({ ...skill, description: skill.description || skill.name });
-      const entries = [{ path: 'SKILL.md', content: skillMarkdown({ ...skill, description: skill.description || skill.name }) }, ...(skill.resources || [])];
-      // Content-addressed packages avoid overwriting files underneath an active process after edits.
-      const packagePath = `skills/${hash(skill.id)}-${hash(JSON.stringify(entries))}`;
-      for (const entry of entries) {
-        if (!skillPathValid(entry.path)) throw new Error('Skill 包含不安全的资源路径');
-        const target = await this.safePath(root, `${packagePath}/${entry.path}`);
-        await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-        await writeFile(target, decode(entry.content, 'encoding' in entry ? entry.encoding : undefined), { mode: 0o600 });
-        if (!('encoding' in entry && entry.encoding) && (entry.content.startsWith('#!') || /\.(?:sh|bash)$/.test(entry.path))) await chmod(target, 0o700);
-      }
-      return { skillId: skill.id, directory: join(root, packagePath), manifest: entries[0].content, files: entries.map(({ path }) => path) };
+      const materialized = await this.materializeSkill(root, skill);
+      return { skillId: skill.id, directory: materialized.directory, manifest: materialized.entries[0].content, files: materialized.entries.map(({ path }) => path) };
     }
     if (name === 'builtin_process_status' || name === 'builtin_stop_process') {
       if (name === 'builtin_process_status' && args.processId === undefined) return { processes: [...this.jobs.values()].filter((job) => job.scope === scope).map(({ id, command, status, exitCode }) => ({ processId: id, command, status, exitCode })) };
@@ -203,13 +289,21 @@ export class SkillRuntime {
         return { fileId: id, ...await imageResult(file.bytes, stored.name) };
       }
     }
-    const target = await this.safePath(root, args.path === undefined && name === 'builtin_list_files' ? '.' : textArg(args, 'path'));
+    const target = await this.safePath(root, args.path === undefined && (name === 'builtin_list_files' || name === 'builtin_prepare_skill') ? '.' : textArg(args, 'path'));
     if (name === 'builtin_create_skill') {
       if (!this.library) throw new Error('宿主未配置 Skills 库');
       const skill = await readSkillPackage(target, signal);
       signal.throwIfAborted();
       const saved = this.library.create(skill, args.skillId === undefined ? undefined : textArg(args, 'skillId'), args.expectedVersion === undefined ? undefined : textArg(args, 'expectedVersion'));
+      if (args.setup === true) return { skillId: saved.id, name: saved.name, version: saved.version, resourceCount: saved.resources?.length || 0, setup: await this.prepareSkill(saved, root, context) };
       return { skillId: saved.id, name: saved.name, version: saved.version, resourceCount: saved.resources?.length || 0 };
+    }
+    if (name === 'builtin_prepare_skill') {
+      if (!this.library) throw new Error('宿主未配置 Skills 库');
+      const skillId = textArg(args, 'skillId');
+      const skill = this.library.list().find((item) => item.id === skillId);
+      if (!skill) throw new Error('Skill 不存在或未授权');
+      return { skillId: skill.id, name: skill.name, version: skill.version, setup: await this.prepareSkill(skill, root, context) };
     }
     if (name === 'builtin_list_files') {
       const entries = await readdir(target, { withFileTypes: true });
@@ -219,7 +313,9 @@ export class SkillRuntime {
       let bytes: Buffer;
       if (name === 'builtin_import_file') {
         const fileId = textArg(args, 'fileId');
-        if (!this.files.get(fileId) || this.files.get(fileId)!.size > MAX_FILE) throw new Error('附件不存在或超过 50 MiB');
+        const stored = this.files.get(fileId);
+        const limit = stored?.mimeType === 'video/mp4' ? MAX_VIDEO_FILE : MAX_FILE;
+        if (!stored || stored.size > limit) throw new Error(stored?.mimeType === 'video/mp4' ? '视频附件不存在或超过 300 MiB' : '附件不存在或超过 50 MiB');
         const file = await this.files.getBytes(fileId);
         if (!file) throw new Error('附件不存在');
         bytes = file.bytes;

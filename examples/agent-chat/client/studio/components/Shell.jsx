@@ -21,7 +21,7 @@ import { useStore } from '../store'
 import { projectSteps } from '../data'
 
 const stepIcons = [IconNotebook, IconScript, IconPhoto, IconVideo, IconMovie]
-const redrawStepIcons = [IconFileText, IconScript, IconPhoto, IconVideo, IconMovie]
+const redrawStepIcons = [IconFileText, IconScript, IconPhoto, IconLayoutList, IconVideo, IconMovie]
 // 项目级步骤：整个项目共用同一份内容，不按集拆分
 const projectLevelPaths = ['/source', '/outline', '/script', '/art']
 const isProjectPath = (path, project) => projectLevelPaths.includes(path) && !(project?.creationMode === 'video-redraw' && ['/source', '/film'].includes(path))

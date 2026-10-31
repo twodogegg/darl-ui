@@ -62,7 +62,7 @@ function Pages({ onContextChange }) {
     <Route path="/dialogue" element={<Navigate to={`/script${location.search}`} replace />} />
     <Route path="/script" element={<Script />} />
     <Route path="/art" element={<Art />} />
-    <Route path="/storyboard" element={data.projects.find(item => item.id === new URLSearchParams(location.search).get('projectId'))?.creationMode === 'video-redraw' ? <RedrawStoryboard /> : <Navigate to={`/video${location.search}`} replace />} />
+    <Route path="/storyboard" element={data.projects.find(item => item.id === new URLSearchParams(location.search).get('projectId'))?.creationMode === 'script' ? <Navigate to={`/video${location.search}`} replace /> : <RedrawStoryboard />} />
     <Route path="/video" element={<VideoProduction />} />
     <Route path="/film" element={<Film />} />
     <Route path="/assets" element={<Assets />} />

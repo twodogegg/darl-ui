@@ -48,13 +48,13 @@ export default function Prompts() {
               >
                 <span>
                   <strong>{p.name}</strong>
-                  <small>{buttonPromptIds.has(p.id) ? 'Agent 按钮使用本地配置' : '查看默认内容或自定义替换'}</small>
+                  <small>{buttonPromptIds.has(p.id) ? '在工作流 Agents 中配置按钮指令' : '查看默认内容或自定义替换'}</small>
                 </span>
-                <em>{buttonPromptIds.has(p.id) ? '本地配置' : p.mode === 'default' ? '默认' : '替换'}</em>
+                <em>{buttonPromptIds.has(p.id) ? '按钮配置' : p.mode === 'default' ? '默认' : '替换'}</em>
               </button>
             ))}
         </aside>
-        {item && buttonPromptIds.has(item.id) ? <section className="prompt-editor"><h3>{item.name}</h3><p>此 Agent 按钮的可见消息、隐藏指令、参数和 Skills 在本地 JSON 文件中配置；此处保存的旧设置不再影响该按钮。</p><code>examples/agent-chat/prompts/studio-agent-buttons.json</code></section> : item && <PromptEditor
+        {item && buttonPromptIds.has(item.id) ? <section className="prompt-editor"><h3>{item.name}</h3><p>此 Agent 按钮的任务指令可在「设置 → 工作流 Agents → 工作台 Agent 按钮」中配置；此处保存的旧设置不影响该按钮。</p></section> : item && <PromptEditor
           key={item?.id || selected}
           item={item}
           onReset={() => setReset(true)}

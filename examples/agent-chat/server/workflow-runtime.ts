@@ -1,5 +1,7 @@
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import { Agent, fetch as undiciFetch } from 'undici';
+import { randomUUID } from 'node:crypto';
+import { logWorkflowDebug } from './workflow-debug';
 import { generate, safeError, toolResultForModel, type FunctionTool, type StoredProvider, type ToolExecution } from './models';
 import type { AgentModelConfig } from '../../../src/index';
 import type { AgentSkill } from '../../../src/components/agent-sidebar/types';
@@ -25,6 +27,7 @@ export function workflowExecution(config: WorkflowAgent, skills: AgentSkill[], j
   return { tools, maxSteps: 8, execute: async (call, signal) => {
     const tool = tools.find(item => item.name === call.name);
     if (!tool || !deps.executeWorkflowTool || !signal) throw new Error('工作流工具不可用');
+    logWorkflowDebug('tool.request', { toolCallId: call.id, tool: call.name, arguments: call.arguments });
     let args: Record<string, unknown>;
     try { args = JSON.parse(call.arguments); } catch { throw new Error(`工具 ${call.name} 参数不是有效 JSON`); }
     const valid = validator.getValidator(tool.parameters as Parameters<AjvJsonSchemaValidator['getValidator']>[0])(args);
@@ -34,8 +37,10 @@ export function workflowExecution(config: WorkflowAgent, skills: AgentSkill[], j
       const value = await deps.executeWorkflowTool(call.name, args, { sessionId: `workflow-${jobId}`, agentId: config.kind, runId: jobId, skills, signal });
       if (value && typeof value === 'object' && (value as { isError?: unknown }).isError === true) throw new Error(`工具 ${call.name} 执行失败`);
       step.status = 'completed'; save();
-      return toolResultForModel(value as Record<string, unknown>);
-    } catch (error) { step.status = 'failed'; step.error = safeError(error); save(); throw error; }
+      const output = toolResultForModel(value as Record<string, unknown>);
+      logWorkflowDebug('tool.response', { toolCallId: call.id, tool: call.name, output });
+      return output;
+    } catch (error) { step.status = 'failed'; step.error = safeError(error); save(); logWorkflowDebug('tool.error', { toolCallId: call.id, tool: call.name, error }); throw error; }
   } };
 }
 export function workflowInstructions(config: WorkflowAgent, skills: AgentSkill[]) {
@@ -54,11 +59,15 @@ export async function runVideoWorkflow(baseUrl: string, apiKey: string, model: s
   const messages: Array<Record<string, unknown>> = [{ role: 'system', content: instructions }, { role: 'user', content }];
   for (let step = 0; step < 8; step++) {
     const body = { model, messages, ...(execution ? { tools: execution.tools.map(tool => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } })) } : {}) };
+    const callId = randomUUID();
+    logWorkflowDebug('model.request', { callId, modelId: model, protocol: 'video-chat-completions', url: `${url.toString().replace(/\/$/, '')}/chat/completions`, input: body });
     let response: Awaited<ReturnType<typeof undiciFetch>>, data: any;
     try {
       response = await undiciFetch(`${url.toString().replace(/\/$/, '')}/chat/completions`, { method: 'POST', signal, dispatcher: videoAnalysisDispatcher, headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       data = await response.json().catch(error => { if (signal.aborted || response.ok) throw error; return null; });
+      logWorkflowDebug('model.response', { callId, status: response.status, output: data });
     } catch (error) {
+      logWorkflowDebug('model.error', { callId, error });
       if (signal.aborted) {
         if (signal.reason?.name === 'TimeoutError') throw new Error('视频分析等待超时，任务已停止；上游可能仍在处理');
         throw signal.reason || error;

@@ -24,7 +24,7 @@ export default function Art() {
 }
 function ArtWorkspace({ context }) {
   const { projectId } = context
-  const { data, update, patch, notify, generateMedia, mediaJobs, models, getModel, setModelSelections, reload } = useStore()
+  const { data, update, patch, notify, generateMedia, mediaJobs, models, getModel, mediaDefaults, setModelSelections, reload } = useStore()
   const navigate = useNavigate()
   const [tab, setTab] = useState('全部')
   const [episodeId, setEpisodeId] = useState('')
@@ -53,6 +53,9 @@ function ArtWorkspace({ context }) {
   const assets = data.assets.filter((a) => a.projectId === projectId && (!episodeId || a.episodeIds?.includes(episodeId) || data.clips.some((clip) => clip.episodeId === episodeId && clip.assetIds.includes(a.id)) || data.shots.some((shot) => shot.episodeId === episodeId && shot.dialogue.some((line) => line.assetId === a.id))))
   const [batchBusy, setBatchBusy] = useState(false)
   const [transitioning, setTransitioning] = useState(false)
+  const [nextOpen, setNextOpen] = useState(false)
+  const [nextModel, setNextModel] = useState('minimax-h3')
+  const [nextMode, setNextMode] = useState('参考生成')
   const [extraction, setExtraction] = useState(null)
   const [extractionOpen, setExtractionOpen] = useState(false), [extractionRequirements, setExtractionRequirements] = useState('')
   const extractionEpisode = episodeId || new URLSearchParams(window.location.search).get('episodeId') || context.episodes[0]?.id
@@ -82,29 +85,20 @@ function ArtWorkspace({ context }) {
     } catch (error) { setExtraction({ status: 'failed', error: error.message }) }
   }
   const isRedraw = context.project.creationMode === 'video-redraw'
-  const imageReadiness = (allAssets, jobs) => {
-    const projectAssets = allAssets.filter(asset => asset.projectId === projectId)
-    const ids = new Set(projectAssets.map(asset => asset.id))
-    const missing = projectAssets.reduce((count, asset) => count + (asset.image ? 0 : 1) + (asset.variants || []).filter(variant => !variant.image).length, 0)
-    const running = jobs.some(job => job.type === 'image' && pendingJob(job) && job.options?.studioTarget?.resource === 'assets' && ids.has(job.options.studioTarget.id))
-    return { ready: projectAssets.length > 0 && missing === 0 && !running, missing, running }
-  }
-  const readiness = imageReadiness(data.assets, mediaJobs)
   async function nextStep() {
     if (transitioning) return
     setTransitioning(true)
     try {
-      if (isRedraw) {
-        const [latest, jobs] = await Promise.all([reload(), studioApi('media-generation/jobs')])
-        if (!imageReadiness(latest.assets, jobs).ready) { notify('请先完成所有资产主图和衍生形态图片'); return }
-      }
       const episode = context.episodes.find(item => item.id === extractionEpisode) || context.episodes[0]
       if (!episode) { notify('请先创建剧集'); return }
+      const modelId = mediaDefaults.video?.modelId
+      if (!models.some(model => model.id === modelId && model.type === 'video' && model.enabled !== false && ['minimax-h3-flash', 'minimax-h3-standard'].includes(model.id))) { notify('请先在设置中配置并启用 MiniMax H3 视频模型'); return }
       const saved = await update(draft => {
         draft.episodes.filter(item => item.projectId === projectId && (!isRedraw || item.id === episode.id)).forEach(item => { item.stage = Math.max(item.stage, 4) })
       })
       if (!saved) return
-      navigate(`/video?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(episode.id)}${isRedraw ? '&promptSetup=1' : ''}`)
+      setModelSelections(current => ({ ...current, video: modelId }))
+      navigate(`/video?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(episode.id)}`, { state: { promptMode: nextMode } })
     } catch (reason) { notify(`进入下一步失败：${reason.message}`) }
     finally { setTransitioning(false) }
   }
@@ -290,17 +284,21 @@ function ArtWorkspace({ context }) {
               </div>
             </section>
             <div className="next-actions">
-              {isRedraw && !readiness.ready && <span className="next-hint" role="status">{readiness.running || batchBusy ? '图片生成中，请等待完成' : readiness.missing ? `还有 ${readiness.missing} 张资产图片未生成` : '请先添加资产并生成图片'}</span>}
               <button
                 className="next-btn"
-                disabled={transitioning || (isRedraw && (!readiness.ready || batchBusy || ['queued', 'running'].includes(extraction?.status)))}
-                onClick={nextStep}
+                disabled={transitioning}
+                onClick={() => isRedraw ? navigate(`/storyboard?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(extractionEpisode || '')}`) : setNextOpen(true)}
               >
                 {transitioning ? '正在进入…' : '▦　进入下一步'}
               </button>
             </div>
           </main>
         </div>
+        {nextOpen && <Modal title="选择视频制作方式" onClose={() => setNextOpen(false)} footer={<><Button onClick={() => setNextOpen(false)}>取消</Button><Button primary disabled={transitioning || nextModel !== 'minimax-h3'} onClick={nextStep}>{transitioning ? '正在进入…' : '进入下一步'}</Button></>}>
+          <Field label="视频模型"><select aria-label="视频模型" value={nextModel} onChange={event => setNextModel(event.target.value)}><option value="seedance-2.5">Seedance 2.5</option><option value="seedance-2.0">Seedance 2.0</option><option value="minimax-h3">MiniMax H3</option></select></Field>
+          {nextModel !== 'minimax-h3' && <p className="muted" role="status">当前工作台尚未接入 {nextModel === 'seedance-2.5' ? 'Seedance 2.5' : 'Seedance 2.0'}，请选择 MiniMax H3。</p>}
+          <Field label="生成模式"><select aria-label="生成模式" value={nextMode} onChange={event => setNextMode(event.target.value)}><option value="分镜图">四宫格分镜</option><option value="参考生成">参考生成</option></select></Field>
+        </Modal>}
         {editor === 'new' && context.project.creationMode === 'video-redraw' ? <SupplementAsset context={context} onClose={() => setEditor(null)} /> : editor && (
           <ArtAssetDrawer
             asset={

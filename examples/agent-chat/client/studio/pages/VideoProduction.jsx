@@ -1,10 +1,10 @@
 import { imageUrl } from '../../image-url'
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { IconMovie, IconPlus, IconPhotoSpark, IconUpload, IconChevronDown, IconSettings, IconArrowUp, IconDots, IconTrash } from '@tabler/icons-react'
 import * as Popover from '@radix-ui/react-popover'
-import { WorkflowRunDetails } from '../components/WorkflowRunDetails'
 import { useProject, Workflow } from '../components/Shell'
+import { WorkflowRunDetails } from '../components/WorkflowRunDetails'
 import { Button, Field, Modal, Confirm, FileButton, MediaPreview, Processing } from '../components/ui'
 import ClipReferences from '../components/ClipReferences'
 import { studioApi, useStore } from '../store'
@@ -221,7 +221,7 @@ function InlineVideoPrompt({ clip, candidates, update, notify, onDirtyChange }) 
     try {
       const saved = await update(draft => {
         const item = draft.clips.find(item => item.id === clip.id)
-        if (!item || item.prompt !== base.current) throw new Error('视频描述已在其他位置修改，请复制草稿并重新加载核对。')
+        if (!item || item.prompt !== base.current) throw new Error('视频提示词已在其他位置修改，请复制草稿并重新加载核对。')
         item.prompt = value; item.description = value
         if (!isH3FormattedPrompt(value)) item.references = (item.references || []).filter(ref => !ref?.h3PromptReference)
       })
@@ -230,7 +230,39 @@ function InlineVideoPrompt({ clip, candidates, update, notify, onDirtyChange }) 
     } catch (reason) { setError(reason.message); notify(reason.message) }
     finally { setSaving(false) }
   }
-  return <><div inert={saving ? true : undefined}><AssetMentionInput label="视频描述" value={text} candidates={candidates} onChange={value => { setText(value); dirty.current = value !== base.current; onDirtyChange(dirty.current); setError('') }} onBlur={save} placeholder="输入画面、动作、运镜和对白，键入 @ 关联资产…" /></div>{saving && <small role="status">正在保存…</small>}{error && <p role="alert">{error}</p>}</>
+  return <><div inert={saving ? true : undefined}><AssetMentionInput label="视频提示词" value={text} candidates={candidates} onChange={value => { setText(value); dirty.current = value !== base.current; onDirtyChange(dirty.current); setError('') }} onBlur={save} placeholder="输入画面、动作、运镜和对白，键入 @ 关联资产…" /></div>{saving && <small role="status">正在保存…</small>}{error && <p role="alert">{error}</p>}</>
+}
+
+function StoryboardPromptField({ clip, candidates, update, notify, onDirtyChange }) {
+  const [text, setText] = useState(clip.storyboardPrompt || '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const base = useRef(clip.storyboardPrompt || '')
+  const dirty = useRef(false)
+  useEffect(() => {
+    if (!dirty.current && !saving) { base.current = clip.storyboardPrompt || ''; setText(clip.storyboardPrompt || '') }
+  }, [clip.storyboardPrompt, saving])
+  async function save(value) {
+    if (!dirty.current || saving) return
+    const problem = validateAssetMentions(value, candidates)
+    if (problem) { setError(problem); return }
+    setSaving(true); setError('')
+    try {
+      const saved = await update(draft => {
+        const item = draft.clips.find(item => item.id === clip.id)
+        if (!item || (item.storyboardPrompt || '') !== base.current) throw new Error('分镜提示词已在其他位置修改，请复制草稿并重新加载核对。')
+        item.storyboardPrompt = value
+      })
+      if (saved) { base.current = value; dirty.current = false; onDirtyChange(false) }
+      else setError('保存失败，请保留草稿并检查连接。')
+    } catch (reason) { setError(reason.message); notify(reason.message) }
+    finally { setSaving(false) }
+  }
+  return <section className="production-storyboard-prompts" aria-label="分镜提示词">
+    <div className="row"><h3>分镜提示词</h3><span className="muted">每个视频片段一条，默认 2×2 四宫格；先生成分镜图并确认风格</span></div>
+    <div inert={saving ? true : undefined}><AssetMentionInput label="分镜提示词" value={text} candidates={candidates} onChange={value => { setText(value); dirty.current = value !== base.current; onDirtyChange(dirty.current); setError('') }} onBlur={save} placeholder="输入当前片段的四宫格分镜提示词，键入 @ 关联资产…" /></div>
+    {saving && <small role="status">正在保存…</small>}{error && <p role="alert">{error}</p>}
+  </section>
 }
 
 export default function VideoProduction() {
@@ -239,11 +271,12 @@ export default function VideoProduction() {
 }
 function Production({ context }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const { data, patch, update, reload, notify, requestAgent, generateMedia, models, getModel, mediaDefaults, mediaJobs } = useStore()
   const { episode, projectId, link } = context
   const [busy, setBusy] = useState(false)
   const [promptSetupOpen, setPromptSetupOpen] = useState(() => new URLSearchParams(window.location.search).get('promptSetup') === '1')
-  const [promptMode, setPromptMode] = useState('参考生成')
+  const [promptMode, setPromptMode] = useState(() => location.state?.promptMode === '分镜图' ? '分镜图' : '参考生成')
   const [promptRequirements, setPromptRequirements] = useState('')
   const [promptTask, setPromptTask] = useState(null)
   const [promptRefresh, setPromptRefresh] = useState(0)
@@ -267,6 +300,14 @@ function Production({ context }) {
     return () => controller.abort()
   }, [projectId, episode.id, promptRefresh])
   async function submitPromptTask() {
+    if (promptMode === '分镜图') {
+      try { await requestAgent({ action: 'storyboard-prompts', projectId, episodeId: episode.id, mode: promptMode, requirements: promptRequirements.trim(), continueCurrentSession: true }); setPromptSetupOpen(false) } catch (error) { notify(error.message) }
+      return
+    }
+    if (context.project.creationMode !== 'video-redraw') {
+      try { await requestAgent({ action: 'video-description', projectId, episodeId: episode.id, mode: promptMode }); setPromptSetupOpen(false) } catch (error) { notify(error.message) }
+      return
+    }
     try {
       const latest = await reload(), project = latest.projects.find(item => item.id === projectId)
       const job = await studioApi('video-redraw/action', { action: 'video-prompts', projectId, episodeId: episode.id, requestId: crypto.randomUUID(), version: project._version, mode: promptMode, requirements: promptRequirements.trim() })
@@ -297,11 +338,15 @@ function Production({ context }) {
   const [compareOpen, setCompareOpen] = useState(false)
   const [historyKind, setHistoryKind] = useState('video')
   const [historyOpen, setHistoryOpen] = useState(false)
-  const [promptDirty, setPromptDirty] = useState(false)
+  const [videoPromptDirty, setVideoPromptDirty] = useState(false)
+  const [storyboardPromptDirty, setStoryboardPromptDirty] = useState(false)
+  const promptDirty = videoPromptDirty || storyboardPromptDirty
   const [imageEdit, setImageEdit] = useState(null)
   const [removingImage, setRemovingImage] = useState(null)
   const [imageNotes, setImageNotes] = useState('')
   const [promptEdit, setPromptEdit] = useState(null)
+  const promptEditRef = useRef(promptEdit)
+  promptEditRef.current = promptEdit
   const [promptPreview, setPromptPreview] = useState(null)
   const [optimizing, setOptimizing] = useState(false)
   const [savingPrompt, setSavingPrompt] = useState(false)
@@ -324,9 +369,10 @@ function Production({ context }) {
   // 视频制作只区分“分镜图”和“参考生成”。旧数据中的文本生成/全能参考均按
   // 参考生成处理，避免历史片段继续绕过参考素材。
   const mode = active?.mode === '分镜图' ? '分镜图' : '参考生成'
+  const storyboardPromptsReady = clips.length > 0 && clips.filter(clip => clip.mode === '分镜图').every(clip => String(clip.storyboardPrompt || '').trim() && clip.image) && Boolean(active?.storyboardPrompt?.trim() && active?.image)
   const storyboardReference = active ? videoImageReferences(active, references, '分镜图') : []
   const selectedImageReferences = active ? videoImageReferences(active, references, mode) : []
-  // 视频描述按引用编辑时的候选：片段分镜图只引用片段图与片段资产。
+  // 视频提示词按引用编辑时的候选：片段分镜图只引用片段图与片段资产。
   const target = promptEdit?.kind === 'clipImage' ? 'clipImage' : 'video'
   const candidateImages = target === 'clipImage' ? (active?.image ? [{ id: `${active.id}:storyboard`, name: '片段分镜图', kind: 'image', url: active.image }] : []) : (mode === '分镜图' ? storyboardReference : references.images)
   const mentionCandidates = assetMentionCandidates(data.assets.filter(asset => asset.projectId === projectId), {
@@ -470,9 +516,10 @@ function Production({ context }) {
       const custom = context.project.creationMode !== 'video-redraw' && column.key === 'blockingImage' ? active.blockingPrompt?.trim() : ''
       const base = clipImagePrompt(active, [], scenes, column.label)
       const content = [custom || base, imageEdit?.source ? imageNotes : ''].filter(Boolean).join('\n')
-      const prompt = column.key === 'image' && !imageEdit?.source ? storyboardImagePrompt(active, content) : content
-      if (!custom && !active.prompt?.trim()) throw new Error('请先填写视频描述')
-      await generateMedia({ prompt, target: { resource: 'clips', id: active.id, field: column.key }, references: imageEdit?.source ? [imageEdit.source] : clipMediaReferences(active, data, { includeFrames: false }).images.map(ref => ref.url), ...(['image', 'storyboardImage'].includes(column.key) ? { options: { aspectRatio: '16:9', ...(column.key === 'image' && active.mode === '分镜图' && !imageEdit?.source ? { resolution: '4K' } : {}) } } : {}) })
+      const useStoryboard = column.key === 'image' && !imageEdit?.source && active.mode === '分镜图'
+      const prompt = useStoryboard ? active.storyboardPrompt?.trim() : column.key === 'image' && !imageEdit?.source ? storyboardImagePrompt(active, content) : content
+      if (!prompt) throw new Error(useStoryboard ? '请先填写分镜提示词' : '请先填写视频提示词')
+      await generateMedia({ prompt, target: { resource: 'clips', id: active.id, field: column.key }, references: imageEdit?.source ? [imageEdit.source] : clipMediaReferences(active, data, { includeFrames: false, selectedOnly: true }).images.map(ref => ref.url), ...(['image', 'storyboardImage'].includes(column.key) ? { options: { aspectRatio: '16:9', ...(column.key === 'image' && active.mode === '分镜图' && !imageEdit?.source ? { resolution: '4K' } : {}) } } : {}) })
     } catch (reason) { notify(reason.message) }
     finally { setBusy(false); setSubmission(null) }
   }
@@ -483,7 +530,7 @@ function Production({ context }) {
     if (plannedDuration > CLIP_DURATION_LIMIT) throw new Error(`片段时长超过 ${CLIP_DURATION_LIMIT} 秒上限`)
     const seconds = videoDuration(plannedDuration, selectedModel)
     if (context.project.creationMode === 'video-redraw' && seconds !== plannedDuration) throw new Error(`当前模型不支持 ${plannedDuration} 秒，请调整片段时长，使内容时长与生成时长一致`)
-    if (!clip.prompt?.trim()) throw new Error('请先填写视频描述')
+    if (!clip.prompt?.trim()) throw new Error('请先填写视频提示词')
     const clipMode = clip.mode === '分镜图' ? '分镜图' : '参考生成'
     const refs = clipMediaReferences(clip, data)
     const images = videoImageReferences(clip, refs, clipMode)
@@ -526,13 +573,14 @@ function Production({ context }) {
         try {
           if (batch.kind === 'image') {
             const column = CLIP_IMAGE_COLUMNS[0]
-            if (!clip.prompt?.trim()) throw new Error('请先填写视频描述')
-            await generateMedia({ prompt: storyboardImagePrompt(clip, clipImagePrompt(clip, [], scenes, column.label)), target: { resource: 'clips', id: clip.id, field: column.key }, references: clipMediaReferences(clip, data, { includeFrames: false }).images.map(ref => ref.url), options: { aspectRatio: '16:9', ...(clip.mode === '分镜图' ? { resolution: '4K' } : {}), batchUnlimited: true } })
+            const prompt = clip.mode === '分镜图' ? clip.storyboardPrompt?.trim() : clip.prompt?.trim() && storyboardImagePrompt(clip, clipImagePrompt(clip, [], scenes, column.label))
+            if (!prompt) throw new Error(clip.mode === '分镜图' ? '请先填写分镜提示词' : '请先填写视频提示词')
+            await generateMedia({ prompt, target: { resource: 'clips', id: clip.id, field: column.key }, references: clipMediaReferences(clip, data, { includeFrames: false, selectedOnly: true }).images.map(ref => ref.url), options: { aspectRatio: '16:9', ...(clip.mode === '分镜图' ? { resolution: '4K' } : {}), batchUnlimited: true } })
           } else if (batch.kind === 'video') {
             await submitVideo(clip, false, true)
           } else {
             const selectedModel = getModel('video', clip.model)
-            if (!selectedModel || !clip.prompt?.trim()) throw new Error('请先选择视频模型并填写视频描述')
+            if (!selectedModel || !clip.prompt?.trim()) throw new Error('请先选择视频模型并填写视频提示词')
             const seconds = videoDuration(Number(clip.duration) || 0, selectedModel)
             const clipMode = clip.mode === '分镜图' ? '分镜图' : '参考生成'
             const refs = clipMediaReferences(clip, data)
@@ -549,7 +597,7 @@ function Production({ context }) {
             setBatch(current => ({ ...current, results: { ...current.results, [clip.id]: { ...result, status: '保存中' } } }))
             const saved = await update(draft => {
               const item = draft.clips.find(item => item.id === clip.id)
-              if (!item || item.prompt !== clip.prompt || item.duration !== clip.duration || item.model !== clip.model) throw new Error('视频描述、时长或模型已修改，请重新优化')
+              if (!item || item.prompt !== clip.prompt || item.duration !== clip.duration || item.model !== clip.model) throw new Error('视频提示词、时长或模型已修改，请重新优化')
               const refs = clipMediaReferences(item, draft)
               const currentImages = videoImageReferences(item, refs, item.mode === '分镜图' ? '分镜图' : '参考生成')
               const candidates = assetMentionCandidates(draft.assets.filter(asset => asset.projectId === projectId), { assetIds: [...new Set(item.assetIds || [])], references: currentImages })
@@ -594,7 +642,7 @@ function Production({ context }) {
     try {
       const saved = await update(draft => {
         const clip = draft.clips.find(clip => clip.id === promptEdit.id)
-        if (!clip || clip.prompt !== promptEdit.currentPrompt || (promptEdit.optimizedDuration !== undefined && (clip.duration !== promptEdit.currentDuration || clip.model !== promptEdit.currentModel))) throw new Error('视频描述、时长或模型已被其他操作修改，当前草稿已保留，请核对后重新打开')
+        if (!clip || clip.prompt !== promptEdit.currentPrompt || (promptEdit.optimizedDuration !== undefined && (clip.duration !== promptEdit.currentDuration || clip.model !== promptEdit.currentModel))) throw new Error('视频提示词、时长或模型已被其他操作修改，当前草稿已保留，请核对后重新打开')
         clip.prompt = promptEdit.text
         clip.description = promptEdit.text
         if (promptEdit.optimizedDuration !== undefined) clip.duration = promptEdit.optimizedDuration
@@ -614,7 +662,7 @@ function Production({ context }) {
     try {
       const saved = await update(draft => {
         const clip = draft.clips.find(clip => clip.id === active.id)
-        if (!clip || clip.prompt !== promptBackup.after) throw new Error('视频描述已修改，请先打开优化对比核对原文')
+        if (!clip || clip.prompt !== promptBackup.after) throw new Error('视频提示词已修改，请先打开优化对比核对原文')
         clip.prompt = promptBackup.before
         clip.description = promptBackup.before
         if (promptBackup.beforeDuration !== undefined && clip.duration === promptBackup.afterDuration) clip.duration = promptBackup.beforeDuration
@@ -637,14 +685,33 @@ function Production({ context }) {
       const style = styleOptionsFromCatalog(catalog.data).find(style => style.id === String(context.project.style_catalog_id))
       const audios = clipAudioReferences(active, data, references, mode)
       const text = await optimizeMediaPrompt({ model, modelId: model.id, optimization: promptEdit.optimization, prompt: promptEdit.optimization === 'h3' ? videoPrompt(promptEdit.text, style, selectedImageReferences, audios) : promptEdit.text, mode: 'reference', options: { count: 1, resolution, aspectRatio: ratio, duration: optimizationDuration }, ...(style ? { style } : {}), ...(selectedImageReferences.length || audios.length ? { references: { ...(selectedImageReferences.length ? { images: selectedImageReferences } : {}), ...(audios.length ? { audios } : {}) } } : {}) }, { signal: controller.signal })
+      if (typeof text !== 'string' || !text.trim()) throw new Error('优化未返回有效提示词，请重试')
       if (promptEdit.optimization === 'h3' && !isH3FormattedPrompt(text)) throw new Error('H3 优化结果缺少必需的结构字段，请重试或检查优化提示词')
-      if (!controller.signal.aborted) {
-        setPromptEdit(current => ({ ...current, text, optimizedDuration: context.project.creationMode === 'video-redraw' ? optimizationDuration : undefined, optimizedImages: current.optimization === 'h3' ? selectedImageReferences : undefined, optimizedAudios: current.optimization === 'h3' ? audios : undefined }))
-      }
+      if (controller.signal.aborted) return
+      if (promptEditRef.current?.id !== promptEdit.id || promptEditRef.current?.text !== promptEdit.text || promptEditRef.current?.optimization !== promptEdit.optimization) throw new Error('优化期间编辑内容已变化，请重新优化')
+      setSavingPrompt(true)
+      const saved = await update(draft => {
+        const clip = draft.clips.find(item => item.id === promptEdit.id)
+        if (!clip || clip.prompt !== promptEdit.currentPrompt || clip.duration !== promptEdit.currentDuration || clip.model !== promptEdit.currentModel) throw new Error('视频提示词、时长或模型已被其他操作修改，请重新优化')
+        const currentRefs = clipMediaReferences(clip, draft)
+        const currentImages = videoImageReferences(clip, currentRefs, clip.mode === '分镜图' ? '分镜图' : '参考生成')
+        const candidates = assetMentionCandidates(draft.assets.filter(asset => asset.projectId === projectId), { assetIds: [...new Set(clip.assetIds || [])], references: currentImages })
+        const mentionError = validateAssetMentions(text, candidates)
+        if (mentionError) throw new Error(mentionError)
+        clip.prompt = text; clip.description = text
+        if (context.project.creationMode === 'video-redraw') clip.duration = optimizationDuration
+        if (promptEdit.optimization === 'h3') clip.references = h3ReferenceSnapshot(clip.references, selectedImageReferences, audios)
+        else if (!isH3FormattedPrompt(text)) clip.references = (clip.references || []).filter(ref => !ref?.h3PromptReference)
+      })
+      if (!saved) throw new Error('优化结果保存失败，请检查保存错误后重试')
+      setPromptBackups(current => ({ ...current, [promptEdit.id]: { before: promptEdit.currentPrompt, after: text, optimization: promptEdit.optimization, ...(context.project.creationMode === 'video-redraw' ? { beforeDuration: promptEdit.currentDuration, afterDuration: optimizationDuration } : {}) } }))
+      setPromptEdit(null)
+      notify('提示词优化完成，已自动应用')
     } catch (reason) {
       if (!controller.signal.aborted) setPromptEdit(current => ({ ...current, error: reason.message }))
     } finally {
       if (optimization.current === controller) { optimization.current = null; setOptimizing(false) }
+      setSavingPrompt(false)
     }
   }
   function moveClip(clip, offset) {
@@ -664,12 +731,12 @@ function Production({ context }) {
   }
   return (
     <div className="page-storyboard production-page">
-      <header className="workspace-toolbar"><div className="sb-toolbar-head"><h2>分镜</h2><label className="sb-episode-pick"><span>剧集</span><select aria-label="选择剧集" value={episode.id} onChange={(e) => navigate(`/video?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(e.target.value)}`)}>{context.episodes.map((e) => <option key={e.id} value={e.id}>第{e.number}集 · {e.title}</option>)}</select></label><p className="muted">共 {clips.length} 个视频片段 · 在下方选择片段</p></div><div className="toolbar"><Button disabled={!clips.length || busy} onClick={() => openBatch('image')}>批量生成分镜图</Button><Button disabled={!clips.length || busy} onClick={() => openBatch('prompt')}>批量优化提示词</Button><Button disabled={!clips.length || busy} onClick={() => openBatch('video')}>批量生成视频</Button>{context.project.creationMode === 'video-redraw' ? <><WorkflowRunDetails projectId={projectId} episodeId={episode.id} job={promptTask} reload={reload} onStarted={next => { setPromptTask(next); setPromptRefresh(value => value + 1) }} /><span role="status">{['queued', 'running'].includes(promptTask?.status) ? '正在编写视频提示词…' : ['failed', 'interrupted', 'cancelled'].includes(promptTask?.status) ? `视频提示词生成失败：${promptTask.error || '请重试'}` : promptTask?.status === 'completed' ? '视频提示词已生成' : ''}</span><Button disabled={['queued', 'running'].includes(promptTask?.status) || clips.length > 0} onClick={() => setPromptSetupOpen(true)}>生成视频提示词</Button>{clips.length > 0 && <Button onClick={() => requestAgent({ action: 'redraw-video-description', projectId, episodeId: episode.id, continueCurrentSession: true }).catch(reason => notify(reason.message))}>让 Agent 调整</Button>}</> : <Button onClick={() => requestAgent({ action: 'video-description', projectId, episodeId: episode.id }).catch(reason => notify(reason.message))}>AI 编写视频描述</Button>}</div></header>
-      {context.project.creationMode === 'video-redraw' && <p className="redraw-production-note">当前使用视频描述和目标资产生成，连续动作不保证逐帧还原。请试听生成结果的目标语言对白。<button className="link-btn" onClick={() => navigate(link('/film'))}>进入短片剪辑 →</button></p>}
+      <header className="workspace-toolbar"><div className="sb-toolbar-head"><h2>{context.project.creationMode === 'video-redraw' ? '视频制作' : '分镜'}</h2><label className="sb-episode-pick"><span>剧集</span><select aria-label="选择剧集" value={episode.id} onChange={(e) => navigate(`/video?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(e.target.value)}`)}>{context.episodes.map((e) => <option key={e.id} value={e.id}>第{e.number}集 · {e.title}</option>)}</select></label><p className="muted">共 {clips.length} 个视频片段 · 在下方选择片段</p></div><div className="toolbar"><Button disabled={!clips.length || busy} onClick={() => openBatch('image')}>批量生成分镜图</Button><Button disabled={!clips.length || busy} onClick={() => openBatch('prompt')}>批量优化提示词</Button><Button disabled={!clips.length || busy} onClick={() => openBatch('video')}>批量生成视频</Button>{context.project.creationMode === 'video-redraw' ? <><WorkflowRunDetails projectId={projectId} episodeId={episode.id} job={promptTask} reload={reload} onStarted={next => { setPromptTask(next); setPromptRefresh(value => value + 1) }} /><span role="status">{['queued', 'running'].includes(promptTask?.status) ? '正在编写视频提示词…' : ['failed', 'interrupted', 'cancelled'].includes(promptTask?.status) ? `视频提示词生成失败：${promptTask.error || '请重试'}` : promptTask?.status === 'completed' ? '视频提示词已生成' : ''}</span><Button disabled={['queued', 'running'].includes(promptTask?.status) || clips.length > 0} onClick={() => setPromptSetupOpen(true)}>生成视频提示词</Button>{clips.length > 0 && <>{mode === '分镜图' && <Button onClick={() => requestAgent({ action: 'storyboard-prompts', projectId, episodeId: episode.id, mode: '分镜图', continueCurrentSession: true }).catch(reason => notify(reason.message))}>Agent 生成分镜提示词</Button>}<Button disabled={mode === '分镜图' && !storyboardPromptsReady} onClick={() => requestAgent({ action: 'redraw-video-description', projectId, episodeId: episode.id, mode, confirmStoryboard: mode === '分镜图', continueCurrentSession: true }).catch(reason => notify(reason.message))}>{mode === '分镜图' ? '确认分镜风格并生成视频提示词' : '让 Agent 调整'}</Button></>}</> : mode === '分镜图' ? <><Button onClick={() => requestAgent({ action: 'storyboard-prompts', projectId, episodeId: episode.id, mode: '分镜图' }).catch(reason => notify(reason.message))}>Agent 生成分镜提示词</Button><Button disabled={!storyboardPromptsReady} onClick={() => requestAgent({ action: 'video-description', projectId, episodeId: episode.id, mode: '分镜图', confirmStoryboard: true }).catch(reason => notify(reason.message))}>确认分镜风格并生成视频提示词</Button></> : !active ? <Button onClick={() => setPromptSetupOpen(true)}>AI 编写提示词</Button> : <Button onClick={() => requestAgent({ action: 'video-description', projectId, episodeId: episode.id, mode: '参考生成' }).catch(reason => notify(reason.message))}>AI 编写视频提示词</Button>}</div></header>
+      {context.project.creationMode === 'video-redraw' && <p className="redraw-production-note">当前使用视频提示词和目标资产生成，连续动作不保证逐帧还原。请试听生成结果的目标语言对白。<button className="link-btn" onClick={() => navigate(link('/film'))}>进入短片剪辑 →</button></p>}
       {promptPlan.length > 0 && <details className="prompt-plan" open><summary>Chip 拆分总表（生成时）</summary><div className="prompt-plan-scroll"><table><thead><tr><th>片段</th><th>原视频时间</th><th>内容时长</th><th>生成时长</th><th>对应镜头</th></tr></thead><tbody>{promptPlan.map((item, index) => <tr key={item.clipId}><td>Chip {shotNumber(index)}</td><td>{formatVideoTime(item.globalStart)}–{formatVideoTime(item.globalEnd)}</td><td>{[...clips, ...unassignedClips].find(clip => clip.id === item.clipId)?.duration ?? '已删除'} 秒</td><td>{plannedDuration(item)}</td><td>{item.shotIds.map(id => { const number = sourceShots.findIndex(shot => shot.id === id); return number < 0 ? '已删除' : shotNumber(number) }).join('、')}</td></tr>)}</tbody></table></div><p className="muted">生成时长按片段当前选择的视频模型和时长计算。</p></details>}
       <div className="production-layout">
         <div className="production-mobile-picker">
-          <select aria-label="选择视频片段" value={active?.id || ''} disabled={!clips.length} onChange={event => { setActiveId(event.target.value); setHistoryKind('video') }}>
+          <select aria-label="选择视频片段" value={active?.id || ''} disabled={!clips.length || promptDirty} onChange={event => { setActiveId(event.target.value); setHistoryKind('video') }}>
             {!clips.length && <option value="">暂无视频片段</option>}
             {scenes.map((scene, index) => <optgroup key={scene.id} label={`第${index + 1}场 · ${scene.location || '地点待填写'}`}>
               {clips.filter(clip => clip.sceneId === scene.id).map(clip => <option key={clip.id} value={clip.id}>{`片段 ${shotNumber(clips.indexOf(clip))} · ${clip.title}`}</option>)}
@@ -712,10 +779,11 @@ function Production({ context }) {
             <SegmentImages clip={active} busy={busy || promptDirty} jobs={activeJobs} submission={submission} fromDescription={context.project.creationMode === 'video-redraw'} onGenerate={(column) => generateClipImage(column)} onUpload={(column, url) => saveImage(column, url)} onUse={(column, url) => { patch('clips', active.id, { [column.key]: url, excludedFrameUrls: (active.excludedFrameUrls || []).filter(item => item !== url) }); notify('已选用该图片版本') }} onPreview={setPreview} onDelete={(column, index) => deleteVersion(column, index)} onEditImage={(column, url) => { setImageNotes(''); setImageEdit({ ...column, source: url }) }} onRemove={(column) => setRemovingImage({ column })} />
           </aside>
           <div className="production-center">
-            <section className="production-description" aria-label="视频描述">
-              <div className="row"><h3>视频描述</h3><div className="toolbar"><Button disabled={busy || !canGenerateVideo} onClick={async () => { try { setPromptPreview(await submitVideo(active, true)) } catch (reason) { notify(reason.message) } }}>预览生成提示词</Button><Button disabled={busy || promptDirty || !model || !active.prompt.trim()} onClick={() => openPromptOptimization()}>提示词优化</Button>{promptBackup && <><Button onClick={() => openPromptOptimization(promptBackup)}>优化对比</Button><Button disabled={savingPrompt || active.prompt !== promptBackup.after || promptBackup.before === promptBackup.after} onClick={restorePrompt}>还原原文</Button></>}</div></div>
-              <p className="muted">画面、动作、镜头切换和对白统一写在视频描述中。</p>
-              <InlineVideoPrompt key={active.id} clip={active} candidates={mentionCandidates} update={update} notify={notify} onDirtyChange={setPromptDirty} />
+            {mode === '分镜图' && <StoryboardPromptField key={active.id} clip={active} candidates={mentionCandidates} update={update} notify={notify} onDirtyChange={setStoryboardPromptDirty} />}
+            <section className="production-description" aria-label="视频提示词">
+              <div className="row"><h3>视频提示词</h3><div className="toolbar"><Button disabled={busy || !canGenerateVideo} onClick={async () => { try { setPromptPreview(await submitVideo(active, true)) } catch (reason) { notify(reason.message) } }}>预览生成提示词</Button><Button disabled={busy || promptDirty || !model || !active.prompt.trim()} onClick={() => openPromptOptimization()}>提示词优化</Button>{promptBackup && <><Button onClick={() => openPromptOptimization(promptBackup)}>优化对比</Button><Button disabled={savingPrompt || active.prompt !== promptBackup.after || promptBackup.before === promptBackup.after} onClick={restorePrompt}>还原原文</Button></>}</div></div>
+              <p className="muted">画面、动作、镜头切换和对白统一写在视频提示词中。</p>
+              <InlineVideoPrompt key={active.id} clip={active} candidates={mentionCandidates} update={update} notify={notify} onDirtyChange={setVideoPromptDirty} />
             </section>
           </div>
           <section className="production-main-preview" aria-label="片段预览">
@@ -753,13 +821,13 @@ function Production({ context }) {
                 <h3>分辨率</h3>{resolution && model?.capabilities?.resolutions?.length && !model.capabilities.resolutions.includes(resolution) && <small>当前值 {resolution} 不受此模型支持，请选择下方选项。</small>}<div className="production-option-grid">{(model?.capabilities?.resolutions || []).map(value => <button key={value} type="button" aria-pressed={resolution === value} onClick={() => patch('clips', active.id, { resolution: value })}>{value}</button>)}</div>
                 <h3>片段时长</h3><label className="production-control-duration"><input key={`${active.id}-${planned}`} aria-label="片段时长（秒）" type="number" min="0.1" max={CLIP_DURATION_LIMIT} step="0.1" defaultValue={planned} onBlur={event => { const value = Number(event.target.value); if (!Number.isFinite(value) || value <= 0 || value > CLIP_DURATION_LIMIT) { event.target.value = String(planned); notify(`片段时长须大于 0 且不超过 ${CLIP_DURATION_LIMIT} 秒`); return } if (value !== planned) patch('clips', active.id, { duration: value }) }} /> 秒</label><small>{durationError || `生成时长 ${duration} 秒${duration !== planned ? '，按模型要求向上取整' : ''}`}</small>
               </Popover.Content></Popover.Portal></Popover.Root>
-              <Popover.Root><Popover.Trigger asChild><button className="production-control-icon" type="button" aria-label="生成方式" title="生成方式"><IconSettings size={19} /></button></Popover.Trigger><Popover.Portal container={document.querySelector('.rn-studio')}><Popover.Content side="top" align="start" sideOffset={8} className="production-control-popover production-mode-panel"><h3>生成方式</h3><div className="production-option-grid">{['分镜图', '参考生成'].map(value => <button key={value} type="button" aria-pressed={mode === value} onClick={() => patch('clips', active.id, { mode: value })}>{value}</button>)}</div></Popover.Content></Popover.Portal></Popover.Root>
+              <Popover.Root><Popover.Trigger asChild><button className="production-control-icon" type="button" aria-label="生成方式" title="生成方式" disabled={promptDirty}><IconSettings size={19} /></button></Popover.Trigger><Popover.Portal container={document.querySelector('.rn-studio')}><Popover.Content side="top" align="start" sideOffset={8} className="production-control-popover production-mode-panel"><h3>生成方式</h3><div className="production-option-grid">{['分镜图', '参考生成'].map(value => <button key={value} type="button" aria-pressed={mode === value} onClick={() => patch('clips', active.id, { mode: value })}>{value}</button>)}</div></Popover.Content></Popover.Portal></Popover.Root>
               <Button className="production-generate" primary disabled={busy || promptDirty || !canGenerateVideo || overLimit} onClick={generateVideo} aria-label="生成整段视频">{busy && submission?.field === 'videos' ? '提交中…' : <><span>生成</span><IconArrowUp size={18} /></>}</Button>
             </div>
           </aside>
         </> : <div className="empty"><h3>还没有视频片段</h3><p>按场次创建视频片段，然后生成整段视频。</p><Button primary onClick={() => editGroup(null, scenes[0]?.id)}>创建视频片段</Button></div>}
       </div>
-      {promptSetupOpen && context.project.creationMode === 'video-redraw' && <Modal title="生成视频提示词" onClose={() => setPromptSetupOpen(false)} footer={<><Button onClick={() => setPromptSetupOpen(false)}>取消</Button><Button primary disabled={['queued', 'running'].includes(promptTask?.status) || clips.length > 0} onClick={submitPromptTask}>开始生成</Button></>}><Field label="视频生成方式"><select aria-label="视频生成方式" value={promptMode} onChange={event => setPromptMode(event.target.value)}><option value="参考生成">参考生成</option><option value="分镜图">分镜图</option></select></Field><Field label="补充要求（选填）"><textarea aria-label="视频提示词补充要求" maxLength={2000} rows={3} value={promptRequirements} onChange={event => setPromptRequirements(event.target.value)} placeholder="例如：优先保持原片动作和对白节奏" /></Field>{clips.length > 0 && <p className="muted">本集已有视频片段，可通过 Agent 调整。</p>}</Modal>}
+      {promptSetupOpen && <Modal title="生成视频提示词" onClose={() => setPromptSetupOpen(false)} footer={<><Button onClick={() => setPromptSetupOpen(false)}>取消</Button><Button primary disabled={['queued', 'running'].includes(promptTask?.status) || clips.length > 0} onClick={submitPromptTask}>开始生成</Button></>}><Field label="视频生成方式"><select aria-label="视频生成方式" value={promptMode} onChange={event => setPromptMode(event.target.value)}><option value="参考生成">参考生成</option><option value="分镜图">四宫格分镜</option></select></Field>{context.project.creationMode === 'video-redraw' && <Field label="补充要求（选填）"><textarea aria-label="视频提示词补充要求" maxLength={2000} rows={3} value={promptRequirements} onChange={event => setPromptRequirements(event.target.value)} placeholder="例如：优先保持原片动作和对白节奏" /></Field>}{clips.length > 0 && <p className="muted">本集已有视频片段，可通过 Agent 调整。</p>}</Modal>}
       {batch && batchOpen && <Modal title={{ image: '批量生成分镜图', prompt: '批量优化提示词', video: '批量生成视频' }[batch.kind]} wide onClose={() => setBatchOpen(false)} footer={<><Button onClick={() => setBatchOpen(false)}>关闭</Button>{!batchBusy && <>{Object.keys(batch.results).length > 0 && <Button onClick={() => setBatch({ ...batch, selected: clips.map(clip => clip.id), results: {} })}>新建批次</Button>}<Button primary disabled={!batch.selected.length || Object.keys(batch.results).length > 0} onClick={runBatch}>开始处理（{batch.selected.length}）</Button></>}</>}>
         <p className="muted">选择本集片段，同时提交处理。关闭窗口后任务继续运行。{batch.kind === 'prompt' ? '优化完成后自动保存并应用。' : '每个片段按自身设置提交，任务进度可在片段历史中查看。'}</p>
         {batch.kind === 'prompt' && <><Field label="优化方式"><select aria-label="批量优化方式" disabled={batchBusy || Object.keys(batch.results).length > 0} value={batch.optimization} onChange={event => setBatch(current => ({ ...current, optimization: event.target.value }))}><option value="general">普通优化</option><option value="h3">H3 提示优化</option></select></Field><p className="muted">H3 提示优化需要片段使用 H3 视频模型并提供参考图片；不符合条件的片段会显示失败原因。</p></>}
@@ -773,15 +841,15 @@ function Production({ context }) {
         <Field label="所属场次"><select value={group.sceneId} onChange={(e) => setGroup({ ...group, sceneId: e.target.value })}>{scenes.map((scene, index) => <option key={scene.id} value={scene.id}>{sceneLabel(scene, index)}</option>)}</select></Field>
         <Field label="片段名称"><input value={group.title} maxLength={100} onChange={(e) => setGroup({ ...group, title: e.target.value })} /></Field>
         <Field label="片段时长（秒）"><input type="number" min="0.1" max={CLIP_DURATION_LIMIT} step="0.1" value={group.duration} onChange={(e) => setGroup({ ...group, duration: e.target.value })} /></Field>
-        <Field label="视频描述"><textarea rows={6} maxLength={10000} value={group.prompt} placeholder="整段视频的画面、动作、镜头与对白，直接作为生成依据…" onChange={(e) => setGroup({ ...group, prompt: e.target.value })} /></Field>
-        <p className="muted">生成时长按模型支持的秒数向上取整，视频描述中的时间安排请与片段时长保持一致。</p>
+        <Field label="视频提示词"><textarea rows={6} maxLength={10000} value={group.prompt} placeholder="整段视频的画面、动作、镜头与对白，直接作为生成依据…" onChange={(e) => setGroup({ ...group, prompt: e.target.value })} /></Field>
+        <p className="muted">生成时长按模型支持的秒数向上取整，视频提示词中的时间安排请与片段时长保持一致。</p>
       </Modal>}
       {promptPreview !== null && <Modal title="生成视频提示词" wide onClose={() => setPromptPreview(null)}><pre className="production-prompt-preview">{promptPreview}</pre></Modal>}
-      {promptEdit && <Modal title={promptEdit.optimization ? '视频提示词优化对比' : '编辑视频描述'} wide onClose={closePrompt} footer={<><Button disabled={savingPrompt} onClick={closePrompt}>取消</Button><Button primary disabled={optimizing || savingPrompt || !promptEdit.text.trim()} onClick={savePrompt}>{savingPrompt ? '正在保存…' : promptEdit.optimization ? '应用结果' : '保存描述'}</Button></>}>
-        {promptEdit.optimization && <><div className="toolbar"><Field label="优化方式"><select aria-label="优化方式" disabled={optimizing || savingPrompt} value={promptEdit.optimization} onChange={event => setPromptEdit({ ...promptEdit, optimization: event.target.value })}><option value="general">普通优化</option>{model && isH3Model(model) && <option value="h3">H3 提示优化</option>}</select></Field><Button disabled={optimizing || savingPrompt || !model || !promptEdit.text.trim()} onClick={optimizePrompt}>开始优化</Button>{optimizing && <Button onClick={() => { optimization.current?.abort(); optimization.current = null; setOptimizing(false) }}>取消优化</Button>}<Button disabled={optimizing || savingPrompt || promptEdit.text === promptEdit.before} onClick={() => setPromptEdit({ ...promptEdit, text: promptEdit.before, error: '', optimizedDuration: undefined, optimizedImages: undefined, optimizedAudios: undefined })}>还原原文</Button></div><p className="muted">对照原文检查优化结果，也可继续编辑。点击“应用结果”后更新视频描述。{context.project.creationMode === 'video-redraw' && duration && duration !== planned && ` 优化将按 ${duration} 秒编排，应用结果时同步调整片段时长。`}</p><Processing busy={optimizing} text="正在优化提示词…" />{promptEdit.error && <p role="alert">{promptEdit.error}</p>}</>}
+      {promptEdit && <Modal title={promptEdit.optimization ? '视频提示词优化对比' : '编辑视频提示词'} wide onClose={closePrompt} footer={<><Button disabled={savingPrompt} onClick={closePrompt}>关闭</Button>{(!promptEdit.optimization || promptEdit.text !== promptEdit.currentPrompt) && <Button primary disabled={optimizing || savingPrompt || !promptEdit.text.trim()} onClick={savePrompt}>{savingPrompt ? '正在保存…' : '保存修改'}</Button>}</>}>
+        {promptEdit.optimization && <><div className="toolbar"><Field label="优化方式"><select aria-label="优化方式" disabled={optimizing || savingPrompt} value={promptEdit.optimization} onChange={event => setPromptEdit({ ...promptEdit, optimization: event.target.value })}><option value="general">普通优化</option>{model && isH3Model(model) && <option value="h3">H3 提示优化</option>}</select></Field><Button disabled={optimizing || savingPrompt || !model || !promptEdit.text.trim()} onClick={optimizePrompt}>开始优化</Button>{optimizing && <Button disabled={savingPrompt} onClick={() => { optimization.current?.abort(); optimization.current = null; setOptimizing(false) }}>取消优化</Button>}<Button disabled={optimizing || savingPrompt || promptEdit.text === promptEdit.before} onClick={() => setPromptEdit({ ...promptEdit, text: promptEdit.before, error: '', optimizedDuration: undefined, optimizedImages: undefined, optimizedAudios: undefined })}>还原原文</Button></div><p className="muted">优化完成后自动应用，可随时查看对比或还原原文。{context.project.creationMode === 'video-redraw' && duration && duration !== planned && ` 优化将按 ${duration} 秒编排并同步调整片段时长。`}</p><Processing busy={optimizing} text={savingPrompt ? '正在保存优化结果…' : '正在优化提示词…'} />{promptEdit.error && <p role="alert">{promptEdit.error}</p>}</>}
         <div className={promptEdit.optimization ? 'production-prompt-comparison' : ''}>
           {promptEdit.optimization && <Field label="原文"><div className="production-prompt-readonly"><MentionText value={promptEdit.before} candidates={mentionCandidates} /></div></Field>}
-          <Field label={promptEdit.optimization ? '优化后' : '视频描述'}><AssetMentionInput value={promptEdit.text} label={promptEdit.optimization ? '优化后' : '视频描述'} candidates={mentionCandidates} onChange={text => setPromptEdit(current => ({ ...current, text }))} /></Field>
+          <Field label={promptEdit.optimization ? '优化后' : '视频提示词'}>{optimizing || savingPrompt ? <div className="production-prompt-readonly"><MentionText value={promptEdit.text} candidates={mentionCandidates} /></div> : <AssetMentionInput value={promptEdit.text} label={promptEdit.optimization ? '优化后' : '视频提示词'} candidates={mentionCandidates} onChange={text => setPromptEdit(current => ({ ...current, text }))} />}</Field>
         </div>
       </Modal>}
       {imageEdit && <Modal title={`修改${imageEdit.label}`} onClose={() => { setImageEdit(null) }} footer={<><Button onClick={() => { setImageEdit(null) }}>取消</Button><Button primary disabled={busy || !imageNotes.trim()} onClick={() => { generateClipImage(imageEdit); setImageEdit(null) }}>生成改图</Button></>}><img loading="lazy" className="production-edit-source" src={imageEdit.source} alt="本次修改的原图" /><Field label="修改要求"><textarea rows={5} maxLength={5000} value={imageNotes} onChange={(e) => setImageNotes(e.target.value)} /></Field></Modal>}

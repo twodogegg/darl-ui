@@ -154,7 +154,7 @@ const skillCreationExample = `// 两个入口共用一个宿主回调
 // 1. 新建绑定当前 Agent 的会话，保留原聊天和草稿。
 // 2. 发送 prompts/create-skill.md 中的开场请求。
 // 3. 显式引用 builtin:skill-creator，由真实模型询问需求。
-// 4. Agent 创建或下载包，调用 builtin_create_skill 安装。
+// 4. Agent 创建或下载包，调用 builtin_create_skill 安装；用户要求立即可运行时传 setup: true。
 // 5. 收到 skills-changed 后 GET /api/skills 更新列表。`;
 
 const skillsApiExample = `GET    /api/state       // 会话 + 当前技能目录
@@ -165,6 +165,10 @@ DELETE /api/skills/:id  // 删除自定义 Skill
 
 // Agent 创建 / 安装：工作区内的目录、SKILL.md 或 ZIP
 builtin_create_skill({ path: 'drafts/my-skill' })
+// 安装并准备依赖、自检脚本，返回真实准备报告
+builtin_create_skill({ path: 'drafts/my-skill', setup: true })
+// 已安装技能重试环境准备和脚本自检
+builtin_prepare_skill({ skillId: 'installed-skill-id' })
 // 更新已有技能必须指定 ID 和当前版本
 builtin_create_skill({ path: 'drafts/my-skill',
   skillId: 'existing-skill-id', expectedVersion: '1.0' })`;
@@ -233,7 +237,7 @@ export function Guide({ onBack }: { onBack: () => void }) {
 
         <section id="guide-images" className="guide-section"><div className="guide-section-kicker">06 / VISION INPUT</div><h2>图片附件与视觉输入</h2><p className="guide-lead">组件支持图片缩略图和纯图片消息。未提供上传适配器时，图片通过 attachments 传给宿主；提供 uploadAttachment 时，宿主先调用文件服务并返回 fileId 和访问地址，通过 uploadedAttachments 发送。当前真实示例使用后者，普通文档也能作为附件交给执行工具。</p><CodeBlock value={imageExample} /><div className="guide-split"><div><h3>模型设置</h3><p>图片附件会直接加入 AI SDK 的模型消息，不再按模型能力开关过滤；实际是否接受图片由上游服务决定。</p><div className="guide-note"><ImagePlus size={16} /><span>支持 PNG、JPEG、WebP 和 GIF。请求体限制为 80MB，单张图片最多 50 MiB，经过服务端校验后才会进入模型上下文。</span></div></div><div><h3>图片结果</h3><p>MCP 返回的 image block 会作为 <code>image</code> 流事件回到 assistant 消息，组件通过 <code>AgentMessage.attachments</code> 渲染内联预览。</p><CodeBlock value={imageStreamExample} /></div></div><div className="guide-note guide-note--warning"><AlertTriangle size={16} /><span>如果出现「无法连接模型服务」，先检查本地 Agent 服务是否运行在 5197 端口，再检查 API 地址、网络代理和模型提供方状态。失败消息支持重新生成，不会清空当前草稿。</span></div></section>
 
-        <section id="guide-data" className="guide-section"><div className="guide-section-kicker">07 / STATE</div><h2>会话与 Skills</h2><p className="guide-lead">会话是 UI 的最小状态单元。示例通过本机服务端 API 保存到 SQLite，刷新页面或重启开发服务后仍可恢复。工具记录仅显示调用名称和状态，不展示原始结果；需要执行确认时才展示参数。</p><CodeBlock value={sessionExample} /><div className="guide-grid"><div className="guide-card"><KeyRound size={17} /><strong>会话持久化</strong><p>用稳定的 session ID 保存标题、固定 agentId、消息与更新时间。聊天自动保存只提交 sessions 和 activeId，Skills 单独写入，避免旧会话状态覆盖新技能。重新生成会从被点击回复前的用户消息重跑，保留更早历史；不会回滚真实文件、已执行操作或子 Agent 的独立历史。</p></div><div className="guide-card"><Sparkles size={17} /><strong>Skill 按需加载</strong><p>浏览器发送 Skill ID，服务端从 SQLite 读取当前技能目录。模型按需读取完整指令和资源，使用通用文件、Shell 和进程工具执行。输入框提供请求批准、帮我批准、完全访问三档；默认自动批准工作区文件操作，复杂命令和未知操作仍询问。模式保存在服务端，主 Agent 与子 Agent 共用，下一轮生效。命令运行在本机后端，没有操作系统沙箱。文件可通过交付工具生成下载链接。导入本身不执行脚本。默认提供 skill-creator；可以对话描述需求创建技能，或发送链接让 Agent 下载完整技能包，再调用创建 / 安装工具写入网站 Skills 库。网站技能由独立接口持久化，聊天自动保存不会覆盖它们。</p></div></div></section>
+        <section id="guide-data" className="guide-section"><div className="guide-section-kicker">07 / STATE</div><h2>会话与 Skills</h2><p className="guide-lead">会话是 UI 的最小状态单元。示例通过本机服务端 API 保存到 SQLite，刷新页面或重启开发服务后仍可恢复。工具记录仅显示调用名称和状态，不展示原始结果；需要执行确认时才展示参数。</p><CodeBlock value={sessionExample} /><div className="guide-grid"><div className="guide-card"><KeyRound size={17} /><strong>会话持久化</strong><p>用稳定的 session ID 保存标题、固定 agentId、消息与更新时间。聊天自动保存只提交 sessions 和 activeId，Skills 单独写入，避免旧会话状态覆盖新技能。重新生成会从被点击回复前的用户消息重跑，保留更早历史；不会回滚真实文件、已执行操作或子 Agent 的独立历史。</p></div><div className="guide-card"><Sparkles size={17} /><strong>Skill 按需加载</strong><p>浏览器发送 Skill ID，服务端从 SQLite 读取当前技能目录。模型按需读取完整指令和资源，使用通用文件、Shell 和进程工具执行。输入框提供请求批准、帮我批准、完全访问三档；默认自动批准工作区文件操作，复杂命令和未知操作仍询问。模式保存在服务端，主 Agent 与子 Agent 共用，下一轮生效。命令运行在本机后端，没有操作系统沙箱。文件可通过交付工具生成下载链接。普通导入不执行脚本；用户要求立即可运行时，安装工具会检查依赖并运行支持 --selftest 的脚本，返回真实状态。默认提供 skill-creator；可以对话描述需求创建技能，或发送链接让 Agent 下载完整技能包，再调用创建 / 安装工具写入网站 Skills 库。网站技能由独立接口持久化，聊天自动保存不会覆盖它们。</p></div></div></section>
 
         <section id="guide-skill-creation" className="guide-section">
           <div className="guide-section-kicker">08 / SKILL CREATION</div><h2>通过对话创建 Skills</h2>
@@ -242,7 +246,7 @@ export function Guide({ onBack }: { onBack: () => void }) {
           <div className="guide-grid">
             <div className="guide-card"><strong>自然语言创建</strong><p>用户在「选择 Skill」弹层或管理窗口点击「通过对话创建」，Agent 先询问目标，再根据回答生成 SKILL.md 和必要资源；需求已经充分时可以直接完成。普通聊天中也可直接提出创建要求。</p></div>
             <div className="guide-card"><strong>提供链接安装</strong><p>Agent 使用现有命令工具下载完整技能包，再调用同一个创建 / 安装工具。GitHub 的 SKILL.md 链接需要连同其目录里的脚本、引用和许可一起获取；仅回复正文或创建文件不代表已经安装。</p></div>
-            <div className="guide-card"><strong>共用网站技能库</strong><p>手动导入和 Agent 安装复用格式、路径、文件大小校验及保存逻辑，安装成功当轮即可加载，刷新后仍保留。默认不写电脑全局技能目录，安装阶段不执行包内脚本。</p></div>
+            <div className="guide-card"><strong>共用网站技能库</strong><p>手动导入和 Agent 安装复用格式、路径、文件大小校验及保存逻辑，安装成功当轮即可加载，刷新后仍保留。默认不写电脑全局技能目录；传 setup: true 时会在审批允许的情况下准备依赖并运行脚本自检。</p></div>
           </div>
           <h3>保存与同步的接口</h3><CodeBlock value={skillsApiExample} />
           <p>同包重复安装返回已有 ID；同名不同内容不能静默覆盖，Agent 更新需提供当前版本。内置技能内容只读，可修改收藏和自动调用设置。skill-creator 的 Claude CLI 专属评测仍需要对应软件与账号；宿主没有提供的能力不能声称已经可用。</p>
@@ -253,7 +257,7 @@ export function Guide({ onBack }: { onBack: () => void }) {
           <p className="guide-lead">运行命令需要服务端提供真实执行环境。当前示例直接使用后端机器，工作区按聊天和 Agent 分目录，同一聊天中的同一个 Agent 会复用文件；它不是虚拟机或操作系统沙箱。</p>
           <div className="guide-split"><div><h3>复用现有工具</h3><ol>
             <li><code>list_skills / load_skill</code> 发现技能并按需展开完整包。</li>
-            <li><code>list_files / read_file / write_file</code> 操作工作区，<code>import_file</code> 读取已上传附件。</li>
+            <li><code>list_files / read_file / write_file</code> 操作工作区，<code>import_file</code> 读取已上传附件；普通附件 50 MiB，MP4 视频 300 MiB。</li>
             <li><code>run_command</code> 执行 CLI、Node.js 或 Python；返回 running 后继续用 <code>process_status</code> 查询真实输出和退出码。</li>
             <li><code>publish_file</code> 返回可下载的业务文件地址；不要把本机路径当成浏览器下载链接。</li>
           </ol></div><div><h3>服务端落实审批</h3><ul>

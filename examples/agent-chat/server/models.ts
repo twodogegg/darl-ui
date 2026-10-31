@@ -6,6 +6,7 @@ import { dynamicTool, jsonSchema, stepCountIs, streamText, ToolLoopAgent, wrapLa
 import { failure } from './errors';
 import { sourceBoundMessage, structuredAgentResult, type StructuredAgentResult } from './context';
 import { recordLanguageModel } from './model-records';
+import { recordWorkflowDebugModel } from './workflow-debug';
 
 export interface StoredProvider extends ModelProvider { apiKey: string }
 export interface ChatImage { type: 'image'; name: string; mimeType: string; data: string; size?: number; fileId?: string }
@@ -170,7 +171,7 @@ export function languageModel(provider: StoredProvider, model: AgentModelConfig,
       return { ...result, stream: result.stream.pipeThrough(new TransformStream({ transform(part, controller) { onActivity(); controller.enqueue(part); } })) };
     },
   } }) : upstreamModel;
-  return recordLanguageModel(observed, provider, model);
+  return recordLanguageModel(recordWorkflowDebugModel(observed, provider, model) as Exclude<LanguageModel, string>, provider, model);
 }
 
 export function modelMessages(messages: ChatMessage[]): ModelMessage[] {

@@ -33,6 +33,13 @@ export function assetImageRequest(asset, { variantId = '', view = '', customProm
 }
 
 export const pendingJob = job => job && ['queued', 'running'].includes(job.status)
+export function redrawImageReadiness(allAssets, jobs, projectId) {
+  const assets = allAssets.filter(asset => asset.projectId === projectId)
+  const ids = new Set(assets.map(asset => asset.id))
+  const missing = assets.reduce((count, asset) => count + (asset.image ? 0 : 1) + (asset.variants || []).filter(variant => !variant.image).length, 0)
+  const running = jobs.some(job => job.type === 'image' && pendingJob(job) && job.options?.studioTarget?.resource === 'assets' && ids.has(job.options.studioTarget.id))
+  return { ready: assets.length > 0 && missing === 0 && !running, missing, running }
+}
 export const assetJob = (jobs, id, variantId) => jobs.filter(job => job.options?.studioTarget?.resource === 'assets' && job.options.studioTarget.id === id && (job.options.studioTarget.variantId || null) === (variantId || null)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
 const pendingAssetJob = (jobs, id, variantId) => assetJob(jobs.filter(pendingJob), id, variantId)
 export const jobLabel = job => ({ queued: '排队中', running: '生成中', completed: '生成完成', failed: '生成失败', uncertain: '结果待确认', cancelled: '已取消' }[job?.status] || '')

@@ -35,8 +35,8 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 | 项目与大纲 | `projects` | 项目信息、`sourceScript`（用户提交的原始素材，不是剧集正文）、`requirements`、`outline` |
 | 剧本与场次 | `episodes` | 剧集、`script`、嵌套 `scenes` |
 | 美术资产 | `assets` | 角色、场景、道具、`variants`、单项资产 `prompt` |
-| 原片分镜 | `shots` | 镜头来源区间、时长、景别、画面、对白、音效与资产关联 |
-| 视频片段 | `clips` | 视频描述 `prompt`、独立时长 `duration`、资产和参考、片段图片及视频历史 |
+| 正式分镜 | `shots` | 原片来源区间、独立目标时长、景别、运镜、画面、对白、音效与资产关联 |
+| 视频片段 | `clips` | 视频提示词 `prompt`、分镜提示词 `storyboardPrompt`、独立时长 `duration`、资产和参考、片段图片及视频历史 |
 | 成片 | `films` | 成片记录 |
 | 操作记录 | `history` | 项目操作记录 |
 | 素材库 | `library`、`folders` | 素材和目录 |
@@ -46,11 +46,13 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 剧本项目的 `projects.adaptation` 保存改编幅度（`忠实` / `抽核` / `借壳`）；项目 `outline` 另外包含 `props:[{id,name,purpose,involvement}]`，只记录确实影响剧情的关键叙事道具。
 
-视频制作以视频片段为单位。每段的镜头顺序、初始站位、动作、对白、音效和时间安排统一写在页面可见的 `clips.prompt`（视频描述）中。
+视频制作以视频片段为单位。每段的镜头顺序、初始站位、动作、对白、音效和时间安排统一写在页面可见的 `clips.prompt`（视频提示词）中；片段分镜生图提示词独立写入 `clips.storyboardPrompt`，不写入 `clips.prompt`。
+
+- 分镜图模式使用两阶段流程：先为每个视频片段写入一条 `clips.storyboardPrompt`，默认一张 2×2 四宫格；用户确认分镜风格后再生成 `clips.prompt`。参考生成模式跳过分镜提示词，直接生成 `clips.prompt`。
 
 - `clips.prompt` 是视频生成的内容依据；`clips.duration` 是独立维护的计划秒数，必须大于 0，单条片段最多 15 秒。生成请求按模型支持的时长向上取整；不改写片段和来源镜头凑整秒，超过上限先缩短或拆分。
 - `clips.assetIds`、描述中的 `<资产名称>` / `<资产名称|形态名称>` 与 `clips.references` 决定参考素材。音色来自片段关联角色、描述中引用的角色和显式音色引用，`disabledVoiceIds` 保存取消勾选项；不从历史 shot 对白补入角色音色。
-- 片段图片分为分镜图 `image/imageHistory`、故事板 `storyboardImage/storyboardHistory`、站位图 `blockingImage/blockingHistory`。片段图片依据当前视频描述生成；原图和各自历史继续保留。视频的“分镜图”方式使用片段当前分镜图，“参考生成”方式使用页面所选的参考素材。`excludedFrameUrls` 保存被“移除引用”的片段图片 URL：这些图片仍保留在片段图片区，但不再作为“参考生成”的参考素材；把某张图片重新设为当前图或删除该图片时会同步清除对应 URL。
+- 片段图片分为分镜图 `image/imageHistory`、故事板 `storyboardImage/storyboardHistory`、站位图 `blockingImage/blockingHistory`。分镜图模式的片段分镜图使用 `clips.storyboardPrompt` 生成；其他片段图片依据当前视频描述生成；原图和各自历史继续保留。视频的“分镜图”方式使用片段当前分镜图，“参考生成”方式使用页面所选的参考素材。`excludedFrameUrls` 保存被“移除引用”的片段图片 URL：这些图片仍保留在片段图片区，但不再作为“参考生成”的参考素材；把某张图片重新设为当前图或删除该图片时会同步清除对应 URL。
 - 保留原片依据和已有用户内容。
 
 视频转绘项目与剧本项目共用这些资源。资产属于项目并跨集共用；分析新集前读取已有资产，优先引用真实 ID，不覆盖已有资产设定。`projects.creationMode` 为 `script`（默认）或 `video-redraw`。`targetRegion`（`japan` / `western`）、`targetLanguage`（`ja` / `en`）属于视频转绘项目，原片优先保存在 `episodes.sourceVideo`，旧项目的第一集兼容读取 `projects.sourceVideo`；剧本项目查询不返回这些字段，也不接受写入，不得据此推断改编地区或语言。转绘项目才使用默认 `japan / ja`，或显式选择 `western / en`。`sourceVideo` 保存原视频 `fileId/url/name`、真实 `duration/width/height/fps/hasAudio`、`segments`（每项 `id/start/end/frames`）；每帧是 `fileId/time/url`。先上传 MP4，再保存对应剧集引用，用转绘工具取得真实元数据，不能编造时长或抽帧结果。
@@ -123,7 +125,7 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 根据已确认剧本创建 `clips`，填写真实 `episodeId`、`sceneId`、`title`、`prompt`、`duration` 和所需资产引用。片段最长 15 秒；画面、动作与对白写入 `prompt`。保存后回读，再使用最新版本生成图片或视频。短片页用于剪辑成片。
 
 
-- 视频转绘进入视频制作时，先让用户在页面选择生成方式并填写可选要求，再使用 `builtin_edit_video_redraw` 的 `video-prompts` 提交文本模型任务（mode 为“参考生成”或“分镜图”，requirements 为补充要求）；用 `builtin_wait_video_redraw` 等待并读取真实结果。原片分镜是参考，可在保留剧情和已确认目标语言对白的前提下合理调整镜头设计、拆合与节奏。结果 `plan` 保存每个片段的原视频来源时间、独立的目标内容时长、片段 ID 和镜头 ID；目标内容时长与生成时长一致，须选用任务提交时默认视频模型支持的整数秒（不超过 15 秒，优先 10–15 秒），可与来源时间差不同；应按目标语言对白的自然语速及停顿安排节奏，每个片段可包含多个镜头。切换视频模型后须核对新模型支持该时长。文本模型基于分镜和资产文字写提示词，不能声称看过图片。已有视频片段时保留用户内容，通过 `builtin_edit_studio` 按用户要求调整，不重复创建。
+- 视频转绘进入视频制作时，先让用户在页面选择生成方式并填写可选要求，再使用 `builtin_edit_video_redraw` 的 `video-prompts` 提交文本模型任务（mode 为“参考生成”或“分镜图”，requirements 为补充要求）；用 `builtin_wait_video_redraw` 等待并读取真实结果。正式分镜是制作依据，优先保留已确认的镜头画面、景别、运镜、目标时长和对白；视频模型时长档位不匹配时可安排自然停顿，无法协调时明确报告冲突。结果 `plan` 保存每个片段的原视频来源时间、独立的目标内容时长、片段 ID 和镜头 ID；目标内容时长与生成时长一致，须选用任务提交时默认视频模型支持的整数秒（不超过 15 秒，优先 10–15 秒），可与来源时间差不同；应按目标语言对白的自然语速及停顿安排节奏，每个片段可包含多个镜头。切换视频模型后须核对新模型支持该时长。文本模型基于分镜和资产文字写提示词，不能声称看过图片。已有视频片段时保留用户内容，通过 `builtin_edit_studio` 按用户要求调整，不重复创建。
 
 ### 分镜和视频描述中的资产标签
 
@@ -176,17 +178,19 @@ H3 视频模型支持 `minimax-h3-flash` 与 `minimax-h3-standard`；视频清�
 
 ## 视频转绘：原视频生成分镜
 
-流程：原视频 → 候选切镜与视频模型分析 → 可编辑原片分镜表 → 转绘资产 → 视频制作。视频转绘不要求先生成剧本。
+流程：原片分析 → 剧本 → 转绘资产 → 正式分镜 → 视频制作 → 短片。原片分析保存的镜头用于正式分镜初稿。
 
-1. 读取项目、剧集、来源视频与已有 `shots`、`assets`。项目已选地区和语言即为有效设定：欧美未指定具体国家时采用通用语境，不为此提问。
-2. 查询 `builtin_read_video_redraw`；没有可复用结果时通过 `builtin_edit_video_redraw` 提交 `analyze`，再调用 `builtin_wait_video_redraw`。服务端自动检测候选切点，直接使用文件服务中原片的 COS 地址，交模型校正并保存镜头及资产条目。已有 COS 原片不重复上传，本地原片需先配置 COS，上传并校验后保留同一 fileId；不依赖网关文件接口；失败时报告真实错误，不重复运行独立切镜或转写。
-`analyze`、`extract-assets`、`video-prompts` 分别使用工作流 Agent。提交后通过 `builtin_wait_video_redraw` 等待，或用 `builtin_read_video_redraw` 传 `projectId`、`episodeId`、`jobId` 查询真实状态；详情的 `outputs` 中 `output_type=raw` 是模型原始输出，`output_type=structured` 是整理后的页面字段，`steps` 是工具调用状态，失败时 `failureStage` 标明原始分析、页面字段整理或校验与保存。失败、中断或取消的任务也可读取已保存输出；`incomplete=true` 表示原始输出被截断或中断，不能用于重新整理。若整理结果已保存但写回校验失败，可用 `builtin_edit_video_redraw` 的 `retry-save`，传原 `jobId`、新 `requestId` 和最新项目 `version`，复用整理结果重新保存，不调用模型。若需要重新整理，使用 `retry-format`；两种操作都需通过版本校验，不能覆盖用户修改。
+`analyze`、`write-script`、`extract-assets`、`plan-storyboard`、`video-prompts` 分别使用工作流 Agent，每阶段执行模型和整理模型独立配置。提交后通过 `builtin_wait_video_redraw` 等待，或用 `builtin_read_video_redraw` 传 `projectId`、`episodeId`、`jobId` 查询真实状态；详情的 `outputs` 中 `output_type=raw` 是模型原始输出，`output_type=structured` 是整理后的页面字段，`steps` 是工具调用状态，失败时 `failureStage` 标明原始分析、页面字段整理或校验与保存。失败、中断或取消的任务也可读取已保存输出；`incomplete=true` 表示原始输出被截断或中断，不能用于重新整理。若整理结果已保存但写回校验失败，可用 `builtin_edit_video_redraw` 的 `retry-save`，传原 `jobId`、新 `requestId` 和最新项目 `version`，复用整理结果重新保存，不调用模型。若需要重新整理，使用 `retry-format`；两种操作都需通过版本校验，不能覆盖用户修改。
 
 对已有原片分镜进行重新分析时，`builtin_edit_video_redraw` 使用 `revise-storyboard`，传 `projectId`、`episodeId`、最新项目 `version`、新 `requestId` 和可选 `requirements`。任务将原片、现有场次、镜头和资产交给视频分析 Agent，可用 `builtin_wait_video_redraw` 等待完成，返回可查看的原始分析和逐镜调整建议，不自动覆盖现有记录。读取结果并让用户确认后，使用 `apply-revision` 传 `projectId`、`episodeId`、`jobId` 应用；应用时核对原片和项目、场次、分镜及资产版本。支持调整画面、景别、音效、原片描述及对白；镜头拆合、时长和场次变化留在建议中供人工处理。
 
+1. 读取项目、剧集、来源视频与已有 `shots`、`assets`。项目已选地区和语言即为有效设定：欧美未指定具体国家时采用通用语境，不为此提问。
+2. 查询 `builtin_read_video_redraw`；没有可复用结果时通过 `builtin_edit_video_redraw` 提交 `analyze`，再调用 `builtin_wait_video_redraw`。服务端自动检测候选切点，直接使用文件服务中原片的 COS 地址，交模型校正并保存镜头及资产条目。已有 COS 原片不重复上传，本地原片需先配置 COS，上传并校验后保留同一 fileId；不依赖网关文件接口；失败时报告真实错误，不重复运行独立切镜或转写。
 3. 回读 `shots` 和 `assets`。根据用户要求使用 `builtin_edit_studio` 调整相应镜头，保留其他镜头和用户修改；画面中的资产以 `<完整资产名称>` 或 `<完整资产名称|状态名称>` 存储，页面显示 @ 标签。 场次的 `assetId` 与可选 `variantId` 关联场景及其状态，连续的同地点同时间镜头属于同一场次；场景无法确认时保留待确认。生成视频片段时必须将所属场次的场景资产和状态带入片段引用与提示词。对白角色必须引用真实角色 ID，原片内容保存在 `source`，目标对白保存在 `dialogue`。
-4. 修改时间时同时维护相邻镜头区间与时长。拆分、合并时检查对白分配，证据不足标记待确认；不要覆盖已完成的媒体。保存后按 ID 回读。
-5. 确认分镜后使用 `builtin_edit_video_redraw` 的 `extract-assets` 提交资产提取，可在 `requirements` 中提供本次补充要求（最多 2000 字），再通过 `builtin_wait_video_redraw` 等待结果。接口使用资产提取工作流 Agent 配置的文本模型处理分镜、场次、原片分析和已有资产，不重新调用视频理解模型；结果含实际 model 与 providerId，保留既有设定、图片与非空提示词，新增缺失资产、必要状态和镜头关联，并补全本集已有衍生状态的空生图提示词。模型漏掉需要补全的状态时任务失败，报告错误并用新的 requestId 重试。原片分析阶段可先留下空提示词，由资产提取阶段补齐。用户要求调整时使用 studio 工具修改已有资产；不要求提供单独剧本。
+4. 原片来源区间保存在 `shots.source.start/end`，正式分镜的目标时长是独立的 `shots.duration`；修改目标时长不要改写来源区间。正式分镜支持 `camera` 运镜，时长按 0.1 秒编辑。拆分、合并时检查对白分配和已关联片段，证据不足标记待确认；不要覆盖已完成的媒体。保存后按 ID 回读。
+5. 原片分析完成后可使用 `builtin_edit_video_redraw` 的 `write-script` 提交本集剧本任务，传 `projectId`、`episodeId`、最新项目 `version` 和唯一 `requestId`，可提供 `requirements`；使用 `builtin_wait_video_redraw` 等待。任务基于原始分析、当前分镜和项目目标地区及语言编写，并由独立整理模型写入已有场次及整集剧本，要求按顺序保留目标对白；`openItems` 列出待确认内容。已有正文不会被覆盖。
+6. 使用 `builtin_edit_video_redraw` 的 `extract-assets` 提交资产提取，可在 `requirements` 中提供本次补充要求（最多 2000 字），再通过 `builtin_wait_video_redraw` 等待结果。接口使用资产提取工作流 Agent 配置的文本模型处理分镜、场次、原片分析和已有资产，不重新调用视频理解模型；结果含实际 model 与 providerId，保留既有设定、图片与非空提示词，新增缺失资产、必要状态和镜头关联，并补全本集已有衍生状态的空生图提示词。模型漏掉需要补全的状态时任务失败，报告错误并用新的 requestId 重试。原片分析阶段可先留下空提示词，由资产提取阶段补齐。用户要求调整时使用 studio 工具修改已有资产。
+7. 进入正式分镜后可用 `plan-storyboard` 传项目、剧集、版本、唯一 requestId 和可选 requirements。独立执行模型读取本集剧本、原片分析、资产文字和现有镜头，整理模型输出逐镜建议，不接收图片像素；如历史项目没有完整的分析任务记录，应明确告知仅能读取镜头中保存的原片依据；读取输出并经用户确认后用 `apply-revision` 应用。可调整画面、景别、运镜、音效与 0.1 秒目标时长，不能改写对白或原片信息；版本变化会阻止覆盖。资产图片和任务、视频模型与生成方式在进入视频制作前检查。
 
 ## 工作区文件与命令
 
@@ -195,7 +199,7 @@ H3 视频模型支持 `minimax-h3-flash` 与 `minimax-h3-standard`；视频清�
 | `builtin_list_files` | 可选 `path`，列出工作区目录 |
 | `builtin_read_file` | `path`，可选 `offset`、`limit`、`encoding` |
 | `builtin_write_file` | `path`、`content`，可选 `encoding` |
-| `builtin_import_file` | `fileId`、`path`，把聊天附件复制进工作区 |
+| `builtin_import_file` | `fileId`、`path`，把聊天附件复制进工作区；MP4 视频支持到 300 MiB，普通附件不超过 50 MiB |
 | `builtin_publish_file` | `path`，返回实际下载链接 |
 | `builtin_run_command` | `command`，可选 `cwd`、`timeoutMs`、`waitMs`；用于工作区文件处理或 Skill 配套命令 |
 | `builtin_process_status` | `processId`，可选 `offset`、`waitMs`；读取命令输出和退出状态 |
@@ -207,7 +211,8 @@ H3 视频模型支持 `minimax-h3-flash` 与 `minimax-h3-standard`；视频清�
 | --- | --- |
 | `builtin_list_skills` | 无参数；返回技能名称、描述、ID、版本 |
 | `builtin_load_skill` | `skillId`；返回完整指令、目录及文件清单 |
-| `builtin_create_skill` | `path`；更新已有技能另传 `skillId`、`expectedVersion`；返回保存的 Skill ID 和版本 |
+| `builtin_create_skill` | `path`；安装并准备运行环境时传 `setup: true`，会检查系统命令、准备 `requirements.txt` / `pyproject.toml` / `package.json` 并运行 `--selftest`；更新已有技能另传 `skillId`、`expectedVersion`；返回保存的 Skill ID、版本和真实准备报告 |
+| `builtin_prepare_skill` | `skillId`；为已安装 Skill 重试依赖准备和脚本自检，返回每项命令的真实状态、输出和退出码 |
 
 ## 其他网站设置
 

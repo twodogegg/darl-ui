@@ -17,7 +17,7 @@ export function promptFor(job: Pick<MediaJob, 'prompt' | 'style' | 'type' | 'mod
   const description = style.description?.trim();
   const stylePrompt = `视觉风格：${style.name}${description ? `。${description}` : ''}`;
   const target = job.options?.studioTarget as { resource?: string } | undefined;
-  return job.type === 'image' && target?.resource === 'assets'
+  return job.type === 'image' && target?.resource === 'assets' && !(Array.isArray(job.options?.references) && job.options.references.length)
     ? `${stylePrompt}\n\n${job.prompt}`
     : `${job.prompt}\n\n${stylePrompt}`;
 }

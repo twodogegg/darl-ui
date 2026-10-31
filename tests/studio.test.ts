@@ -16,6 +16,7 @@ import { CLIP_DURATION_LIMIT, clipImagePrompt, clipMediaReferences, clipPrompt, 
 import { defaultModelConfiguration, toMediaModels } from '../src/components/settings/model-config';
 import { FIRST_SHOT_TRANSITION, freeShotFields, shotOptionValue, shotOptions, studioPositions, type StudioChange } from '../examples/agent-chat/studio-schema';
 import { studioAgentPayload } from '../examples/agent-chat/client/studio/agent-task';
+import agentButtons from '../examples/agent-chat/prompts/studio-agent-buttons.json';
 
 let directory: string, store: StudioStore, projectId: string, files: FileStore;
 beforeEach(() => {
@@ -87,6 +88,10 @@ describe('shared short drama business service', () => {
     expect(prompt.indexOf('镜头 01')).toBeLessThan(prompt.indexOf('镜头 02'));
     expect(clipImagePrompt({ id: 'clip-1', blocking: '她站在门外右侧', storyboardPrompt: '' }, lines, [scene])).toContain('初始站位与状态：她站在门外右侧');
     expect(shotPrompt(lines[1])).toContain('画面：指节叩门');
+  });
+  it('persists each clip storyboard prompt independently of its video prompt', () => {
+    store.apply('video-prompt', [{ resource: 'clips', op: 'create', id: 'clip-video', values: { episodeId: 'episode-1', sceneId: 'scene-1', storyboardPrompt: '四格分镜提示词', prompt: '视频提示词', duration: 5 } }]);
+    expect(new StudioStore(store.projects).snapshot().clips.find(item => item.id === 'clip-video')).toMatchObject({ storyboardPrompt: '四格分镜提示词', prompt: '视频提示词' });
   });
   it('orders a segment by clip.shotIds and moves shots by id, not object identity', () => {
     const all = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }];
@@ -196,16 +201,22 @@ describe('shared short drama business service', () => {
   });
 
   it('separates the visible button request from its model parameters', () => {
-    const payload = studioAgentPayload({ action: 'rewrite-script', projectId, notes: '加强冲突', ignored: '不传递' }, []);
+    const payload = studioAgentPayload({ action: 'rewrite-script', projectId, notes: '加强冲突', ignored: '不传递' }, [], '页面配置的改写指令');
     expect(payload.content).toBe('请按我的要求改写这集剧本。');
     expect(payload.context.modelContext).toContain(`"projectId":"${projectId}"`);
     expect(payload.context.modelContext).toContain('加强冲突');
+    expect(payload.context.modelContext).toContain('页面配置的改写指令');
+    expect(payload.context.modelContext).not.toContain(agentButtons['rewrite-script'].hiddenMessage);
     expect(payload.content).not.toContain('加强冲突');
     expect(payload.context.modelContext).not.toContain('不传递');
-    expect(() => studioAgentPayload({ action: 'redraw-analyze', projectId }, [])).toThrow('darl-studio');
+    expect(() => studioAgentPayload({ action: 'redraw-analyze', projectId }, [], '读取原片')).toThrow('darl-studio');
     const skills = [{ id: 'redraw', name: '视频转绘', slug: 'video-redraw' }, { id: 'studio', name: '网站操作', slug: 'darl-studio' }];
-    expect(studioAgentPayload({ action: 'video-description', projectId, projectMode: 'video-redraw' }, skills).context.modelSkillIds).toEqual(['studio']);
-    expect(studioAgentPayload({ action: 'video-description', projectId, projectMode: 'script' }, skills).context.modelSkillIds).toEqual([]);
+    expect(studioAgentPayload({ action: 'video-description', projectId, projectMode: 'video-redraw' }, skills, '页面指令').context.modelSkillIds).toEqual(['studio']);
+    expect(studioAgentPayload({ action: 'video-description', projectId, projectMode: 'script' }, skills, '页面指令').context.modelSkillIds).toEqual([]);
+    const storyboard = studioAgentPayload({ action: 'storyboard-prompts', projectId, episodeId: 'episode-1', mode: '分镜图', projectMode: 'script' }, skills, agentButtons['storyboard-prompts'].hiddenMessage);
+    expect(storyboard.context.modelContext).toContain('clips.storyboardPrompt');
+    expect(storyboard.context.modelContext).toContain('2×2');
+    expect(storyboard.context.modelContext).toContain('"mode":"分镜图"');
   });
   it('refreshes default prompt text without overwriting a custom prompt', () => {
     store.apply('custom-prompt', [{ resource: 'prompts', op: 'update', id: '0-0', version: 1, values: { mode: 'replace', text: '我的大纲提示词' } }]);
@@ -230,6 +241,17 @@ describe('shared short drama business service', () => {
     expect(refs.additional).toEqual([{ id: 'extra', kind: 'image', url: '/api/files/extra', name: '图片 5' }]);
     expect(refs.frames).toEqual([]);
     expect(refs.assets).toHaveLength(2);
+  });
+  it('does not turn unselected asset mentions into storyboard image references', () => {
+    const data = {
+      episodes: [{ id: 'episode-1', projectId: 'project-1' }],
+      assets: [
+        { id: 'chloe', projectId: 'project-1', name: 'Chloe Xu', type: '角色', image: '/api/files/chloe' },
+        { id: 'mia', projectId: 'project-1', name: 'Mia', type: '角色', image: '/api/files/mia' },
+      ],
+    };
+    const clip = { id: 'clip', episodeId: 'episode-1', assetIds: ['mia'], prompt: '<Chloe Xu> 不应因为描述文字自动成为参考图。' };
+    expect(clipMediaReferences(clip, data, { includeFrames: false, selectedOnly: true }).images.map(ref => ref.url)).toEqual(['/api/files/mia']);
   });
   it('discovers required fields and reports the invalid query field with available choices', () => {
     expect(store.query({ resource: 'assets', describe: true })).toMatchObject({ requiredOnCreate: ['projectId', 'name'], valuesSchema: { properties: { projectId: { type: 'string', minLength: 1 } } } });

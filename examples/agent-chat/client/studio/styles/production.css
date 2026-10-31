@@ -513,6 +513,13 @@
 .production-advanced > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
 .production-advanced > summary span { display: block; padding: 5px 0 12px; color: var(--br-text-secondary); font-size: 11px; font-weight: 400; }
 .production-center .production-description { margin-bottom: 20px; }
+.production-storyboard-prompts { margin-bottom: 20px; }
+.production-storyboard-prompts > .row { align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.production-storyboard-prompts h3 { font-size: 13px; }
+.production-storyboard-prompts .muted { font-size: 11px; }
+.production-storyboard-prompt-list { display: grid; gap: 10px; }
+.production-storyboard-prompt-list textarea { width: 100%; min-height: 100px; padding: 10px 12px; border: 1px solid var(--br-border); border-radius: 6px; background: var(--br-input-bg); color: var(--br-text-primary); font: inherit; font-size: 12px; line-height: 1.7; resize: vertical; }
+.production-storyboard-prompt-list textarea::placeholder { color: var(--br-text-secondary); }
 .production-center .production-description > .asset-mention-text { max-height: 160px; }
 .production-media-actions { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
 .production-media-actions details { position: relative; }

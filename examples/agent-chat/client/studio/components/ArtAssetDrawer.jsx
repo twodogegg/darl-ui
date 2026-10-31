@@ -140,7 +140,7 @@ export default function ArtAssetDrawer({
           shot.description = renameMentions(shot.description)
           shot.dialogue = (shot.dialogue || []).map(line => line.assetId === form.id ? { ...line, speaker: name } : line)
         })
-        draft.clips.filter(item => episodeIds.has(item.episodeId)).forEach(clip => { clip.prompt = renameMentions(clip.prompt) })
+        draft.clips.filter(item => episodeIds.has(item.episodeId)).forEach(clip => { clip.prompt = renameMentions(clip.prompt); if (clip.storyboardPrompt) clip.storyboardPrompt = renameMentions(clip.storyboardPrompt) })
       }
     })
     if (!saved) throw new Error('资产未保存，请先处理保存错误')

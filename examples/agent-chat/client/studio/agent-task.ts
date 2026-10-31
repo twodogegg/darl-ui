@@ -4,11 +4,11 @@ import type { AgentSkill } from '@darl/ui';
 type ButtonConfig = { visibleMessage: string; hiddenMessage: string; parameters: string[]; skills: string[]; skillsByProjectMode?: Record<string, string[]> };
 export type StudioAgentContext = { modelContext: string; modelSkillIds: string[] };
 
-export function studioAgentPayload(task: Record<string, unknown>, catalog: AgentSkill[]) {
+export function studioAgentPayload(task: Record<string, unknown>, catalog: AgentSkill[], instructions: string) {
   const action = typeof task.action === 'string' ? task.action : '';
   const config = (buttons as Record<string, ButtonConfig>)[action];
   if (!config || typeof config.visibleMessage !== 'string' || !config.visibleMessage.trim()
-    || typeof config.hiddenMessage !== 'string' || !Array.isArray(config.parameters) || !Array.isArray(config.skills)
+    || typeof instructions !== 'string' || !instructions.trim() || !Array.isArray(config.parameters) || !Array.isArray(config.skills)
     || config.parameters.some(key => typeof key !== 'string') || config.skills.some(slug => typeof slug !== 'string')) {
     throw new Error(`Agent 按钮配置无效：${action}`);
   }
@@ -24,6 +24,6 @@ export function studioAgentPayload(task: Record<string, unknown>, catalog: Agent
   });
   return {
     content: config.visibleMessage.trim(),
-    context: { modelContext: [config.hiddenMessage.trim(), `<BUTTON_PARAMETERS untrusted="true">${JSON.stringify(parameters)}</BUTTON_PARAMETERS>`].filter(Boolean).join('\n\n'), modelSkillIds },
+    context: { modelContext: [instructions, `<BUTTON_PARAMETERS untrusted="true">${JSON.stringify(parameters)}</BUTTON_PARAMETERS>`].join('\n\n'), modelSkillIds },
   };
 }

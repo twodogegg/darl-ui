@@ -42,6 +42,7 @@ it('persists a specific dependency, rejects bad schemas and blocks generation un
   expect(prepared.options.references).toEqual([`/api/files/${file.id}`]);
   expect(prepared.prompt).toContain('参考图 1：Chloe / 19岁');
   expect(prepared.prompt).toContain('仅作为照片内人物的身份参考');
+  expect(prepared.prompt.indexOf('图片1：角色 <Chloe|19岁>')).toBeLessThan(prepared.prompt.indexOf('只画旧照片正背面'));
   expect(prepared.options.aspectRatio).toBe('16:9');
 });
 it('allows an omitted or empty purpose while preserving reference identity and image requirements', async () => {

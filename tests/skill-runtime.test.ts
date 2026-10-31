@@ -64,6 +64,20 @@ describe('generic local Skill runtime', () => {
     await expect(execute('write_file', { path: 'bad.bin', content: '!!!!', encoding: 'base64' })).rejects.toThrow('base64');
   });
 
+  it('imports large MP4 attachments for local media scripts while keeping ordinary files bounded', async () => {
+    const originalGet = files.get.bind(files);
+    const originalGetBytes = files.getBytes.bind(files);
+    const largeVideo = { id: 'large-video', mimeType: 'video/mp4', size: 51 * 1024 * 1024 } as any;
+    const largeText = { id: 'large-text', mimeType: 'text/plain', size: 51 * 1024 * 1024 } as any;
+    Object.assign(files, {
+      get: (id: string) => id === largeVideo.id ? largeVideo : id === largeText.id ? largeText : originalGet(id),
+      getBytes: async (id: string) => id === largeVideo.id ? { file: largeVideo, bytes: Buffer.from('video') } : id === largeText.id ? { file: largeText, bytes: Buffer.from('text') } : originalGetBytes(id),
+    });
+    await execute('import_file', { fileId: largeVideo.id, path: 'videos/source.mp4' });
+    expect((await execute('read_file', { path: 'videos/source.mp4' })).content).toBe('video');
+    await expect(execute('import_file', { fileId: largeText.id, path: 'text/source.txt' })).rejects.toThrow('50 MiB');
+  });
+
   it('reads actual image pixels from workspace files and stored file IDs, keeping binary pagination available', async () => {
     const bytes = await sharp({ create: { width: 80, height: 40, channels: 3, background: '#cc2200' } }).png().toBuffer();
     await execute('write_file', { path: 'frames/frame.png', content: bytes.toString('base64'), encoding: 'base64' });

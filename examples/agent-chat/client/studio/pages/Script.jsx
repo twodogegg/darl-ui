@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProject, Workflow } from '../components/Shell'
 import { Button, Confirm, Field, Modal, Models, Processing } from '../components/ui'
-import { useStore, useAgentTask } from '../store'
+import { studioApi, useStore, useAgentTask } from '../store'
+import { WorkflowRunDetails } from '../components/WorkflowRunDetails'
 import { id } from '../data'
 import { episodeScenes, sceneLabel, scenesToScript, removeEpisode, sourceScenes, unmatchedSentences } from '../scenes'
 import ProjectOutline from '../components/ProjectOutline'
@@ -79,7 +80,7 @@ function ScriptImport({ context }) {
 
 function ScriptList({ context }) {
   const { project, episodes } = context
-  const { data, patch, notify, log, update, requestAgent } = useStore()
+  const { data, patch, notify, update, reload } = useStore()
   const navigate = useNavigate()
   const [activeId, setActiveId] = useState(context.episode?.id || episodes[0]?.id)
   const active = episodes.find((e) => e.id === activeId) || episodes[0]
@@ -92,6 +93,8 @@ function ScriptList({ context }) {
   const [duration, setDuration] = useState(active?.duration || 60)
   const [regen, setRegen] = useState(false)
   const [transitioning, setTransitioning] = useState(false)
+  const [scriptJob, setScriptJob] = useState(null)
+  const [scriptRefresh, setScriptRefresh] = useState(0)
   const [notes, setNotes] = useState('')
   const { busy, run, cancel } = useAgentTask()
 
@@ -104,6 +107,44 @@ function ScriptList({ context }) {
       base.current = { id: active?.id, version: active?._version, scenes: JSON.stringify(active ? episodeScenes(active) : []), duration: active?.duration || 60 }
     }
   }, [active?.id, active?._version])
+
+  useEffect(() => {
+    if (project.creationMode !== 'video-redraw' || !active?.id) return
+    const controller = new AbortController()
+    setScriptJob(null)
+    const params = new URLSearchParams({ projectId: project.id, episodeId: active.id })
+    studioApi(`video-redraw/status?${params}`, undefined, controller.signal).then(async result => {
+      const job = result.jobs.find(item => item.kind === 'write-script')
+      if (!job) return
+      setScriptJob(job)
+      if (job.status === 'completed') {
+        params.set('jobId', job.id)
+        setScriptJob(await studioApi(`video-redraw/status?${params}`, undefined, controller.signal))
+      } else if (['queued', 'running'].includes(job.status)) {
+        params.set('jobId', job.id)
+        const done = await studioApi(`video-redraw/wait?${params}`, undefined, controller.signal)
+        setScriptJob(done)
+        if (done.status === 'completed') await reload()
+      }
+    }).catch(error => { if (!controller.signal.aborted) setScriptJob({ status: 'failed', error: error.message }) })
+    return () => controller.abort()
+  }, [project.id, active?.id, scriptRefresh])
+
+  async function writeRedrawScript() {
+    try {
+      const latest = await reload()
+      const currentProject = latest.projects.find(item => item.id === project.id)
+      const job = await studioApi('video-redraw/action', { action: 'write-script', projectId: project.id, episodeId: active.id, requestId: crypto.randomUUID(), version: currentProject._version })
+      setScriptJob(job); setScriptRefresh(value => value + 1)
+    } catch (error) { setScriptJob({ status: 'failed', error: error.message }) }
+  }
+
+  async function cancelRedrawScript() {
+    try {
+      await studioApi('video-redraw/action', { action: 'cancel', projectId: project.id, episodeId: active.id, jobId: scriptJob.id || scriptJob.jobId })
+      setScriptRefresh(value => value + 1)
+    } catch (error) { notify(error.message) }
+  }
 
   const dirty =
     !!active &&
@@ -159,12 +200,13 @@ function ScriptList({ context }) {
       const redraw = project.creationMode === 'video-redraw'
       const saved = await update(draft => {
         draft.episodes.filter(episode => episode.projectId === project.id).forEach(episode => { episode.stage = Math.max(episode.stage, 2) })
-        if (redraw) draft.projects.find(item => item.id === project.id).adaptation = '忠实'
       })
       if (!saved) return
       if (redraw) {
-        navigate(`/art?projectId=${encodeURIComponent(project.id)}`)
-        await requestAgent({ action: 'redraw-assets', projectId: project.id, episodeId: active.id, continueCurrentSession: true })
+        const latest = await reload()
+        const currentProject = latest.projects.find(item => item.id === project.id)
+        await studioApi('video-redraw/action', { action: 'extract-assets', projectId: project.id, episodeId: active.id, requestId: crypto.randomUUID(), version: currentProject._version })
+        navigate(`/art?projectId=${encodeURIComponent(project.id)}&episodeId=${encodeURIComponent(active.id)}`)
       } else {
         navigate(`/video?projectId=${encodeURIComponent(project.id)}&episodeId=${encodeURIComponent(episodes[0].id)}`)
         notify('全部剧集已确认，进入视频制作')
@@ -193,6 +235,13 @@ function ScriptList({ context }) {
           />
         </Field>
       </header>
+      {project.creationMode === 'video-redraw' && <div className="toolbar">
+        <Button disabled={dirty || !active || !data.shots.some(shot => shot.episodeId === active.id) || scenes.some(scene => scene.content.trim()) || ['queued', 'running'].includes(scriptJob?.status)} onClick={writeRedrawScript}>生成本集剧本</Button>
+        {['queued', 'running'].includes(scriptJob?.status) && <Button onClick={cancelRedrawScript}>取消生成</Button>}
+        <WorkflowRunDetails projectId={project.id} episodeId={active?.id} job={scriptJob} reload={reload} onStarted={() => setScriptRefresh(value => value + 1)} />
+        <span role="status">{['queued', 'running'].includes(scriptJob?.status) ? `正在生成剧本：${scriptJob.phase || '排队'}…` : scriptJob?.status === 'completed' ? '剧本已生成，请核对待确认事项。' : ['failed', 'cancelled', 'interrupted'].includes(scriptJob?.status) ? `剧本生成未完成：${scriptJob.error || '任务已取消'}` : '基于已确认目标对白生成，已有正文不会覆盖。'}</span>
+        {scriptJob?.openItems?.length > 0 && <details><summary>待确认事项（{scriptJob.openItems.length}）</summary><ul>{scriptJob.openItems.map((item, index) => <li key={index}>{item}</li>)}</ul></details>}
+      </div>}
       <div className="script-split">
         <aside className="script-episodes" aria-label="剧集列表">
           <p className="script-episodes-title">剧集</p><Button onClick={addEpisode}>＋ 添加剧集</Button>

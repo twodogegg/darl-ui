@@ -5,7 +5,7 @@ export const studioFields = {
   dialogues: 'projectId episodeId idCode sourceText sourceSpeaker sourceStart sourceEnd targetText targetSpeaker tone timingStatus estimatedSeconds plannedSeconds note',
   assets: 'projectId episodeIds name type role alias description appearance costume voiceDescription image prompt variants history voiceId references dependencies imageDependencies source',
   shots: 'episodeId sceneId description scale camera transition dialogue effects duration source assetIds image imageHistory storyboardPrompt clipId',
-  clips: 'episodeId sceneId title shotIds sourceSignature description duration prompt assetIds references disabledVoiceIds lastGenerationVoiceIds image imageHistory storyboardImage storyboardHistory imageSource blocking blockingImage blockingHistory excludedFrameUrls videos currentVideo model resolution ratio mode firstFrame lastFrame',
+  clips: 'episodeId sceneId title shotIds sourceSignature description duration prompt storyboardPrompt assetIds references disabledVoiceIds lastGenerationVoiceIds image imageHistory storyboardImage storyboardHistory imageSource blocking blockingImage blockingHistory excludedFrameUrls videos currentVideo model resolution ratio mode firstFrame lastFrame',
   films: 'projectId episodeId title name url',
   history: 'projectId episodeId message time',
   folders: 'name',
@@ -110,7 +110,7 @@ export const studioDefaults: Partial<Record<StudioResource, Record<string, unkno
   dialogues: { projectId: '', episodeId: '', idCode: '', sourceText: '', sourceSpeaker: '', sourceStart: 0, sourceEnd: 0, targetText: '', targetSpeaker: '', tone: '', timingStatus: 'estimate_not_measured', estimatedSeconds: 0, plannedSeconds: 0, note: '' },
   assets: { episodeIds: [], name: '', type: '角色', role: '', alias: '', description: '', appearance: '', costume: '', voiceDescription: '', image: '', prompt: '', variants: [], history: [], voiceId: '', references: [], dependencies: [], imageDependencies: {} },
   shots: { description: '', scale: '中景', camera: '固定', transition: '硬切', dialogue: [], effects: '', duration: 3, assetIds: [], image: '', imageHistory: [], storyboardPrompt: '', clipId: '' },
-  clips: { title: '新片段', shotIds: [], sourceSignature: '', description: '', duration: 5, prompt: '', assetIds: [], references: [], disabledVoiceIds: [], lastGenerationVoiceIds: [], image: '', imageHistory: [], storyboardImage: '', storyboardHistory: [], imageSource: 'clip', blocking: '', blockingImage: '', blockingHistory: [], excludedFrameUrls: [], videos: [], model: '', resolution: '', ratio: '9:16', mode: '参考生成', firstFrame: '', lastFrame: '' },
+  clips: { title: '新片段', shotIds: [], sourceSignature: '', description: '', duration: 5, prompt: '', storyboardPrompt: '', assetIds: [], references: [], disabledVoiceIds: [], lastGenerationVoiceIds: [], image: '', imageHistory: [], storyboardImage: '', storyboardHistory: [], imageSource: 'clip', blocking: '', blockingImage: '', blockingHistory: [], excludedFrameUrls: [], videos: [], model: '', resolution: '', ratio: '9:16', mode: '参考生成', firstFrame: '', lastFrame: '' },
 };
 export function studioResource(value: unknown): StudioResource {
   if (typeof value !== 'string' || !Object.hasOwn(studioFields, value)) throw new Error('不支持的资源类型');
@@ -187,6 +187,7 @@ export function studioValueSchema(resource: StudioResource): Record<string, unkn
     if (resource === 'clips' && key === 'shotIds') schema.description = '可选的同剧集来源镜头 ID，仅供追溯，不参与生成时长、描述、图片或音色推导；无来源镜头时留空数组。';
     if (resource === 'clips' && key === 'imageSource') schema = { type: 'string', enum: ['clip'], description: '分镜图方式仅使用片段当前选用图片。历史 shots 值不再参与生成。' };
     if (resource === 'clips' && key === 'prompt') schema.description = '片段视频描述，是视频生成的直接依据；可手动编辑，也可用“从镜头生成描述”按关联镜头重建。修改它不会回写镜头。';
+    if (resource === 'clips' && key === 'storyboardPrompt') schema.description = '此片段分镜图的完整生图提示词，一片段一条，默认 2×2 四宫格；与视频提示词 prompt 独立。';
     if (key === 'dialogue') schema = { type: 'array', items: dialogueSchema };
     if (resource === 'assets' && key === 'dependencies') schema = dependenciesSchema;
     if (resource === 'assets' && key === 'imageDependencies') schema = dependencyImagesSchema;

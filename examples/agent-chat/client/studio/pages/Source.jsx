@@ -77,7 +77,7 @@ function RedrawSource({ context }) {
       })
       if (!saved) throw new Error('剧集保存失败')
       navigate(`/source?projectId=${encodeURIComponent(project.id)}&episodeId=${encodeURIComponent(episodeId)}`)
-      notify('剧集已添加，请生成本集分镜')
+      notify('剧集已添加，请分析本集原片')
     } catch (error) { notify(`添加剧集失败：${error.message}`) }
     finally { setUploading(false) }
   }
@@ -93,7 +93,7 @@ function RedrawSource({ context }) {
     finally { setStarting(false) }
   }
   return <Workflow context={context}>
-    <header className="workspace-toolbar"><div><h2>原片</h2><p className="muted">自动检测候选切镜，分析原片并生成可编辑分镜表。</p></div><div className="toolbar"><input ref={input} type="file" accept="video/mp4,.mp4" aria-label="上传新剧集原片" hidden onChange={addEpisode} /><button className="btn" disabled={uploading} onClick={() => input.current?.click()}>{uploading ? '正在上传剧集…' : '＋ 添加剧集'}</button><button className="btn" disabled={!source?.fileId || starting || hasShots || ['queued', 'running'].includes(analysis?.status)} onClick={generate}>{starting ? '正在启动…' : '生成分镜'}</button><button className="btn primary" onClick={() => navigate(context.link('/storyboard'))}>查看分镜</button></div></header>
-    <div className="redraw-source"><WorkflowRunDetails projectId={project.id} episodeId={episode?.id} job={analysis} reload={reload} onStarted={next => { setAnalysis(next); setRefresh(value => value + 1) }} />{source?.fileId ? <SourcePlayer source={source} /> : <div className="empty"><h2>暂无原视频</h2><p>请先上传原视频。</p></div>}<p className="muted" role={submitError || analysis?.status === 'failed' ? 'alert' : 'status'}>{submitError ? `生成分镜启动失败：${submitError}` : ['queued', 'running'].includes(analysis?.status) ? `正在生成分镜：${analysis.phase || '排队'}…` : analysis?.status === 'completed' || hasShots ? '分镜已生成，可在分镜页查看并编辑。' : ['failed', 'interrupted', 'cancelled'].includes(analysis?.status) ? `生成分镜未完成${analysis.failureStage ? `（${analysis.failureStage}）` : ''}：${analysis.error || '任务已取消'}，可查看任务详情。` : '生成后可在此查看进度，完成后在分镜页查看并编辑。'}</p></div>
+    <header className="workspace-toolbar"><div><h2>原片</h2><p className="muted">自动检测候选切镜并分析原片，分析结果供剧本、资产和分镜使用。</p></div><div className="toolbar"><input ref={input} type="file" accept="video/mp4,.mp4" aria-label="上传新剧集原片" hidden onChange={addEpisode} /><button className="btn" disabled={uploading} onClick={() => input.current?.click()}>{uploading ? '正在上传剧集…' : '＋ 添加剧集'}</button><button className="btn" disabled={!source?.fileId || starting || hasShots || ['queued', 'running'].includes(analysis?.status)} onClick={generate}>{starting ? '正在启动…' : '分析原片'}</button><button className="btn primary" disabled={!hasShots || ['queued', 'running'].includes(analysis?.status)} onClick={() => navigate(`/script?projectId=${encodeURIComponent(project.id)}&episodeId=${encodeURIComponent(episode?.id || '')}`)}>进入剧本</button></div></header>
+    <div className="redraw-source"><WorkflowRunDetails projectId={project.id} episodeId={episode?.id} job={analysis} reload={reload} onStarted={next => { setAnalysis(next); setRefresh(value => value + 1) }} />{source?.fileId ? <SourcePlayer source={source} /> : <div className="empty"><h2>暂无原视频</h2><p>请先上传原视频。</p></div>}<p className="muted" role={submitError || analysis?.status === 'failed' ? 'alert' : 'status'}>{submitError ? `原片分析启动失败：${submitError}` : ['queued', 'running'].includes(analysis?.status) ? `正在分析原片：${analysis.phase || '排队'}…` : analysis?.status === 'completed' || hasShots ? '原片分析完成，可进入剧本。' : ['failed', 'interrupted', 'cancelled'].includes(analysis?.status) ? `原片分析未完成${analysis.failureStage ? `（${analysis.failureStage}）` : ''}：${analysis.error || '任务已取消'}，可查看任务详情。` : '分析后可在此查看进度，完成后进入剧本。'}</p></div>
   </Workflow>
 }

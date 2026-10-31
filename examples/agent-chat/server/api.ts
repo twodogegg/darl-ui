@@ -29,12 +29,14 @@ import { RUNTIME_TOOLS, SkillRuntime } from './skill-runtime';
 import { SkillLibrary } from './skill-library';
 import { sendRevalidatedJson } from './http-cache';
 import { RequestRecordStore, requestRecordsApi, requestRecordScope } from './request-records';
+import { createWorkflowDebugLog } from './workflow-debug';
 import { createPromptOptimization, type OptimizationPromptKey } from './prompt-optimization';
 import { RequestTimeout } from './request-timeout';
 import { VideoRedraw, REDRAW_TOOLS, handleRedrawRequest } from './video-redraw';
 import { loadWorkflowAgents, validateWorkflowAgents } from './workflow-agents';
 import { VideoEditing, handleVideoEditingRequest } from './video-editing';
 import { USER_INPUT_TOOL, validateUserAnswers, validateUserInput } from './user-input';
+import studioAgentButtons from '../prompts/studio-agent-buttons.json';
 
 /** Resolve the model selected in the current chat against an enabled text binding. */
 export function resolveTextModel(providers: StoredProvider[], configuration: ModelConfiguration, providerId: string, modelId: string) {
@@ -277,7 +279,16 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const storageSettings = new StorageSettings(storage, files, fileConfig);
   const projectStore = new ProjectStore(storage.path, files);
   const studio = new StudioStore(projectStore);
+  const workflowDebug = createWorkflowDebugLog(join(directory, 'logs'), /^(1|true|yes|on)$/i.test(env.VIDEO_REDRAW_DEBUG?.trim() || ''), () => [
+    env.AGENT_CHAT_API_KEY || '', env.VIDEO_ANALYSIS_API_KEY || '', env.FISH_API_KEY || '', env.COS_SECRET_ID || '', env.COS_SECRET_KEY || '',
+    ...((storage.getConfig<StoredProvider[]>('providers') || []).map(provider => provider.apiKey)),
+    storage.getConfig<{ apiKey?: string }>('voiceConfiguration')?.apiKey || '',
+    storage.getConfig<{ secretId?: string; secretKey?: string }>('storageConfiguration')?.secretId || '',
+    storage.getConfig<{ secretId?: string; secretKey?: string }>('storageConfiguration')?.secretKey || '',
+  ]);
+  workflowDebug?.({ event: 'debug.enabled', message: '视频转绘工作流调试日志已启用' });
   const videoRedraw: VideoRedraw = new VideoRedraw(studio, {
+    debugLog: workflowDebug,
     workflowAgent: kind => loadWorkflowAgents(storage).find(agent => agent.kind === kind)!,
     workflowSkills: ids => ids.map(id => {
       const skill = skillLibrary.list().find(item => item.id === id);
@@ -334,6 +345,9 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   };
 
   const initial: StoredProvider[] = [{ id: 'darl', name: 'Darl', baseUrl: env.AGENT_CHAT_BASE_URL || 'https://api.darl.cn/v1', protocol: 'openai-completions', apiKey: env.AGENT_CHAT_API_KEY || '', status: 'unknown', models: [{ id: env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash', name: env.AGENT_CHAT_MODEL || 'deepseek-v4.1-flash', providerId: 'darl', type: 'text', enabled: true }] }];
+  const buttonInstructions = storage.getConfig<Record<string, string>>('studioAgentButtonInstructions') || {};
+  const initializedButtons = Object.fromEntries(Object.entries(studioAgentButtons).map(([action, button]) => [action, buttonInstructions[action] ?? button.hiddenMessage]));
+  if (Object.keys(initializedButtons).some(action => buttonInstructions[action] === undefined)) storage.setConfig('studioAgentButtonInstructions', { ...buttonInstructions, ...initializedButtons });
   if (!storage.getConfig<StoredProvider[]>('providers')) storage.setConfig('providers', initial);
   const storedConfiguration = storage.getConfig<ModelConfiguration>('modelConfiguration');
   if (!storedConfiguration) storage.setConfig('modelConfiguration', defaultModelConfiguration());
@@ -496,6 +510,17 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       const defaultAgent: StoredAgent = { id: 'default', name: savedDefault?.name || '网站助手', avatar: savedDefault?.avatar || '/agent-default-avatar.png', description: savedDefault?.description || '系统默认 Agent', type: 'main_agent', source: 'system_default', selectable: true, callable: true, contextStrategy: 'inherit_filtered', instructions: savedDefault?.instructions || await loadPrompt(), websiteInstructions: savedDefault?.websiteInstructions ?? readFileSync(new URL('../prompts/website.md', import.meta.url), 'utf8'), skillIds: [], contextPolicy: savedDefault?.contextPolicy || { childContext: 'task-only', historyMode: 'summary', toolResultMode: 'standard' }, enabled: true, isDefault: true, builtIn: true };
       const agents = [defaultAgent, ...configuredAgents.filter((agent) => agent.id !== defaultAgent.id)];
       const path = request.url.split('?')[0];
+      if (path === '/api/studio-agent-buttons' && request.method === 'GET') {
+        const saved = storage.getConfig<Record<string, string>>('studioAgentButtonInstructions') || {};
+        return send(200, Object.entries(studioAgentButtons).map(([action, button]) => ({ action, label: button.visibleMessage, instructions: saved[action] ?? button.hiddenMessage })));
+      }
+      if (path === '/api/studio-agent-buttons' && request.method === 'POST') {
+        const body = await readBody(request);
+        if (typeof body.action !== 'string' || !Object.hasOwn(studioAgentButtons, body.action) || typeof body.instructions !== 'string' || !body.instructions.trim() || body.instructions.length > 100_000) throw new Error('按钮指令无效或超过 100000 字');
+        const saved = storage.getConfig<Record<string, string>>('studioAgentButtonInstructions') || {};
+        storage.setConfig('studioAgentButtonInstructions', { ...saved, [body.action]: body.instructions });
+        return send(200, { action: body.action, instructions: body.instructions });
+      }
       if (path === '/api/workflow-agents/tools' && request.method === 'GET') return send(200, [...RUNTIME_TOOLS, ...STUDIO_TOOLS, ...REDRAW_TOOLS].filter(tool => tool.risk === 'read' && !('waitForCompletion' in tool)).map(tool => ({ name: tool.name, title: tool.title, risk: tool.risk })));
       if (path === '/api/workflow-agents' && request.method === 'GET') return send(200, loadWorkflowAgents(storage));
       if (path === '/api/workflow-agents' && request.method === 'POST') {
@@ -994,7 +1019,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
                 const args: unknown = JSON.parse(request.arguments || '{}');
                 if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('工具参数必须为 JSON 对象');
                 call.input = args;
-                const lowRisk = runtimeTool.approval === 'workspace' || (runtimeTool.approval === 'library' && !(args as Record<string, unknown>).skillId) || (runtimeTool.approval === 'command' && isLowRiskCommand((args as Record<string, unknown>).command));
+                const lowRisk = runtimeTool.approval === 'workspace' || (runtimeTool.name === 'builtin_create_skill' && (args as Record<string, unknown>).setup !== true && !(args as Record<string, unknown>).skillId) || (runtimeTool.approval === 'library' && !(args as Record<string, unknown>).skillId) || (runtimeTool.approval === 'command' && isLowRiskCommand((args as Record<string, unknown>).command));
                 if (shouldConfirm(approvalMode, runtimeTool.risk, lowRisk)) {
                   call.status = 'confirmation';
                   const decision = waitForConfirmation(call.id, callSignal);
