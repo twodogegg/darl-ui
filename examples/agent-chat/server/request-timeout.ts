@@ -8,6 +8,8 @@ export class RequestTimeout {
 
   constructor(private milliseconds = 180_000) { this.touch(); }
 
+  extend(milliseconds: number) { this.milliseconds = Math.max(this.milliseconds, milliseconds); this.touch(); }
+
   touch = () => {
     clearTimeout(this.timer);
     if (this.disposed || this.paused || this.signal.aborted) return;

@@ -15,8 +15,10 @@ import { MediaJobStore } from '../examples/agent-chat/server/media-job-store';
 import { CLIP_DURATION_LIMIT, clipImagePrompt, clipMediaReferences, clipPrompt, clipShots, clipVoices, imageSourceOptions, moveShotId, shotPrompt, sourceImageReferences, totalDuration, videoDuration, videoImageReferences } from '../examples/agent-chat/client/studio/storyboard';
 import { defaultModelConfiguration, toMediaModels } from '../src/components/settings/model-config';
 import { FIRST_SHOT_TRANSITION, freeShotFields, shotOptionValue, shotOptions, studioPositions, type StudioChange } from '../examples/agent-chat/studio-schema';
-import { studioAgentPayload } from '../examples/agent-chat/client/studio/agent-task';
-import agentButtons from '../examples/agent-chat/prompts/studio-agent-buttons.json';
+import { saveNovelScript } from '../examples/agent-chat/server/novel-script';
+import { saveScriptAssets } from '../examples/agent-chat/server/script-assets';
+import { parseBatchPromptResults, promptAdjustmentContext, validatePromptTiming } from '../examples/agent-chat/server/prompt-adjustment';
+import { VideoRedraw } from '../examples/agent-chat/server/video-redraw';
 
 let directory: string, store: StudioStore, projectId: string, files: FileStore;
 beforeEach(() => {
@@ -32,6 +34,96 @@ afterEach(() => rmSync(directory, { recursive: true, force: true }));
 const shots = (count = 40): StudioChange[] => Array.from({ length: count }, (_, index) => ({ resource: 'shots', op: 'create', id: `shot-${index}`, position: index, values: { episodeId: 'episode-1', sceneId: 'scene-1', description: `动作 ${index}`, duration: 3 } }));
 
 describe('shared short drama business service', () => {
+  it('extracts project assets once and refuses to overwrite newly added assets or changed episodes', () => {
+    const state = store.snapshot(), project = state.projects.find(item => item.id === projectId)!;
+    const versions = { 'episodes:episode-1': state.episodes[0]._version as number };
+    const asset = { name: '林青', type: '角色', prompt: '短发，深色工作服。', episodeIds: ['episode-1'], variants: [] };
+    expect(() => saveScriptAssets(store, project, versions, asset.prompt, { assets: [{ ...asset, episodeIds: ['other'] }], openItems: [] }, 'invalid-episode')).toThrow('剧集关联');
+    saveScriptAssets(store, project, versions, asset.prompt, { assets: [asset], openItems: [] }, 'initial-assets');
+    const saved = store.snapshot().assets.find(item => item.projectId === projectId)!;
+    expect(saved).toMatchObject({ name: '林青', prompt: asset.prompt, episodeIds: ['episode-1'] });
+    expect(() => saveScriptAssets(store, project, versions, asset.prompt, { assets: [asset], openItems: [] }, 'duplicate-assets')).toThrow('发生变化');
+  });
+  it('saves novel scenes without overwriting existing script or dropping existing scene ids', () => {
+    store.apply('novel-empty-episode', [{ resource: 'episodes', op: 'create', id: 'novel-empty', values: { projectId, number: 2, scenes: [{ id: 'kept-scene', location: '书房', setting: '内', time: '日', content: '' }] } }]);
+    const episode = store.snapshot().episodes.find(item => item.id === 'novel-empty')!;
+    const scene = { sceneId: 'kept-scene', location: '书房', setting: '内', time: '日', suggestedDuration: null, content: '她推门进来。' };
+    expect(() => saveNovelScript(store, episode, { scenes: [{ ...scene, sceneId: null }], openItems: [] }, 'missing-scene')).toThrow('遗漏');
+    expect(() => saveNovelScript(store, episode, { scenes: [{ ...scene, sceneId: 'unknown' }], openItems: [] }, 'invalid-scene')).toThrow('不存在或重复');
+    saveNovelScript(store, episode, { scenes: [scene, { ...scene, sceneId: null, location: '街道' }], openItems: [] }, 'write-scene');
+    const saved = store.snapshot().episodes.find(item => item.id === episode.id)!;
+    expect(saved.scenes).toMatchObject([{ id: 'kept-scene', content: '她推门进来。' }, { location: '街道' }]);
+    expect(saved.script).toContain('她推门进来。');
+    expect(saved.duration).toBeNull();
+    expect(() => saveNovelScript(store, saved, { scenes: [scene], openItems: [] }, 'overwrite')).toThrow('已有剧本');
+  });
+  it('assigns real IDs to new scenes when the episode has no existing scenes', () => {
+    store.apply('create-empty-novel', [{ resource: 'episodes', op: 'create', id: 'new-novel', values: { projectId, number: 2, scenes: [] } }]);
+    const episode = store.snapshot().episodes.find(item => item.id === 'new-novel')!;
+    const scene = { sceneId: 'model-generated-id', location: '书房', setting: '内', time: '日', suggestedDuration: null, content: '她推门进来。' };
+    saveNovelScript(store, episode, { scenes: [scene, { ...scene, location: '街道' }], openItems: [] }, 'new-scenes');
+    const scenes = store.snapshot().episodes.find(item => item.id === episode.id)!.scenes as Array<{ id: string }>;
+    expect(scenes).toHaveLength(2);
+    expect(scenes[0].id).not.toBe(scene.sceneId);
+    expect(scenes[0].id).not.toBe(scenes[1].id);
+  });
+  it('recovers complete batch results even if the model output is truncated', () => {
+    const output = '{"items":[{"clipId":"one","prompt":"第一段含 \\"引号\\" 和 {画面}"},{"clipId":"two","prompt":"第二段"},{"clipId":"three","prompt":"未完成';
+    expect(parseBatchPromptResults(output)).toEqual([{ clipId: 'one', prompt: '第一段含 "引号" 和 {画面}' }, { clipId: 'two', prompt: '第二段' }]);
+    expect(parseBatchPromptResults('{"items":[{"clipId":"x","error":"无法调整"}]}')).toEqual([{ clipId: 'x', error: '无法调整' }]);
+  });
+  it('only adjusts storyboard prompts for clips in storyboard mode', () => {
+    store.apply('mode-adjustment', [{ resource: 'clips', op: 'create', id: 'clip-mode', values: { episodeId: 'episode-1', sceneId: 'scene-1', mode: '参考生成', title: '片段', prompt: '视频描述' } }]);
+    const redraw = new VideoRedraw(store, {});
+    const input = { projectId, episodeId: 'episode-1', clipId: 'clip-mode', field: 'storyboardPrompt', requirements: '调整构图' };
+    expect(() => promptAdjustmentContext(store, redraw, input)).toThrow('参考生成模式不使用分镜图提示词');
+    const clip = store.snapshot().clips.find(item => item.id === 'clip-mode')!;
+    store.apply('change-mode', [{ resource: 'clips', op: 'update', id: clip.id, version: clip._version, values: { mode: '分镜图' } }]);
+    expect(promptAdjustmentContext(store, redraw, input).context.clip.mode).toBe('分镜图');
+    redraw.dispose();
+  });
+  it('leaves target duration unset for new redraw episodes while preserving explicit and script durations', () => {
+    expect(store.snapshot().episodes[0].duration).toBeNull();
+    store.apply('script-null-duration', [{ resource: 'episodes', op: 'update', id: 'episode-1', version: 1, values: { duration: null } }]);
+    store.apply('redraw-project', [{ resource: 'projects', op: 'update', id: projectId, version: 1, values: { creationMode: 'video-redraw' } }]);
+    store.apply('redraw-episodes', [
+      { resource: 'episodes', op: 'create', id: 'redraw-empty', values: { projectId, number: 2 } },
+      { resource: 'episodes', op: 'create', id: 'redraw-explicit', values: { projectId, number: 3, duration: 150 } },
+    ]);
+    expect(store.snapshot().episodes.find(item => item.id === 'redraw-empty')?.duration).toBeNull();
+    expect(store.snapshot().episodes.find(item => item.id === 'redraw-explicit')?.duration).toBe(150);
+    expect(store.query({ resource: 'episodes', describe: true })).toMatchObject({ valuesSchema: { properties: { duration: { type: ['number', 'null'] } } } });
+  });
+  it('leaves script episode duration unset unless explicitly provided', () => {
+    store.apply('duration-range', [{ resource: 'projects', op: 'update', id: projectId, version: 1, values: { durationMin: 3, durationMax: 7 } }]);
+    store.apply('duration-episodes', [
+      { resource: 'episodes', op: 'create', id: 'range-default', values: { projectId, number: 2 } },
+      { resource: 'episodes', op: 'create', id: 'range-explicit', values: { projectId, number: 3, duration: 240 } },
+    ]);
+    const episodes = store.snapshot().episodes;
+    expect(episodes.find(item => item.id === 'range-default')?.duration).toBeNull();
+    expect(episodes.find(item => item.id === 'range-explicit')?.duration).toBe(240);
+    expect(episodes.find(item => item.id === 'episode-1')?.duration).toBeNull();
+    store.apply('clear-episode-duration', [{ resource: 'episodes', op: 'update', id: 'range-explicit', version: 1, values: { duration: null } }]);
+    expect(store.snapshot().episodes.find(item => item.id === 'range-explicit')?.duration).toBeNull();
+  });
+  it('keeps project duration ranges independent from any optional exact target', () => {
+    expect(store.snapshot().projects.find(item => item.id === projectId)).toMatchObject({ durationMin: 2, durationMax: 5, duration: null });
+    const description = store.query({ resource: 'projects', describe: true }) as unknown as { valuesSchema: { properties: { duration: { type: string[] } } } };
+    expect(description.valuesSchema.properties.duration.type).toEqual(['number', 'null']);
+    store.apply('explicit-project-duration', [{ resource: 'projects', op: 'update', id: projectId, version: 1, values: { duration: 180 } }]);
+    expect(store.snapshot().projects.find(item => item.id === projectId)?.duration).toBe(180);
+    store.apply('clear-project-duration', [{ resource: 'projects', op: 'update', id: projectId, version: 2, values: { duration: null } }]);
+    expect(store.snapshot().projects.find(item => item.id === projectId)).toMatchObject({ durationMin: 2, durationMax: 5, duration: null });
+  });
+  it('rejects video prompt time ranges beyond the actual clip duration', () => {
+    expect(() => validatePromptTiming('0–2秒，2–5.8秒，5.8–9秒', 'prompt', 9)).not.toThrow();
+    expect(() => validatePromptTiming('片段 02｜原片 9.9–24.0 秒｜本段 15 秒\n0–15秒', 'prompt', 15)).not.toThrow();
+    expect(() => validatePromptTiming('原片 9.9–24.0 秒\n15–16秒', 'prompt', 15)).toThrow('结果未保存');
+    expect(() => validatePromptTiming('6–9.2秒', 'prompt', 9)).toThrow('结果未保存');
+    expect(() => validatePromptTiming('9–6秒', 'prompt', 9)).toThrow('顺序无效');
+    expect(() => validatePromptTiming('6–9.2秒', 'storyboardPrompt', 9)).not.toThrow();
+  });
   it('uses only the current clip image for storyboard video generation and optimization', () => {
     const clip = { id: 'clip-1', image: '/api/files/storyboard', assetIds: [] };
     const references = { images: [{ id: 'asset-1', kind: 'image', url: '/api/files/asset' }] };
@@ -200,24 +292,6 @@ describe('shared short drama business service', () => {
     for (const key of ['targetRegion', 'targetLanguage', 'sourceVideo']) expect(store.snapshot().projects[0]).not.toHaveProperty(key);
   });
 
-  it('separates the visible button request from its model parameters', () => {
-    const payload = studioAgentPayload({ action: 'rewrite-script', projectId, notes: '加强冲突', ignored: '不传递' }, [], '页面配置的改写指令');
-    expect(payload.content).toBe('请按我的要求改写这集剧本。');
-    expect(payload.context.modelContext).toContain(`"projectId":"${projectId}"`);
-    expect(payload.context.modelContext).toContain('加强冲突');
-    expect(payload.context.modelContext).toContain('页面配置的改写指令');
-    expect(payload.context.modelContext).not.toContain(agentButtons['rewrite-script'].hiddenMessage);
-    expect(payload.content).not.toContain('加强冲突');
-    expect(payload.context.modelContext).not.toContain('不传递');
-    expect(() => studioAgentPayload({ action: 'redraw-analyze', projectId }, [], '读取原片')).toThrow('darl-studio');
-    const skills = [{ id: 'redraw', name: '视频转绘', slug: 'video-redraw' }, { id: 'studio', name: '网站操作', slug: 'darl-studio' }];
-    expect(studioAgentPayload({ action: 'video-description', projectId, projectMode: 'video-redraw' }, skills, '页面指令').context.modelSkillIds).toEqual(['studio']);
-    expect(studioAgentPayload({ action: 'video-description', projectId, projectMode: 'script' }, skills, '页面指令').context.modelSkillIds).toEqual([]);
-    const storyboard = studioAgentPayload({ action: 'storyboard-prompts', projectId, episodeId: 'episode-1', mode: '分镜图', projectMode: 'script' }, skills, agentButtons['storyboard-prompts'].hiddenMessage);
-    expect(storyboard.context.modelContext).toContain('clips.storyboardPrompt');
-    expect(storyboard.context.modelContext).toContain('2×2');
-    expect(storyboard.context.modelContext).toContain('"mode":"分镜图"');
-  });
   it('refreshes default prompt text without overwriting a custom prompt', () => {
     store.apply('custom-prompt', [{ resource: 'prompts', op: 'update', id: '0-0', version: 1, values: { mode: 'replace', text: '我的大纲提示词' } }]);
     const restored = new StudioStore(store.projects).snapshot().prompts.find(item => item.id === '0-0');

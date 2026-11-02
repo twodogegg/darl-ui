@@ -8,7 +8,7 @@ import { LocalStorage } from '../examples/agent-chat/server/storage';
 import { FileStore } from '../examples/agent-chat/server/file-storage';
 import { SkillLibrary } from '../examples/agent-chat/server/skill-library';
 import { SkillRuntime } from '../examples/agent-chat/server/skill-runtime';
-import { newSkillDraft } from '../src/components/agent-sidebar/skill-package';
+import { newSkillDraft } from '../src/components/skill-manager/skill-package';
 
 let directory: string;
 let library: SkillLibrary;

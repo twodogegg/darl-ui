@@ -1,12 +1,12 @@
 import { useState, type ReactNode } from 'react';
-import { Bot, Component, FileImage, Github, Layers3, LayoutPanelTop, Menu, Moon, Palette, Play, Settings, Sun, Upload, ListChecks } from 'lucide-react';
+import { Component, FileImage, Github, Layers3, LayoutPanelTop, Menu, Moon, Palette, Play, Settings, Sun, Upload, ListChecks } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import type { Mode } from './usePlaygroundTheme';
 
-export type Page = 'intro' | 'theme' | 'uploader' | 'video' | 'media' | 'styles' | 'agent' | 'agent-plaza' | 'settings' | 'confirm-dialog' | 'assets';
+export type Page = 'intro' | 'theme' | 'uploader' | 'video' | 'media' | 'styles' | 'settings' | 'confirm-dialog' | 'assets';
 const pages = [
   { id: 'intro', label: '概览', title: 'Introduction', icon: LayoutPanelTop },
   { id: 'theme', label: '主题系统', title: 'Theme', icon: Palette },
@@ -15,8 +15,6 @@ const pages = [
   { id: 'media', label: 'MediaWorkspace', title: 'MediaWorkspace', icon: FileImage },
   { id: 'styles', label: 'StyleSelector', title: 'StyleSelector', icon: Palette },
   { id: 'assets', label: 'AssetLibrary', title: 'AssetLibrary', icon: Layers3 },
-  { id: 'agent', label: 'AgentSidebar', title: 'AgentSidebar', icon: Bot },
-  { id: 'agent-plaza', label: 'Agent 广场', title: 'Agent Plaza', icon: Bot },
   { id: 'settings', label: 'SettingsPage', title: 'SettingsPage', icon: Settings },
   { id: 'confirm-dialog', label: 'InteractiveConfirmDialog', title: 'InteractiveConfirmDialog', icon: ListChecks },
 ] as const;

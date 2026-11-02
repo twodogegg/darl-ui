@@ -270,8 +270,9 @@ export class ProjectStore {
   }
 
   async createStyle(value: StyleInput) {
+    value = { ...value, name: value.name.replace(/\r\n?/g, '\n'), prompt: value.prompt.replace(/\r\n?/g, '\n') };
     if (!value.name.trim() || value.name.trim().length > 80 ||
-      !value.prompt.trim() || value.prompt.trim().length > 500) throw new Error('风格名称或描述无效');
+      !value.prompt.trim() || value.prompt.trim().length > 1000) throw new Error('风格名称或描述无效');
     const files = this.requiredFiles();
     const file = value.image && value.mimeType ? await files.put(value.image, value.mimeType, `${value.name.trim()}-reference`) : undefined;
     const result = this.db.prepare(
@@ -290,7 +291,8 @@ export class ProjectStore {
   async updateStyle(id: number, value: StyleInput) {
     const existing = this.db.prepare('SELECT id FROM workspace_styles WHERE id = ? AND is_owned = 1').get(id);
     if (!existing) return null;
-    if (!value.name.trim() || value.name.trim().length > 80 || !value.prompt.trim() || value.prompt.trim().length > 500)
+    value = { ...value, name: value.name.replace(/\r\n?/g, '\n'), prompt: value.prompt.replace(/\r\n?/g, '\n') };
+    if (!value.name.trim() || value.name.trim().length > 80 || !value.prompt.trim() || value.prompt.trim().length > 1000)
       throw new Error('风格名称或描述无效');
     if (value.image && value.mimeType) {
       const previous = this.db.prepare('SELECT file_id FROM workspace_style_files WHERE style_id = ?').get(id) as { file_id?: string } | undefined;

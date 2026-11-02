@@ -1,6 +1,6 @@
 import { imageUrl } from '../../image-url'
 import { useState } from 'react'
-import { useStore, useAgentTask } from '../store'
+import { useStore } from '../store'
 import { id, types } from '../data'
 import {
   Button,
@@ -12,7 +12,6 @@ import {
   Confirm,
   MediaPreview,
   Empty,
-  Processing,
   VoiceModal,
 } from '../components/ui'
 import { download } from '../files'
@@ -32,8 +31,6 @@ export default function Assets() {
   const [deleting, setDeleting] = useState(null)
   const [moving, setMoving] = useState(null)
   const [targetFolder, setTargetFolder] = useState('')
-  const [prompt, setPrompt] = useState('')
-  const { busy, run, cancel } = useAgentTask()
   const projectAssets = data.assets
     .filter((a) => projectId === '全部项目' || a.projectId === projectId)
     .map((a) => ({ ...a, source: '项目素材', collection: 'assets' }))
@@ -50,7 +47,6 @@ export default function Assets() {
       (source !== '我的素材' || (a.folderId || '') === (folder?.id || '')),
   )
   function switchSource(value) {
-    cancel()
     setSource(value)
     setFolder(null)
     setSearch('')
@@ -115,44 +111,10 @@ export default function Assets() {
             items={['音乐', '音效']}
             value={audioType}
             onChange={(value) => {
-              cancel()
-              setAudioType(value)
+                        setAudioType(value)
             }}
           />
-          <div className="music-form">
-            <Field label={`${audioType}描述`}>
-              <textarea
-                aria-label={`${audioType}描述`}
-                rows={2}
-                maxLength={2000}
-                value={prompt}
-                placeholder={`描述想要的${audioType}…`}
-                onChange={(e) => setPrompt(e.target.value)}
-              />
-            </Field>
-            <div className="toolbar">
-              <Button
-                primary
-                disabled={busy}
-                onClick={() => {
-                  if (!prompt.trim()) return notify(`请填写${audioType}描述`)
-                  run({ action: 'audio', type: audioType, notes: prompt })
-                }}
-              >
-                生成{audioType}
-              </Button>
-              <FileButton
-                kind="audio"
-                onSelect={(item) => {
-                  update((d) => d.audio.unshift({ ...item, type: audioType }))
-                  notify('音频已上传并加入素材库')
-                }}
-              >
-                选择本地{audioType}
-              </FileButton>
-            </div>
-          </div>
-          <Processing busy={busy} cancel={cancel} />
+          <div className="music-form"><FileButton kind="audio" onSelect={item => { update(d => d.audio.unshift({ ...item, type: audioType })); notify('音频已上传并加入素材库') }}>选择本地{audioType}</FileButton></div>
           <div className="audio-grid">
             {data.audio
               .filter((a) => a.type === audioType && a.name.includes(search))

@@ -4,8 +4,8 @@ import { chmod, lstat, mkdir, readFile, readdir, realpath, stat, writeFile } fro
 import { realpathSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AgentSkill } from '../../../src/components/agent-sidebar/types';
-import { skillMarkdown, skillPathValid, validateSkill } from '../../../src/components/agent-sidebar/skill-package';
+import type { AgentSkill } from '../../../src/components/skill-manager/types';
+import { skillMarkdown, skillPathValid, validateSkill } from '../../../src/components/skill-manager/skill-package';
 import { readSkillPackage, type SkillLibrary } from './skill-library';
 import type { FileStore } from './file-storage';
 import sharp from 'sharp';

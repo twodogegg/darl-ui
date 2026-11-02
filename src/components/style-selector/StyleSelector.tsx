@@ -238,7 +238,7 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
             <label htmlFor={`${id}-name`}>风格名称 <em>*</em></label>
             <input id={`${id}-name`} autoFocus required value={name} maxLength={80} onChange={(event) => setName(event.target.value)} placeholder="给这个风格起一个便于识别的名称" />
             <label htmlFor={`${id}-description`}>风格描述词 <em>*</em></label>
-            <div className="darl-style-textarea-wrap"><textarea id={`${id}-description`} required value={description} maxLength={500} onChange={(event) => setDescription(event.target.value)} placeholder="描述画面质感、光影、色彩与构图等风格关键词" /><span>{description.length}/500</span></div>
+            <div className="darl-style-textarea-wrap"><textarea id={`${id}-description`} required value={description} maxLength={1000} onChange={(event) => setDescription(event.target.value)} placeholder="描述画面质感、光影、色彩与构图等风格关键词" /><span>{description.length}/1000</span></div>
           </div>
           <div className="darl-style-reference">
             <label htmlFor={`${id}-reference`}>风格参考图</label><p id={`${id}-hint`}>建议使用 16:9 图片，也支持其他比例；可选上传 1 张，单张不超过 10MB</p>

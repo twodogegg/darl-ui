@@ -9,11 +9,11 @@ if (import.meta.hot) import.meta.hot.data.studioContext = Store
 export async function studioApi(path, body, signal) {
   const response = await fetch(`/api/${path}`, { signal, ...(body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) })
   const value = await response.json()
-  if (!response.ok) throw new Error(value.error || `请求失败（${response.status}）`)
+  if (!response.ok) { const error = new Error(typeof value.error === 'string' ? value.error : value.error?.message || `请求失败（${response.status}）`); error.status = response.status; throw error }
   return value
 }
 const fields = (resource, item) => Object.fromEntries(studioFields[resource].split(' ').filter(key => item[key] !== undefined).map(key => [key, item[key]]))
-export function StudioProvider({ children, onAgentRequest, agents, models, onNavigate, onAgentCancel, currentTextModelId, currentAgentId }) {
+export function StudioProvider({ children, models, onNavigate }) {
   const [data, setData] = useState(emptyStudioData)
   const [mediaJobs, setMediaJobs] = useState([])
   const [mediaDefaults, setMediaDefaults] = useState({})
@@ -21,9 +21,8 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
   const [pending, setPending] = useState(0)
-  const [agentSelection, setAgentSelection] = useState('')
   const [modelSelections, setModelSelections] = useState({})
-  const getModel = (type, modelId) => models.find(model => model.type === type && model.enabled !== false && model.id === (modelId || modelSelections[type] || (type === 'text' ? currentTextModelId : mediaDefaults[type]?.modelId)))
+  const getModel = (type, modelId) => models.find(model => model.type === type && model.enabled !== false && model.id === (modelId || modelSelections[type] || mediaDefaults[type]?.modelId))
   const state = useRef(data), queue = useRef(Promise.resolve()), failed = useRef(false), count = useRef(0), timer = useRef(), mounted = useRef(true)
   const announce = useCallback(message => { if (!mounted.current) return; clearTimeout(timer.current); setToast(message); timer.current = setTimeout(() => setToast(''), 4000) }, [])
   const reloading = useRef(null)
@@ -102,13 +101,17 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
     return task
   }, [announce, reload])
   const patch = (resource, id, values) => update(draft => { const item = draft[resource].find(item => item.id === id); if (item) Object.assign(item, values) })
-  const log = (projectId, episodeId, message) => update(draft => draft.history.unshift({ id: crypto.randomUUID(), projectId, ...(episodeId ? { episodeId } : {}), message, time: new Date().toLocaleString('zh-CN') }))
-  const requestAgent = async task => {
+  const ensureWritable = async () => {
     await queue.current
-    if (failed.current) throw new Error('数据尚未成功保存，请先处理保存错误')
-    const project = state.current.projects.find(project => project.id === task.projectId)
-    await onAgentRequest({ ...task, agentId: task.agentId || agentSelection || currentAgentId, modelSelections, projectMode: project?.creationMode })
+    if (failed.current) throw new Error('数据尚未成功保存，请先重新加载并处理保存错误')
   }
+  const recover = async () => {
+    await queue.current
+    await reload()
+    failed.current = false
+    if (mounted.current) setError('')
+  }
+  const log = (projectId, episodeId, message) => update(draft => draft.history.unshift({ id: crypto.randomUUID(), projectId, ...(episodeId ? { episodeId } : {}), message, time: new Date().toLocaleString('zh-CN') }))
   const generateMedia = async ({ type = 'image', prompt, target, references = [], options = {}, modelId, applyStyle = true, styleId, preview = false, promptReferences = [], promptAudios = [] }) => {
     await queue.current
     if (failed.current) throw new Error('请先处理保存错误')
@@ -147,25 +150,11 @@ export function StudioProvider({ children, onAgentRequest, agents, models, onNav
     announce('生成任务已入队，页面将同步真实进度')
     return job
   }
-  return <Store.Provider value={{ data, update, patch, notify, log, reload, requestAgent, agents, models, getModel, currentAgentId, mediaJobs, mediaDefaults, onNavigate, cancelAgent: onAgentCancel, generateMedia, agentSelection, setAgentSelection, modelSelections, setModelSelections }}>
-    {error && <div className="studio-error" role="alert">{error}<button onClick={async () => { failed.current = false; setError(''); await reload() }}>重新加载</button></div>}
+  return <Store.Provider value={{ data, update, patch, notify, log, reload, ensureWritable, recover, models, getModel, mediaJobs, mediaDefaults, onNavigate, generateMedia, modelSelections, setModelSelections }}>
+    {error && <div className="studio-error" role="alert">{error}<button onClick={() => recover().catch(reason => setError(reason.message))}>重新加载</button></div>}
     <div className="studio-save-status" role="status">{loading ? '正在读取工作台…' : pending ? `正在保存 ${pending} 批修改…` : error ? '保存失败' : '已同步'}</div>
     {!loading && children}
     {toast && <div className="demo-toast" role="status">{toast}</div>}
   </Store.Provider>
 }
 export const useStore = () => useContext(Store)
-export function useAgentTask() {
-  const { requestAgent, notify, cancelAgent } = useStore()
-  const [busy, setBusy] = useState(false)
-  const alive = useRef(true)
-  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
-  const run = async task => {
-    if (busy) return
-    setBusy(true)
-    try { await requestAgent(task); notify('已交给 Agent，可在聊天中查看执行过程') }
-    catch (reason) { notify(reason.message) }
-    finally { if (alive.current) setBusy(false) }
-  }
-  return { busy, run, cancel: () => { if (busy) cancelAgent(); setBusy(false) } }
-}

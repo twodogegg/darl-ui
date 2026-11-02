@@ -6,7 +6,7 @@
 
 ## 1. 目标与边界
 
-让使用者在「模型管理」中新增逻辑模型，选择可复用的能力模板，为同一模型绑定多个 API 供应商，并在绑定层配置上游模型映射、调用协议和少量能力差异。配置保存后由 AgentSidebar、MediaWorkspace、DefaultModelSelector 等组件读取。
+让使用者在「模型管理」中新增逻辑模型，选择可复用的能力模板，为同一模型绑定多个 API 供应商，并在绑定层配置上游模型映射、调用协议和少量能力差异。配置保存后由 MediaWorkspace、DefaultModelSelector 和工作流读取。
 
 - `@darl/ui` 提供配置 UI、类型、校验、受控回调和通用任务展示；宿主提供持久化、凭据、协议适配器、上传、请求、轮询、路由和结果存储。
 - 只使用宿主已实现且验证过的协议。**协议包括请求构造、上传要求、异步任务、响应解析和错误映射**；不单独创建「响应处理」配置页。
@@ -68,7 +68,7 @@ DeepSeek 官方将请求 `medium` 映射到实际 `high`，因此不在 UI 中�
 ### 文本
 
 - `reasoningEfforts: string[]`：只列出当前协议/渠道真实支持的思考等级，不含关闭思考。
-- `defaultReasoningEffort`：必须属于候选档位。`toAgentModels` 会把它作为 `AgentModel.defaultReasoningEffort` 传给 `AgentSidebar`；用户和宿主都没给出选择时使用该值，未配置则不带等级，不能按 `reasoningEfforts` 的顺序推断默认值。
+- `defaultReasoningEffort`：必须属于候选档位。`toAgentModels` 会将其作为 `AgentModel.defaultReasoningEffort` 提供给宿主；未配置时不发送该参数，不能按 `reasoningEfforts` 的顺序推断默认值。
 - 视觉输入、工具调用等可用于内部运行时校验，但不作为新的通用用户调参面板。
 
 ### 图片
@@ -142,7 +142,6 @@ DeepSeek 官方将请求 `medium` 映射到实际 `high`，因此不在 UI 中�
 
 ## 6. 组件与宿主交互契约
 
-- `AgentSidebar`：只显示启用的文本模型和其当前渠道有效思考档位，模型切换后清理无效值。不暴露关闭思考，参数键由协议负责。
 - `MediaWorkspace`：模型/绑定决定输入槽位、图片编辑自动判定、画幅/尺寸/时长等控件；所有输入都在提交前校验。通用 `onGenerate` 事件携带逻辑模型、选中绑定或路由策略、模式、素材角色及规范化选项，**不能直接拼接供应商原生请求体**。
 - `DefaultModelSelector`：只要求宿主实际启用的类型，比例/尺寸从模型能力读取，不能使用固化白名单。
 - **协议实现位于宿主**：通过 `protocolKey` 从受支持适配器注册表选择，适配器负责上传、发送、轮询、下载和错误标准化。UI 不保存 API Key 或实现通用网关调度。
@@ -209,7 +208,7 @@ DeepSeek 官方将请求 `medium` 映射到实际 `high`，因此不在 UI 中�
 
 - P0：配置实体与继承/覆盖、模型映射、协议键与持久化兼容。
 - P0：模型/渠道/模板编辑 UI 与合法性校验。
-- P0：AgentSidebar、MediaWorkspace、DefaultModelSelector 消费统一有效能力，移除硬编码。
+- P0：MediaWorkspace、DefaultModelSelector 和工作流 消费统一有效能力，移除硬编码。
 - P1：图片协议已接通 `openai-images`（generations / edits）与 `gemini-generate-content`（imageConfig / inlineData / data URL），并用真实网关验证生成与参考图编辑；视频继续实现 `darl-h3-flash-unified`，异步结果复用 TaskCenter（#16）。
 - 后续：Seedance、官方/本地 H3、更多供应商协议和多种视频模式，**需要独立真实契约与测试**，不从旧版 H3 RunningHub 文档猜测。
 

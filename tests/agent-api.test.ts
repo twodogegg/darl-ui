@@ -5,12 +5,12 @@ import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { LocalStorage } from '../examples/agent-chat/server/storage';
-import { callMcpToolWithRetry, createApi, findAttachedImageForUpload, isRetryableMcpError, mcpResultError } from '../examples/agent-chat/server/api';
+import { createApi } from '../examples/agent-chat/server/api';
 
-async function withApi(directory: string, promptFile: string, test: (request: (path: string, body?: unknown, method?: string) => Promise<Response>) => Promise<void>) {
-  const middleware = createApi(directory, {}, promptFile);
+async function withApi(directory: string, promptFile: string, test: (request: (path: string, body?: unknown, method?: string) => Promise<Response>) => Promise<void>, env: Record<string, string> = {}) {
+  const middleware = createApi(directory, env, promptFile);
   const server = createServer((request, response) => { void middleware(request, response, () => { response.writeHead(404); response.end(); }); });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as AddressInfo).port;
@@ -35,79 +35,36 @@ function dbJson<T>(directory: string, key: string): T {
 }
 
 describe('Agent configuration API', () => {
-  it('never creates empty conversations or replaces sent messages with an empty snapshot', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'darl-chat-empty-'));
+  it('uses the configured SQLite file without modifying the previous database', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'darl-database-switch-'));
     const promptFile = join(directory, 'system.md');
     await writeFile(promptFile, '默认提示词');
+    const previous = new LocalStorage(directory);
+    previous.setConfig('sentinel', '旧库数据');
     try {
       await withApi(directory, promptFile, async request => {
-        const draft = { id: 'draft', title: '新对话', messages: [] };
-        expect((await request('sessions/draft', { session: draft, version: 0 }, 'PUT')).status).toBe(400);
-        expect((await request('state', { sessions: [draft], skills: [] })).status).toBe(200);
-        expect(await (await request('sessions')).json()).toEqual([]);
-        const sent = { ...draft, messages: [{ id: 'user', role: 'user', content: '实际发送的消息' }] };
-        expect((await request('sessions/draft', { session: sent, version: 0 }, 'PUT')).status).toBe(200);
-        expect((await (await request('sessions')).json())[0]).toMatchObject({ messageCount: 1, messages: [] });
-        expect((await request('sessions/draft', { session: draft, version: 1 }, 'PUT')).status).toBe(400);
-        expect((await (await request('sessions/draft')).json()).session.messages).toEqual(sent.messages);
-      });
+        expect((await request('workflow-agents')).ok).toBe(true);
+        const current = new LocalStorage(directory, 'new-data.sqlite');
+        expect(current.getConfig('sentinel')).toBeUndefined();
+        expect(previous.getConfig('sentinel')).toBe('旧库数据');
+        expect(current.getConfig('modelConfiguration')).toBeDefined();
+      }, { AGENT_CHAT_DB_PATH: 'new-data.sqlite' });
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
-  it('migrates history, lists only metadata and preserves messages across restarts and stale snapshots', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'darl-chat-history-'));
-    const promptFile = join(directory, 'system.md');
-    await writeFile(promptFile, '默认提示词');
-    const session = { id: 'history', agentId: 'default', title: '历史会话', messages: [{ id: 'user', role: 'user', content: '需要保留的原始消息' }, { id: 'answer', role: 'assistant', content: '历史回复正文'.repeat(200) }] };
-    const storage = new LocalStorage(directory);
-    storage.setConfig('clientState', { sessions: [session], skills: [], activeId: session.id });
-    try {
-      await withApi(directory, promptFile, async request => {
-        const catalog = await (await request('sessions')).json();
-        expect(catalog).toEqual([expect.objectContaining({ id: session.id, messages: [], version: 1 })]);
-        expect(catalog[0].messagePreview).toHaveLength(160);
-        expect(JSON.stringify(catalog)).not.toContain(session.messages[0].content);
-        expect(await (await request('sessions/history')).json()).toEqual({ session, version: 1 });
-        // A failed hydration in an old tab must not delete any saved conversation.
-        expect((await request('state', { sessions: [], skills: [] })).ok).toBe(true);
-        expect((await request('state', { sessions: [{ ...session, messages: [] }], skills: [] })).status).toBe(200);
-        const other = { id: 'other', title: '另一条对话', messages: [{ id: 'other-user', role: 'user', content: '第二条消息' }] };
-        expect((await request('sessions/other', { session: other, version: 0 }, 'PUT')).ok).toBe(true);
-        expect((await (await request('sessions')).json())).toHaveLength(2);
-      });
-      await withApi(directory, promptFile, async request => {
-        expect(await (await request('sessions/history')).json()).toEqual({ session, version: 1 });
-        expect(await (await request('sessions')).json()).toHaveLength(2);
-        expect(dbJson<{ sessions: unknown[] }>(directory, 'clientState').sessions).toEqual([session]);
-      });
-    } finally { await rm(directory, { recursive: true, force: true }); }
-  });
 
-  it('rejects stale saves and deletes, renames without losing messages and never resurrects deleted history', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'darl-chat-versions-'));
+  it('removes chat and ordinary Agent endpoints while keeping workflow configuration', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'darl-no-chat-'));
     const promptFile = join(directory, 'system.md');
     await writeFile(promptFile, '默认提示词');
-    const session = { id: 'one', title: '会话', messages: [{ id: 'message', role: 'user', content: '服务重启后也保留' }] };
-    new LocalStorage(directory).setConfig('clientState', { sessions: [session], skills: [] });
     try {
       await withApi(directory, promptFile, async request => {
-        expect((await request('sessions/one', { session, version: 0 }, 'PUT')).status).toBe(409);
-        expect((await request('sessions/one', { session: { ...session, title: '更新' }, version: 1 }, 'PUT')).status).toBe(200);
-        expect((await request('sessions/one', { session, version: 1 }, 'PUT')).status).toBe(409);
-        expect((await request('sessions/one', { version: 1 }, 'DELETE')).status).toBe(409);
-        expect((await request('sessions/one', { title: '改名', version: 2 }, 'PATCH')).status).toBe(200);
-        expect(await (await request('sessions/one')).json()).toEqual({ session: expect.objectContaining({ title: '改名', messages: session.messages }), version: 3 });
-        expect((await request('sessions/one', { session: { ...session, messages: null }, version: 3 }, 'PUT')).status).toBe(400);
-        expect((await request('sessions/wrong', { session, version: 3 }, 'PUT')).status).toBe(400);
-        expect((await request('sessions/one', { version: 3 }, 'DELETE')).status).toBe(200);
-        expect((await request('sessions/one', { session, version: 0 }, 'PUT')).status).toBe(409);
-        expect((await request('sessions/one')).status).toBe(404);
-      });
-      await withApi(directory, promptFile, async request => {
-        expect(await (await request('sessions')).json()).toEqual([]);
-        expect((await request('sessions/one')).status).toBe(404);
-        await request('state', { sessions: [session], skills: [] });
-        expect(await (await request('sessions')).json()).toEqual([]);
+        for (const path of ['chat', 'agents', 'sessions', 'state', 'approval-settings', 'agent-settings', 'studio-agent-buttons']) {
+          expect((await request(path)).status).toBe(404);
+          expect((await request(path, {})).status).toBe(404);
+        }
+        expect((await request('workflow-agents')).ok).toBe(true);
+        expect((await request('skills?summary=1')).ok).toBe(true);
       });
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
@@ -122,132 +79,9 @@ describe('Agent configuration API', () => {
         expect(tools).toEqual(expect.arrayContaining([
           expect.objectContaining({ name: 'builtin_load_skill', risk: 'read', appId: 'builtin:runtime' }),
           expect.objectContaining({ name: 'builtin_run_command', risk: 'write', inputSchema: expect.objectContaining({ required: ['command'] }) }),
-          expect.objectContaining({ name: 'builtin_generate_media' }),
+          expect.objectContaining({ name: 'builtin_read_studio', risk: 'read' }),
         ]));
-        expect(await (await request('approval-settings')).json()).toEqual({ mode: 'auto' });
-      });
-    } finally { await rm(directory, { recursive: true, force: true }); }
-  });
-
-  it('persists approval modes, rejects invalid updates and refuses stale chat policies', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'darl-approval-'));
-    const promptFile = join(directory, 'system.md');
-    await writeFile(promptFile, '默认提示词');
-    try {
-      await withApi(directory, promptFile, async (request) => {
-        for (const mode of ['ask', 'auto', 'full']) {
-          expect(await (await request('approval-settings', { mode })).json()).toEqual({ mode });
-          expect(await (await request('approval-settings')).json()).toEqual({ mode });
-        }
-        expect((await request('approval-settings', { mode: ['full'] })).ok).toBe(false);
-        expect(await (await request('approval-settings')).json()).toEqual({ mode: 'full' });
-        expect((await request('chat', { approvalMode: 'ask', messages: [] })).status).toBe(409);
-      });
-      await withApi(directory, promptFile, async (request) => {
-        expect(await (await request('approval-settings')).json()).toEqual({ mode: 'full' });
-      });
-    } finally { await rm(directory, { recursive: true, force: true }); }
-  });
-
-  it('persists a conversation Agent and refuses switching it in a chat request', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'darl-bound-agent-'));
-    const promptFile = join(directory, 'system.md');
-    await writeFile(promptFile, '默认提示词');
-    try {
-      await withApi(directory, promptFile, async request => {
-        const sessions = [{ id: 'one', agentId: 'art', title: '会话', messages: [{ id: 'user-1', role: 'user', content: '你好' }] }];
-        expect((await request('state', { sessions, skills: [], activeId: 'one' })).ok).toBe(true);
-        expect((await (await request('state')).json()).sessions).toEqual(sessions);
-        const denied = await request('chat', { sessionId: 'one', agentId: 'writer', messages: [{ role: 'user', content: '你好' }] });
-        expect(denied.status).toBe(409);
-        expect((await denied.json()).error).toContain('Agent 已固定');
-      });
-    } finally { await rm(directory, { recursive: true, force: true }); }
-  });
-
-  it('keeps safe MCP error details visible while masking credentials', () => {
-    expect(mcpResultError({ content: [{ type: 'text', text: 'Asset Hub API 404: asset 不存在或无权访问' }] })).toBe('Asset Hub API 404: asset 不存在或无权访问');
-    expect(mcpResultError({ content: [{ type: 'text', text: 'request ahk_private failed' }] }, 'ahk_private')).toBe('request [已隐藏] failed');
-    expect(mcpResultError({ content: [{ type: 'text', text: '第一段' }, { type: 'text', text: '第二段' }], structuredContent: { code: 'ASSET_NOT_FOUND' } })).toContain('第二段');
-    expect(mcpResultError({ content: [{ type: 'text', text: '第一段' }, { type: 'text', text: '第二段' }], structuredContent: { code: 'ASSET_NOT_FOUND' } })).toContain('ASSET_NOT_FOUND');
-  });
-
-  it('reports a missing image attachment instead of dereferencing undefined', () => {
-    const tool = { _meta: { 'darl-ui/image-input': { kind: 'data-url', fields: { assetId: 'assetId', dataUrl: 'dataUrl', fileName: 'fileName' } } } };
-    expect(() => findAttachedImageForUpload(tool, { assetId: 'asset-1' }, [])).toThrow('缺少可上传的图片附件');
-  });
-
-  it('retries transient read-only MCP failures without retrying writes', async () => {
-    expect(isRetryableMcpError(Object.assign(new Error('HTTP 401'), { status: 401 }))).toBe(false);
-    expect(isRetryableMcpError(Object.assign(new Error('HTTP 503'), { status: 503 }))).toBe(true);
-    expect(isRetryableMcpError(Object.assign(new Error('aborted'), { name: 'AbortError' }))).toBe(false);
-    const readCall = vi.fn()
-      .mockResolvedValueOnce({ content: [{ type: 'text', text: 'HTTP 503 temporary failure' }], isError: true })
-      .mockResolvedValueOnce({ content: [], isError: false });
-    const readConnection = { app: { id: 'catalog', name: 'Catalog', url: 'https://example.test/mcp', readOnlyTools: ['read'] }, call: readCall } as never;
-    const readTool = { name: 'read', inputSchema: { type: 'object' as const } };
-    const attempts: number[] = [];
-    const retries: number[] = [];
-    expect((await callMcpToolWithRetry(readConnection, readTool, {}, new AbortController().signal, { onAttempt: (attempt) => attempts.push(attempt), onRetry: (attempt) => retries.push(attempt) })).isError).toBe(false);
-    expect(readCall).toHaveBeenCalledTimes(2);
-    expect(attempts).toEqual([1, 2]);
-    expect(retries).toEqual([2]);
-
-    const writeCall = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'failure' }], isError: true });
-    const writeConnection = { app: { id: 'catalog', name: 'Catalog', url: 'https://example.test/mcp' }, call: writeCall } as never;
-    const writeTool = { name: 'write', inputSchema: { type: 'object' as const } };
-    expect((await callMcpToolWithRetry(writeConnection, writeTool, {}, new AbortController().signal)).isError).toBe(true);
-    expect(writeCall).toHaveBeenCalledTimes(1);
-
-    const notFoundCall = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'HTTP 404 not found' }], isError: true });
-    const notFoundConnection = { app: { id: 'catalog', name: 'Catalog', url: 'https://example.test/mcp', readOnlyTools: ['read'] }, call: notFoundCall } as never;
-    expect((await callMcpToolWithRetry(notFoundConnection, readTool, {}, new AbortController().signal)).isError).toBe(true);
-    expect(notFoundCall).toHaveBeenCalledTimes(1);
-
-    const abortedController = new AbortController();
-    const transientCall = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'HTTP 503 temporary failure' }], isError: true });
-    const transientConnection = { app: { id: 'catalog', name: 'Catalog', url: 'https://example.test/mcp', readOnlyTools: ['read'] }, call: transientCall } as never;
-    const pending = callMcpToolWithRetry(transientConnection, readTool, {}, abortedController.signal);
-    setTimeout(() => abortedController.abort(), 5);
-    await expect(pending).rejects.toBeDefined();
-    expect(transientCall).toHaveBeenCalledTimes(1);
-  });
-
-  it('persists, updates and deletes server-managed Agents without exposing keys', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'darl-agents-'));
-    const promptFile = join(directory, 'system.md');
-    await writeFile(promptFile, '默认提示词');
-    try {
-      await withApi(directory, promptFile, async (request) => {
-        const agent = { id: 'art', name: '美术 Agent', instructions: '只负责美术任务', isDefault: true, providerId: 'darl', modelId: 'legacy-model' };
-        const saved = await request('agents', { agent });
-        expect(saved.status).toBe(200);
-        const savedBody = await saved.json();
-        expect(savedBody).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'art', isDefault: true })]));
-        expect(JSON.stringify(savedBody)).not.toContain('apiKey');
-        const stored = dbJson<Array<Record<string, unknown>>>(directory, 'agents').find((item) => item.id === 'art');
-        expect(stored).toMatchObject({ id: 'art', name: '美术 Agent', instructions: '只负责美术任务' });
-        expect(stored).not.toHaveProperty('providerId');
-        expect(stored).not.toHaveProperty('modelId');
-        const updated = await request('agents', { agent: { ...agent, name: '美术 Agent v2', enabled: false } });
-        expect((await updated.json()).find((item: { id: string }) => item.id === 'art')).toMatchObject({ name: '美术 Agent v2', enabled: false });
-        const removed = await request('agents/art', undefined, 'DELETE');
-        expect(await removed.json()).toEqual([expect.objectContaining({ id: 'default', builtIn: true })]);
-      });
-    } finally { await rm(directory, { recursive: true, force: true }); }
-  });
-
-  it('returns a stable structured validation error with a requestId', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'darl-agent-errors-'));
-    const promptFile = join(directory, 'system.md');
-    await writeFile(promptFile, '默认提示词');
-    try {
-      await withApi(directory, promptFile, async (request) => {
-        const response = await request('chat', { messages: [] });
-        const body = await response.json();
-        expect(response.status).toBe(400);
-        expect(body.error).toMatchObject({ code: 'VALIDATION_FAILED', stage: 'validation', retryable: false });
-        expect(body.error.requestId).toEqual(expect.any(String));
+        expect(tools.some(tool => tool.name === 'builtin_request_user_input')).toBe(false);
       });
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
@@ -331,7 +165,6 @@ describe('Agent configuration API', () => {
         expect((await request('skills', { skill: { ...list[0], instructions: '篡改默认技能' } })).status).toBe(400);
         expect((await request('skills/builtin%3Askill-creator', undefined, 'DELETE')).status).toBe(400);
         expect((await request('skills', { skill: { ...list[0], favorite: true, allowImplicitInvocation: false, version: '1.1' } })).ok).toBe(true);
-        expect((await request('state', { sessions: [], skills: [] })).ok).toBe(true);
       });
       await withApi(directory, promptFile, async request => {
         const list = await (await request('skills')).json();
@@ -343,20 +176,15 @@ describe('Agent configuration API', () => {
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
-  it('persists chat state and media tasks in the local database', async () => {
+  it('persists Skills and media tasks in the local database', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'darl-local-state-'));
     const promptFile = join(directory, 'system.md');
     await writeFile(promptFile, '默认提示词');
     try {
       await withApi(directory, promptFile, async (request) => {
-        const state = { sessions: [{ id: 's1', title: '小说', messages: [{ id: 'user-1', role: 'user', content: '小说创作' }] }], activeId: 's1', skills: [] };
         const skill = { id: 'skill-1', name: '编剧', description: '按场次写作', instructions: '按场次输出', version: '1.0' };
         expect((await request('skills', { skill })).ok).toBe(true);
-        expect((await request('state', state)).status).toBe(200);
-        const restored = await (await request('state')).json();
-        expect(restored.sessions).toEqual(state.sessions);
-        expect(restored.activeId).toBe(state.activeId);
-        expect(restored.skills.map((item: { id: string }) => item.id)).toEqual(['builtin:skill-creator', 'skill-1']);
+        expect((await (await request('skills')).json()).map((item: { id: string }) => item.id)).toEqual(['builtin:skill-creator', 'skill-1']);
         expect(dbJson<unknown[]>(directory, 'skills')).toHaveLength(1);
         expect((await request('skills/skill-1', undefined, 'DELETE')).ok).toBe(true);
         expect((await (await request('skills')).json()).map((item: { id: string }) => item.id)).toEqual(['builtin:skill-creator']);

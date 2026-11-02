@@ -48,6 +48,6 @@ export function saveRedrawVideoPrompts(studio: StudioStore, project: StudioRecor
     if (found < 0) throw new Error('模型生成的提示词遗漏或改动了已确认台词，本批未保存');
     dialogueCursor = found + text.length;
   }
-  studio.apply(`redraw-video-prompts-${jobId}`, changes);
+  studio.apply(`redraw-video-prompts-${jobId}`, changes, { source: 'workflow', kind: 'video-prompts', jobId });
   return { clips: clips.length, shots: visited.size, plan };
 }

@@ -180,4 +180,24 @@ describe('SQLite project workspace', () => {
     builtIn.set('prompt', '不应修改');
     expect((await request('styles/1', { method: 'PATCH', body: builtIn })).status).toBe(404);
   });
+
+  it('accepts multiline descriptions up to 1000 characters when creating and updating', async () => {
+    const description = `${'画面\n'.repeat(333)}画`;
+    const form = new FormData();
+    form.set('name', '多行风格');
+    form.set('prompt', description);
+    const created = await request('styles', { method: 'POST', body: form });
+    expect(created.status).toBe(201);
+    const id = created.data.data.id;
+    expect((await request('styles')).data.data.items.find((style: { id: number }) => style.id === id).prompt).toBe(description);
+
+    const update = new FormData();
+    update.set('name', '多行风格');
+    update.set('prompt', description);
+    expect((await request(`styles/${id}`, { method: 'PATCH', body: update })).status).toBe(200);
+    update.set('prompt', `${description}多`);
+    expect((await request(`styles/${id}`, { method: 'PATCH', body: update })).status).toBe(422);
+    form.set('prompt', `${description}多`);
+    expect((await request('styles', { method: 'POST', body: form })).status).toBe(422);
+  });
 });

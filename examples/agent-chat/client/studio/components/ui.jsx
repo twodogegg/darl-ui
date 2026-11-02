@@ -11,7 +11,7 @@ import {
 } from 'react'
 import { useLocation } from 'react-router-dom'
 import { IconX } from '@tabler/icons-react'
-import { useStore, useAgentTask } from '../store'
+import { useStore } from '../store'
 import { readMedia, download } from '../files'
 import { loadVoiceCatalog } from '../../VoiceSettings'
 import { jobResults } from '../../media-job-view'
@@ -228,19 +228,6 @@ export function MediaPreview({ item, onClose }) {
     </Modal>
   )
 }
-export function Models({ image = false, video = false }) {
-  return <div className="model-fields"><DirectorSelect /><TextModelSelect type={video ? 'video' : image ? 'image' : 'text'} label={video ? '视频模型' : image ? '图片模型' : '文本模型'} /></div>
-}
-export function DirectorSelect({ label = '创作导演', disabled }) {
-  const { agents, agentSelection, setAgentSelection, currentAgentId } = useStore()
-  const available = agents.filter(agent => agent.type !== 'sub_agent' && agent.enabled !== false)
-  const selectedId = available.find(agent => agent.id === (agentSelection || currentAgentId))?.id || ''
-  return <label className="creative-director-select"><span>{label}</span><select aria-label={label} disabled={disabled} value={selectedId} onChange={event => setAgentSelection(event.target.value)}>{!selectedId && <option value="">请选择 Agent</option>}{available.map(agent => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
-}
-export function TextModelSelect({ label = '文本模型', type = 'text', disabled }) {
-  const { models, getModel, setModelSelections } = useStore()
-  return <label className="text-model-select"><span>{label}</span><select aria-label={label} disabled={disabled} value={getModel(type)?.id || ''} onChange={event => setModelSelections(current => ({ ...current, [type]: event.target.value }))}>{!getModel(type) && <option value="">请选择模型</option>}{models.filter(model => model.type === type && model.enabled !== false).map(model => <option key={model.id} value={model.id}>{model.name || model.displayName}</option>)}</select></label>
-}
 export function Processing({ busy, cancel, text = '正在提交…' }) {
   return (
     busy && (
@@ -268,10 +255,12 @@ export function ReferencePicker({
   onApply,
   assetSelection = false,
   initialKind,
+  initialSource = '资产库',
+  single = false,
   kinds = ['图片', '视频', '音频', '音色'],
 }) {
   const { data, mediaJobs } = useStore()
-  const [source, setSource] = useState('资产库')
+  const [source, setSource] = useState(initialSource)
   const [kind, setKind] = useState(
     initialKind || (assetSelection ? '关联资产' : kinds[0]),
   )
@@ -311,7 +300,7 @@ export function ReferencePicker({
             ? data.voices.map((a) => ({ ...a, kind: 'audio' }))
             : data.audio.map((a) => ({ ...a, kind: 'audio' }))
   const generated = mediaJobs.filter(job => job.status === 'completed' && job.type === (kind === '图片' ? 'image' : 'video')).flatMap(job =>
-    jobResults(job).filter(result => result.status === 'completed' && result.url).map(result => ({ ...result, kind: job.type, name: job.prompt.trim().slice(0, 80) || '生成结果' })),
+    jobResults(job).filter(result => result.status === 'completed' && result.url).map(result => ({ ...result, kind: job.type, name: `${job.type === 'image' ? '生成图片' : '生成视频'} · ${new Date(job.createdAt).toLocaleString('zh-CN')}` })),
   )
   const options = source === '生成记录' ? generated : libraryOptions
   const all = [
@@ -327,7 +316,7 @@ export function ReferencePicker({
     setPicked((old) =>
       old.some((x) => same(x, item))
         ? old.filter((x) => !same(x, item))
-        : [...old, item],
+        : single ? [item] : [...old, item],
     )
   }
   return (
@@ -402,9 +391,6 @@ export function VoiceModal({ asset, onClose }) {
   const [gender, setGender] = useState('全部')
   const [language, setLanguage] = useState('zh')
   const [selection, setSelection] = useState(asset.voiceId)
-  const [description, setDescription] = useState(asset.voiceDescription || '')
-  const [name, setName] = useState('')
-  const [upload, setUpload] = useState(null)
   const [catalog, setCatalog] = useState([])
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(false)
@@ -412,7 +398,6 @@ export function VoiceModal({ asset, onClose }) {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [revision, setRevision] = useState(0)
-  const { busy, run, cancel } = useAgentTask()
   useEffect(() => {
     if (tab !== '公共音色库') return
     const controller = new AbortController()
@@ -460,40 +445,30 @@ export function VoiceModal({ asset, onClose }) {
     })
     if (!saved) setError('收藏未保存，请关闭弹窗并重新加载最新数据后重试')
   }
-  function create() {
-    if (tab === 'AI 设计' && !description.trim())
-      return notify('请填写声音描述')
-    if (tab === '上传音频' && (!upload || !name.trim()))
-      return notify('请选择有效音频并填写音色名称')
-    run({ action: 'voice', projectId: asset.projectId, assetId: asset.id, assetName: asset.name, provider: 'fish', mode: tab, name, description, referenceAudio: upload?.url })
-  }
   return (
     <Modal
       title={`${asset.name} · 配置音色`}
-      onClose={() => { if (!saving) { cancel(); onClose() } }}
+      onClose={() => { if (!saving) onClose() }}
       wide
       footer={
         <>
-          <Button disabled={saving} onClick={() => { cancel(); onClose() }}>取消</Button>
-          <Button primary disabled={!selectedVoice || busy || saving} onClick={apply}>
+          <Button disabled={saving} onClick={onClose}>取消</Button>
+          <Button primary disabled={!selectedVoice || saving} onClick={apply}>
             {saving ? '保存中…' : '应用音色'}
           </Button>
         </>
       }
     >
       <Tabs
-        items={['选择已有', '公共音色库', '我的收藏', 'AI 设计', '上传音频']}
+        items={['选择已有', '公共音色库', '我的收藏']}
         value={tab}
         onChange={(v) => {
-          cancel()
           setPage(1)
           setGender('全部')
           setError('')
           setTab(v)
         }}
       />
-      {['选择已有', '公共音色库', '我的收藏'].includes(tab) ? (
-        <>
           <div className="toolbar">
             <input
               aria-label="搜索音色"
@@ -559,55 +534,6 @@ export function VoiceModal({ asset, onClose }) {
             <span>第 {page} 页</span>
             <Button disabled={loading || !hasMore} onClick={() => setPage(value => value + 1)}>下一页</Button>
           </div>}
-        </>
-      ) : (
-        <div className="form-stack">
-          {tab === 'AI 设计' ? (
-            <>
-              <Field label="声音描述">
-                <textarea
-                  aria-label="声音描述"
-                  rows={4}
-                  maxLength={1000}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                />
-              </Field>
-              <Field label="试听文本">
-                <textarea
-                  defaultValue="有些故事，值得再讲一次。"
-                  maxLength={500}
-                />
-              </Field>
-            </>
-          ) : (
-            <>
-              <Field label="音色名称">
-                <input
-                  aria-label="音色名称"
-                  maxLength={100}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </Field>
-              <FileButton kind="audio" onSelect={setUpload}>
-                选择本地音频
-              </FileButton>
-              {upload && (
-                <div>
-                  <audio controls src={upload.url} />
-                  <Button onClick={() => setUpload(null)}>移除音频</Button>
-                </div>
-              )}
-            </>
-          )}
-          <Button primary disabled={busy} onClick={create}>
-            {tab === 'AI 设计' ? '设计音色' : '克隆音色'}
-          </Button>
-          <Processing busy={busy} cancel={cancel} />
-
-        </div>
-      )}
       {error && <p role="alert">{error}{tab === '公共音色库' && <Button disabled={loading} onClick={() => setRevision(value => value + 1)}>重试</Button>}</p>}
     </Modal>
   )

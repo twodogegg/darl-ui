@@ -4,6 +4,7 @@ import { appendFileSync, chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { wrapLanguageModel, type LanguageModel, type LanguageModelMiddleware } from 'ai';
 import type { AgentModelConfig, ModelProvider } from '../../../src/components/settings/types';
+import { createWorkflowLogCompactor } from './workflow-log.mjs';
 
 type DebugContext = { write: (entry: Record<string, unknown>) => void; jobId: string; projectId: string; episodeId?: string; kind: string; phase: () => string };
 const scope = new AsyncLocalStorage<DebugContext>();
@@ -47,13 +48,20 @@ export function sanitizeWorkflowDebug(value: unknown, secrets: string[] = []): u
 
 export function createWorkflowDebugLog(directory: string, enabled: boolean, secrets: () => string[] = () => []) {
   if (!enabled) return undefined;
-  const path = join(directory, 'workflow-debug.jsonl');
+  const logDirectory = join(directory, 'workflow-debug');
+  const compactor = createWorkflowLogCompactor();
   let ready = false, warned = false;
   return (entry: Record<string, unknown>) => {
     try {
-      if (!ready) { mkdirSync(directory, { recursive: true, mode: 0o700 }); ready = true; }
-      const line = JSON.stringify(sanitizeWorkflowDebug({ timestamp: new Date().toISOString(), ...entry }, secrets()));
+      const { jobId, projectId, kind } = entry;
+      if (typeof jobId !== 'string' || !/^[\w-]{1,160}$/.test(jobId) || typeof projectId !== 'string' || !/^[\w-]{1,32}$/.test(projectId) || typeof kind !== 'string' || !/^[\w-]{1,32}$/.test(kind)) throw new Error('无效的工作流日志标识');
+      if (!ready) { mkdirSync(logDirectory, { recursive: true, mode: 0o700 }); ready = true; }
+      const path = join(logDirectory, `project-${projectId}_${kind}_${jobId}.jsonl`);
+      const sanitized = sanitizeWorkflowDebug({ timestamp: new Date().toISOString(), ...entry }, secrets());
+      const prepared = compactor.prepare(sanitized, path);
+      const line = JSON.stringify(prepared.entry);
       appendFileSync(path, `${line}\n`, { mode: 0o600 });
+      prepared.commit();
       chmodSync(path, 0o600);
     } catch {
       if (!warned) { warned = true; process.stderr.write('[workflow-debug] 无法写入调试日志，请检查日志目录权限。\n'); }
@@ -66,6 +74,27 @@ export function logWorkflowDebug(event: string, details: Record<string, unknown>
   const current = scope.getStore();
   if (!current) return;
   current.write({ event, jobId: current.jobId, projectId: current.projectId, episodeId: current.episodeId, kind: current.kind, phase: current.phase(), ...details });
+}
+
+/** Combine streamed fragments while keeping incomplete tool inputs recoverable. */
+export function workflowDebugStream() {
+  let outputText = '', reasoningText = '';
+  const parts: unknown[] = [], toolInputs = new Map<string, string>(), completedTools = new Set<string>();
+  return {
+    add(part: { type: string; id?: string; delta?: string; toolCallId?: string }) {
+      if (part.type === 'text-delta') outputText += part.delta || '';
+      else if (part.type === 'reasoning-delta') reasoningText += part.delta || '';
+      else if (part.type === 'tool-input-delta' && part.id) toolInputs.set(part.id, (toolInputs.get(part.id) || '') + (part.delta || ''));
+      else {
+        parts.push(part);
+        if (part.type === 'tool-call' && part.toolCallId) completedTools.add(part.toolCallId);
+      }
+    },
+    result() {
+      const incompleteToolInputs = Object.fromEntries([...toolInputs].filter(([id]) => !completedTools.has(id)));
+      return { outputText, reasoningText, parts, ...(Object.keys(incompleteToolInputs).length ? { incompleteToolInputs } : {}) };
+    },
+  };
 }
 
 /** Capture every SDK model step, including tool calls and partial output, without changing it. */
@@ -81,14 +110,14 @@ export function recordWorkflowDebugModel(model: Exclude<LanguageModel, string>, 
     wrapStream: async ({ doStream, params }) => {
       const callId = randomUUID(), { abortSignal: _signal, headers: _headers, ...input } = params;
       logWorkflowDebug('model.request', { callId, providerId: provider.id, modelId: config.id, protocol: provider.protocol, baseUrl: provider.baseUrl, input });
-      const parts: unknown[] = [];
-      let outputText = '', finished = false;
-      const finish = (event: string, details: Record<string, unknown> = {}) => { if (!finished) { finished = true; logWorkflowDebug(event, { callId, outputText, parts, ...details }); } };
+      const logged = workflowDebugStream();
+      let finished = false;
+      const finish = (event: string, details: Record<string, unknown> = {}) => { if (!finished) { finished = true; logWorkflowDebug(event, { callId, ...logged.result(), ...details }); } };
       try {
         const result = await doStream(), reader = result.stream.getReader();
         return { ...result, stream: new ReadableStream({
           async pull(controller) {
-            try { const { done, value } = await reader.read(); if (done) { finish('model.response'); reader.releaseLock(); controller.close(); return; } if (value.type === 'text-delta') outputText += value.delta; parts.push(value); controller.enqueue(value); }
+            try { const { done, value } = await reader.read(); if (done) { finish('model.response'); reader.releaseLock(); controller.close(); return; } logged.add(value); controller.enqueue(value); }
             catch (error) { finish('model.error', { error }); reader.releaseLock(); controller.error(error); }
           },
           async cancel(reason) { finish('model.cancelled', { reason }); try { await reader.cancel(reason); } finally { reader.releaseLock(); } },

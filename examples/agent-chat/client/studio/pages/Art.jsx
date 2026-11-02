@@ -1,6 +1,6 @@
 import { imageUrl } from '../../image-url'
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { StyleSelector } from '@darl/ui'
 import { createWorkspaceStyle, styleOptionsFromCatalog } from '../../workspace-styles'
 import { Workflow, useProject } from '../components/Shell'
@@ -8,7 +8,7 @@ import { VoiceModal, Confirm, Modal, Button, Field } from '../components/ui'
 import { studioApi, useStore } from '../store'
 import { types } from '../data'
 import ArtAssetDrawer from '../components/ArtAssetDrawer'
-import { assetJob, canBatchGenerate, generateAssetBatch, jobLabel, pendingJob } from '../art'
+import { assetJob, canBatchGenerate, generateAssetBatch, jobLabel, pendingJob, redrawImageReadiness } from '../art'
 import { AssetSourceEvidence, SupplementAsset } from '../components/VideoRedraw'
 import { WorkflowRunDetails } from '../components/WorkflowRunDetails'
 
@@ -26,6 +26,7 @@ function ArtWorkspace({ context }) {
   const { projectId } = context
   const { data, update, patch, notify, generateMedia, mediaJobs, models, getModel, mediaDefaults, setModelSelections, reload } = useStore()
   const navigate = useNavigate()
+  const location = useLocation()
   const [tab, setTab] = useState('全部')
   const [episodeId, setEpisodeId] = useState('')
   const [editor, setEditor] = useState(null)
@@ -56,16 +57,17 @@ function ArtWorkspace({ context }) {
   const [nextOpen, setNextOpen] = useState(false)
   const [nextModel, setNextModel] = useState('minimax-h3')
   const [nextMode, setNextMode] = useState('参考生成')
-  const [extraction, setExtraction] = useState(null)
+  const [extraction, setExtraction] = useState(() => location.state?.extractionError ? { status: 'failed', error: location.state.extractionError } : null)
   const [extractionOpen, setExtractionOpen] = useState(false), [extractionRequirements, setExtractionRequirements] = useState('')
-  const extractionEpisode = episodeId || new URLSearchParams(window.location.search).get('episodeId') || context.episodes[0]?.id
+  const isRedraw = context.project.creationMode === 'video-redraw'
+  const extractionEpisode = isRedraw ? episodeId || new URLSearchParams(window.location.search).get('episodeId') || context.episodes[0]?.id : context.episodes[0]?.id
   useEffect(() => {
-    if (context.project.creationMode !== 'video-redraw' || !extractionEpisode) return
+    if (!extractionEpisode) return
     const controller = new AbortController()
     const params = new URLSearchParams({ projectId, episodeId: extractionEpisode })
     studioApi(`video-redraw/status?${params}`, undefined, controller.signal).then(async result => {
-      const job = result.jobs.find(item => item.kind === 'extract-assets')
-      if (!job) { setExtraction(null); return }
+      const job = result.jobs.find(item => item.kind === (isRedraw ? 'extract-assets' : 'script-assets'))
+      if (!job) return
       setExtraction(job)
       if (['queued', 'running'].includes(job.status)) {
         params.set('jobId', job.id)
@@ -75,22 +77,35 @@ function ArtWorkspace({ context }) {
       }
     }).catch(error => { if (!controller.signal.aborted) setExtraction({ status: 'failed', error: error.message }) })
     return () => controller.abort()
-  }, [projectId, extractionEpisode, extraction?.refresh])
+  }, [projectId, extractionEpisode, extraction?.refresh, isRedraw])
   async function extractAssets() {
     try {
       const latest = await reload()
       const project = latest.projects.find(item => item.id === projectId)
-      const job = await studioApi('video-redraw/action', { action: 'extract-assets', projectId, episodeId: extractionEpisode, requestId: crypto.randomUUID(), version: project._version, requirements: extractionRequirements.trim() })
+      const job = await studioApi('video-redraw/action', { action: isRedraw ? 'extract-assets' : 'script-assets', projectId, episodeId: extractionEpisode, requestId: crypto.randomUUID(), version: project._version, requirements: extractionRequirements.trim() })
       setExtraction({ ...job, refresh: Date.now() }); setExtractionOpen(false)
-    } catch (error) { setExtraction({ status: 'failed', error: error.message }) }
+    } catch (error) { setExtractionOpen(false); setExtraction({ status: 'failed', error: error.message }) }
   }
-  const isRedraw = context.project.creationMode === 'video-redraw'
+  async function cancelExtraction() {
+    try { await studioApi('video-redraw/action', { action: 'cancel', projectId, episodeId: extractionEpisode, jobId: extraction.id || extraction.jobId }); setExtraction(current => ({ ...current, refresh: Date.now() })) }
+    catch (error) { notify(error.message) }
+  }
+  const redrawReadiness = redrawImageReadiness(data.assets, mediaJobs, projectId)
   async function nextStep() {
     if (transitioning) return
     setTransitioning(true)
     try {
       const episode = context.episodes.find(item => item.id === extractionEpisode) || context.episodes[0]
       if (!episode) { notify('请先创建剧集'); return }
+      if (!isRedraw && ['queued', 'running'].includes(extraction?.status)) { notify('资产提取进行中，请等待完成'); return }
+      let latest, status
+      if (isRedraw) {
+        const result = await Promise.all([reload(), studioApi('media-generation/jobs'), studioApi(`video-redraw/status?${new URLSearchParams({ projectId, episodeId: episode.id })}`)])
+        const jobs = result[1]
+        latest = result[0]; status = result[2]
+        if (!redrawImageReadiness(latest.assets, jobs, projectId).ready) { notify('请先完成所有资产主图和衍生形态图片'); return }
+        if (status.jobs.some(job => job.kind === 'extract-assets' && ['queued', 'running'].includes(job.status))) { notify('资产提取进行中，请等待完成'); return }
+      }
       const modelId = mediaDefaults.video?.modelId
       if (!models.some(model => model.id === modelId && model.type === 'video' && model.enabled !== false && ['minimax-h3-flash', 'minimax-h3-standard'].includes(model.id))) { notify('请先在设置中配置并启用 MiniMax H3 视频模型'); return }
       const saved = await update(draft => {
@@ -98,7 +113,24 @@ function ArtWorkspace({ context }) {
       })
       if (!saved) return
       setModelSelections(current => ({ ...current, video: modelId }))
-      navigate(`/video?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(episode.id)}`, { state: { promptMode: nextMode } })
+      const hasClips = isRedraw && latest.clips.some(clip => clip.episodeId === episode.id)
+      const promptRunning = isRedraw && status.jobs.some(job => job.kind === 'video-prompts' && ['queued', 'running'].includes(job.status))
+      if (isRedraw && !hasClips && !promptRunning) {
+        const current = await reload()
+        const project = current.projects.find(item => item.id === projectId)
+        await studioApi('video-redraw/action', { action: 'video-prompts', projectId, episodeId: episode.id, requestId: crypto.randomUUID(), version: project._version, mode: nextMode })
+      }
+      let storyboardError = ''
+      if (!isRedraw) {
+        try {
+          const [current, currentStatus] = await Promise.all([reload(), studioApi(`video-redraw/status?${new URLSearchParams({ projectId, episodeId: episode.id })}`)])
+          if (!current.clips.some(clip => clip.episodeId === episode.id) && !currentStatus.jobs.some(job => job.kind === 'script-storyboard' && ['queued', 'running'].includes(job.status))) {
+            const project = current.projects.find(item => item.id === projectId)
+            await studioApi('video-redraw/action', { action: 'script-storyboard', projectId, episodeId: episode.id, requestId: crypto.randomUUID(), version: project._version, mode: nextMode })
+          }
+        } catch (error) { storyboardError = error.message }
+      }
+      navigate(`/video?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(episode.id)}`, { state: { promptMode: nextMode, storyboardError } })
     } catch (reason) { notify(`进入下一步失败：${reason.message}`) }
     finally { setTransitioning(false) }
   }
@@ -148,7 +180,7 @@ function ArtWorkspace({ context }) {
                 </nav>
               </div>
               <div className="art-toolbar__right">
-                {isRedraw && <><WorkflowRunDetails projectId={projectId} episodeId={extractionEpisode} job={extraction} reload={reload} onStarted={next => setExtraction({ ...next, refresh: Date.now() })} /><span role="status">{['queued', 'running'].includes(extraction?.status) ? '正在提取美术资产…' : extraction?.status === 'failed' || extraction?.status === 'interrupted' || extraction?.status === 'cancelled' ? `资产提取${extraction.status === 'cancelled' ? '已取消' : '失败'}：${extraction.error || '请重试'}` : extraction?.status === 'completed' ? '资产提取完成' : ''}</span><button className="tool-btn" disabled={!extractionEpisode || ['queued', 'running'].includes(extraction?.status)} onClick={() => setExtractionOpen(true)}>重新提取资产</button></>}
+                {(isRedraw || !data.assets.some(item => item.projectId === projectId) || extraction) && <><WorkflowRunDetails projectId={projectId} episodeId={extractionEpisode} job={extraction} reload={reload} onStarted={next => setExtraction({ ...next, refresh: Date.now() })} /><span role="status">{['queued', 'running'].includes(extraction?.status) ? '正在提取美术资产…' : extraction?.status === 'failed' || extraction?.status === 'interrupted' || extraction?.status === 'cancelled' ? `资产提取${extraction.status === 'cancelled' ? '已取消' : '失败'}：${extraction.error || '请重试'}` : extraction?.status === 'completed' ? '资产提取完成' : ''}</span>{['queued', 'running'].includes(extraction?.status) && <button className="tool-btn" onClick={cancelExtraction}>取消提取</button>}{(isRedraw || !data.assets.some(item => item.projectId === projectId)) && <button className="tool-btn" disabled={!extractionEpisode || ['queued', 'running'].includes(extraction?.status)} onClick={() => setExtractionOpen(true)}>{extraction ? '重新提取资产' : '提取美术资产'}</button>}</>}
                 <button className="tool-btn art-style-select" aria-label="选择项目视觉风格" title={selectedStyle?.description} disabled={batchBusy || styleBusy} onClick={() => setStyleOpen(true)}>
                   {styleBusy ? '正在保存风格…' : `视觉风格：${selectedStyle?.name || '请选择'}`}
                 </button>
@@ -287,17 +319,19 @@ function ArtWorkspace({ context }) {
               <button
                 className="next-btn"
                 disabled={transitioning}
-                onClick={() => isRedraw ? navigate(`/storyboard?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(extractionEpisode || '')}`) : setNextOpen(true)}
+                onClick={() => setNextOpen(true)}
               >
                 {transitioning ? '正在进入…' : '▦　进入下一步'}
               </button>
             </div>
           </main>
         </div>
-        {nextOpen && <Modal title="选择视频制作方式" onClose={() => setNextOpen(false)} footer={<><Button onClick={() => setNextOpen(false)}>取消</Button><Button primary disabled={transitioning || nextModel !== 'minimax-h3'} onClick={nextStep}>{transitioning ? '正在进入…' : '进入下一步'}</Button></>}>
+        {nextOpen && <Modal title="选择视频制作方式" onClose={() => setNextOpen(false)} footer={<><Button onClick={() => setNextOpen(false)}>取消</Button><Button primary disabled={transitioning || nextModel !== 'minimax-h3' || (isRedraw && (!redrawReadiness.ready || ['queued', 'running'].includes(extraction?.status)))} onClick={nextStep}>{transitioning ? '正在进入…' : '进入下一步'}</Button></>}>
           <Field label="视频模型"><select aria-label="视频模型" value={nextModel} onChange={event => setNextModel(event.target.value)}><option value="seedance-2.5">Seedance 2.5</option><option value="seedance-2.0">Seedance 2.0</option><option value="minimax-h3">MiniMax H3</option></select></Field>
           {nextModel !== 'minimax-h3' && <p className="muted" role="status">当前工作台尚未接入 {nextModel === 'seedance-2.5' ? 'Seedance 2.5' : 'Seedance 2.0'}，请选择 MiniMax H3。</p>}
           <Field label="生成模式"><select aria-label="生成模式" value={nextMode} onChange={event => setNextMode(event.target.value)}><option value="分镜图">四宫格分镜</option><option value="参考生成">参考生成</option></select></Field>
+          {isRedraw && !redrawReadiness.ready && <p className="muted" role="status">{redrawReadiness.running ? '图片生成中，请等待完成' : redrawReadiness.missing ? `还有 ${redrawReadiness.missing} 张资产图片未生成` : '请先添加资产并生成图片'}</p>}
+          {isRedraw && ['queued', 'running'].includes(extraction?.status) && <p className="muted" role="status">资产提取进行中，请等待完成。</p>}
         </Modal>}
         {editor === 'new' && context.project.creationMode === 'video-redraw' ? <SupplementAsset context={context} onClose={() => setEditor(null)} /> : editor && (
           <ArtAssetDrawer
@@ -313,7 +347,7 @@ function ArtWorkspace({ context }) {
             onDelete={setDeleting}
           />
         )}
-        {extractionOpen && <Modal title="重新提取资产" onClose={() => setExtractionOpen(false)} footer={<><Button onClick={() => setExtractionOpen(false)}>取消</Button><Button primary onClick={extractAssets}>开始提取</Button></>}><Field label="补充要求（选填）"><textarea aria-label="资产提取补充要求" maxLength={2000} rows={3} value={extractionRequirements} onChange={event => setExtractionRequirements(event.target.value)} placeholder="例如：重点补充本集出现的关键道具" /></Field><p className="muted">已有资产设定和图片会保留；如需修改已有内容，可交给 Agent 调整。</p></Modal>}
+        {extractionOpen && <Modal title="提取美术资产" onClose={() => setExtractionOpen(false)} footer={<><Button onClick={() => setExtractionOpen(false)}>取消</Button><Button primary onClick={extractAssets}>开始提取</Button></>}><Field label="补充要求（选填）"><textarea aria-label="资产提取补充要求" maxLength={2000} rows={3} value={extractionRequirements} onChange={event => setExtractionRequirements(event.target.value)} placeholder="例如：重点补充剧本中的关键道具" /></Field><p className="muted">{isRedraw ? 'AI 将更新资产文字和提示词，并保留已有图片。' : 'AI 将根据全项目剧本和大纲提取资产；已有资产时不会覆盖。'}修改可在顶栏“变更日志”中查看和还原。</p></Modal>}
         {voice && data.assets.some(a => a.id === voice.id) && (
           <VoiceModal
             asset={data.assets.find((a) => a.id === voice.id)}

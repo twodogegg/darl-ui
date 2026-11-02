@@ -7,9 +7,9 @@ export const steps = [
 ]
 export const redrawSteps = [
   { path: '/source', label: '原片', english: 'SOURCE' },
+  { path: '/storyboard', label: '镜头校对', english: 'SHOTS' },
   { path: '/script', label: '剧本', english: 'SCRIPT' },
   { path: '/art', label: '转绘资产', english: 'ASSETS' },
-  { path: '/storyboard', label: '分镜', english: 'STORYBOARD' },
   { path: '/video', label: '视频制作', english: 'VIDEO' },
   { path: '/film', label: '短片', english: 'FILM' },
 ]

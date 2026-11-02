@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { aiTools, generate, languageModel, modelMessages, toolImageMessages, toolResultForModel, type StoredProvider } from '../examples/agent-chat/server/models';
+import { aiTools, generate, languageModel, modelMessages, toolImageMessages, toolResultForModel, videoUrlRequestBody, type StoredProvider } from '../examples/agent-chat/server/models';
 import type { ModelMessage } from 'ai';
 import { ToolConfirmations } from '../examples/agent-chat/server/mcp';
 import { resolveTextModel } from '../examples/agent-chat/server/api';
@@ -30,6 +30,16 @@ describe('AI SDK runtime integration boundary', () => {
       { role: 'user', content: [{ type: 'text', text: '描述这张图' }, { type: 'image', image: 'data:image/png;base64,aGVsbG8=', mediaType: 'image/png' }] },
       { role: 'assistant', content: '**好的**' },
     ]);
+  });
+
+  it('retains video through source boundaries and supports both gateway URL formats', () => {
+    const video = { type: 'video' as const, name: '原片.mp4', mimeType: 'video/mp4', fileId: 'video-id', url: 'https://example.test/video.mp4' };
+    const mapped = modelMessages([{ role: 'user', content: [{ type: 'text', text: '看视频' }, video] }]);
+    expect(mapped[0].content).toEqual([{ type: 'text', text: '看视频' }, { type: 'file', data: new URL(video.url), mediaType: 'video/mp4', filename: video.name }]);
+    const body = { messages: [{ role: 'user', content: [{ type: 'text', text: '看视频' }, { type: 'video_url', video_url: { url: video.url } }] }] };
+    expect(videoUrlRequestBody(body).messages[0].content[1].video_url).toBe(video.url);
+    expect(videoUrlRequestBody(body, 'object')).toEqual(body);
+    expect(body.messages[0].content[1].video_url).toEqual({ url: video.url });
   });
 
   it('passes tool images as model image parts without serializing pixels into text or duplicating them', async () => {

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { StudioProvider, useStore } from './store'
 import Shell from './components/Shell'
@@ -26,7 +26,11 @@ import './styles/migration.css'
 import './styles/production.css'
 import './styles/integration.css'
 import './styles/video-redraw.css'
+import './styles/change-log.css'
 import './styles/film.css'
+
+// 流程视图依赖 React Flow，按需加载，其他页面不加载画布代码。
+const RedrawFlow = lazy(() => import('./pages/RedrawFlow'))
 
 function StudioMediaPage() {
   const navigate = useNavigate()
@@ -45,14 +49,12 @@ function StudioMediaPage() {
   />} />
 }
 
-function Pages({ onContextChange }) {
+function Pages() {
   const location = useLocation()
   const { data } = useStore()
   useEffect(() => {
-    const params = new URLSearchParams(location.search)
-    onContextChange({ page: location.pathname, projectId: params.get('projectId') || '', episodeId: params.get('episodeId') || '' })
     window.scrollTo(0, 0)
-  }, [location.pathname, location.search, onContextChange])
+  }, [location.pathname, location.search])
   return <Shell><Routes>
     <Route path="/" element={<Home />} />
     <Route path="/projects" element={<Projects />} />
@@ -65,6 +67,7 @@ function Pages({ onContextChange }) {
     <Route path="/storyboard" element={data.projects.find(item => item.id === new URLSearchParams(location.search).get('projectId'))?.creationMode === 'script' ? <Navigate to={`/video${location.search}`} replace /> : <RedrawStoryboard />} />
     <Route path="/video" element={<VideoProduction />} />
     <Route path="/film" element={<Film />} />
+    <Route path="/flow" element={<Suspense fallback={<div className="empty"><p>正在加载流程视图…</p></div>}><RedrawFlow /></Suspense>} />
     <Route path="/assets" element={<Assets />} />
     <Route path="/media" element={<StudioMediaPage />} />
     <Route path="/settings/prompts" element={<Prompts />} />
@@ -73,5 +76,5 @@ function Pages({ onContextChange }) {
 }
 export function StudioApp(props) {
   if (!location.pathname.startsWith('/studio')) history.replaceState(null, '', '/studio/')
-  return <div className="rn-studio"><BrowserRouter basename="/studio"><StudioProvider {...props}><Pages onContextChange={props.onContextChange} /></StudioProvider></BrowserRouter></div>
+  return <div className="rn-studio"><BrowserRouter basename="/studio"><StudioProvider {...props}><Pages /></StudioProvider></BrowserRouter></div>
 }

@@ -40,118 +40,63 @@ Agent Chat 的素材上传、命名字体、项目封面和媒体结果统一通
 
 ### 短剧工作台
 
-Agent Chat 默认打开 `/studio/`，提供项目、大纲、剧本与场次、美术资产、分镜、短片剪辑、资产库和提示词设置。分镜页维护视频片段描述、时长和生成历史，短片页提供剪辑入口。视频转绘根据原视频分析生成初始镜头及原片依据，供剧本、资产和正式分镜使用。页面迁自 RN 短剧 web，代码位于 `examples/agent-chat/client/studio/`；沿用其业务字段，接入当前宿主的 Agent、模型配置、文件服务和 SQLite，不依赖旧 RN 服务或数据库。首次启动不创建演示项目或生成结果。
+Agent Chat 默认打开 `/studio/`，提供项目、大纲、剧本与场次、美术资产、分镜、短片剪辑、资产库和提示词设置。分镜页维护视频片段描述、时长和生成历史，短片页提供剪辑入口。视频转绘根据原视频分析生成镜头（含景别与运镜）及原片依据，先在镜头校对页核对，再供剧本、资产和视频制作使用。镜头校对和剧本页可向原工作流 Agent 连续反馈；结果经校验后直接写入，可通过变更日志还原。页面迁自 RN 短剧 web，代码位于 `examples/agent-chat/client/studio/`；沿用其业务字段，接入当前宿主的 Agent、模型配置、文件服务和 SQLite，不依赖旧 RN 服务或数据库。首次启动不创建演示项目或生成结果。
 
 人工编辑与 Agent 共用 `server/studio.ts` 业务服务。项目创建时上传的文本保存在项目 `sourceScript`，在独立的“原始素材”页面展示，供大纲创作参考，不自动生成剧集；小说、剧本或其他文字资料都放在这里，剧本页保持独立。两个内置工具分别查询和批量编辑；查询支持项目、剧集、场次、ID、字段筛选与分页，`describe` 返回字段说明、类型与创建必填项，编辑工具使用同一份字段 schema。角色对白必须引用当前项目的真实角色资产，资产与分镜可同批创建。字段和引用错误返回具体记录、字段路径与修正提示。每批最多 500 条修改，在一个短事务内校验引用与版本，失败整批回滚；同一请求编号可以安全重试。分镜时长、片段关联与排序由代码校验，剧本改编、资产归并与创意判断由 Agent 处理。页面定期同步工具修改，未保存草稿遇到外部修改会保留并提示冲突。
 
+剧本模式在大纲页点击“编写分集剧本”时，如无剧集会创建第一集；首集没有正文且未提交过生成任务时，自动启动小说转剧本工作流。执行模型、整理模型、提示词、Skills 和只读工具在「设置 → 工作流 Agents → 小说转剧本」配置。任务读取项目原文、大纲、分集与时长设置，先生成报告再整理并校验写入场次；可在任务详情查看状态和报告，已有正文不会覆盖，失败可在剧本页重试。
+
+剧本模式确认全部剧本进入美术资产时，若项目没有资产且未提交过该任务，会自动启动“剧本资产提取”，根据全项目大纲和剧本生成角色、场景、道具及提示词；已有资产不会覆盖。任务可在资产页查看、取消和失败重试，执行模型、整理模型与 Skills 可在工作流 Agents 中配置。
+
+剧本项目的新剧集默认不设置本集目标时长；生成剧本时参考创建项目时设置的单集时长区间。用户或 Agent 可填写本集目标秒数，已有时长不会自动改写。
+
 图片和视频按钮复用现有持久化生成队列，独立于聊天会话。真实结果写入资产或片段的历史版本；生成期间目标被修改时保留结果，不覆盖当前选用版本。当前支持图片生成/参考编辑，以及 H3 的文本、图片、视频和音频/音色试听参考视频；音频参考须搭配图片或视频，实际声音保持效果需试听生成结果。首尾帧、工作台的 AI 音乐与音色设计尚未接通。模型和服务端凭证需要在现有设置中配置，失败会显示真实错误。 美术资产页可查看和修改项目视觉风格，官方预设与自建风格统一用于生成；批量补图固定本次选定的风格，保留已有主图和衍生图；缺主图时先生成主图，再参考选用主图逐个补齐缺失的衍生形态，主图失败则跳过对应衍生任务。融合资产可在依赖资产区关联同项目资产的主形象或具体形态，依赖未出图时禁止生成；后台自动传入图片和用途说明，禁止循环依赖，批量生成仅补齐缺图，不重做已有主形象或衍生形态；先处理缺失的依赖。生成结果按图片记录实际引用，参考图更新后提示重新生成，生成期间依赖变化则仅保留历史。美术资产抽屉支持主图与衍生形态生成、参考改图、清晰度/画幅选择和历史选图；页面显示持久化任务状态，刷新后可继续查看已提交任务的结果。剧集列表可确认删除本集及关联分镜、片段和成片记录，项目共享资产保留。
 
-「设置 → Agents」在原系统提示词后提供独立的**网站专用系统提示词**，随 Agent 保存，主 Agent 与子 Agent 都按此顺序加载。默认网站助手首次从 `prompts/website.md` 初始化；留空可清除。工作台 Agent 按钮的任务指令可在「设置 → 工作流 Agents → 工作台 Agent 按钮」修改，首次从 `examples/agent-chat/prompts/studio-agent-buttons.json` 初始化到 SQLite；按钮消息、页面参数及 Skills 绑定仍由该文件定义。按钮消息和模型上下文随对话保存，重新生成时保留。隐藏内容仅在聊天正文中不显示，仍会存储并发送给模型，不应放密钥。其他创作阶段提示词由 `prompts/studio-prompt-catalog.json` 初始化到 SQLite，可在工作台提示词页面替换，`prompts/studio-actions.json` 提供媒体创作指令。
+网站已下线侧边栏聊天助手、Agent 广场与普通 Agents 管理；独立的「设置 → 工作流 Agents」继续用于配置创作任务。Skills、模型、媒体任务及历史数据保留。原本依赖聊天助手的剧本重写、音色设计与音频生成入口已移除；也可在剧本页手动添加剧集并使用小说转剧本工作流。
 
-分镜图模式为每个视频片段独立维护 `clips.storyboardPrompt`，默认一张 2×2 四宫格；视频提示词保存在 `clips.prompt`。分镜风格确认后再编写视频提示词，参考生成模式直接编写视频提示词。
+分镜图模式为每个视频片段独立维护 `clips.storyboardPrompt`，默认一张 2×2 四宫格；视频提示词保存在 `clips.prompt`。视频提示词工作流先创建片段与提示词；四宫格模式的分镜提示词可在页面填写或调整。 视频制作页顶部可对当前片段或本集全部片段切换生成方式；分镜与视频提示词均支持针对当前片段或批量输入要求交给 AI 调整。转绘项目的视频提示词调整复用首次生成的视频提示词工作流 Agent、Skills、整理模型及上游报告，并携带当前页面数据、视频模型、选中片段和修改要求；分镜提示词调整仍调用提示词优化模型。结果逐项保存，进度和失败原因显示在调整窗口。 批量调整将选中片段一次交给模型统一生成，逐项校验保存；单项失败可单独重试。片段“其他参考素材”可从生成记录选择图片并重命名，分镜提示词中用 @ 引用；片段分镜图的“选图”可直接选用生成记录中的图片。生成时按实际附件顺序标注资产和参考图。
 
 视频制作以片段自身为单位：底部按场次选择片段，左侧管理素材和片段图片，中间编辑视频描述与生成参数，右侧预览。初始站位、镜头画面、动作、切镜和对白统一保存在 `clips.prompt`；`clips.duration` 独立维护，单条片段最多 15 秒，提交时按模型支持的时长向上取整。视频描述与时长由片段独立维护。转绘图片依据当前视频描述生成；资产与音色来自片段关联、描述中的资产引用和显式参考。项目内图片和视频在各自生成历史中显示排队、运行、失败和结果；请求入队后可继续提交多个版本，无需等待运行结束。独立「生成媒体」只列出未关联项目生成目标的任务。视频描述复用现有普通/H3 提示词优化，原文与结果并列对比，确认后应用；当前浏览器标签页保留各片段最近一次优化，应用或刷新后仍可对比、还原原文，后续修改过的描述不会被直接还原覆盖。关联素材按实际图片地址去重，未生成图片的资产只显示名称和状态。模型与参数下拉框直接显示生效值。视频片段可上传本地视频，保存到历史并选用；失败或结果待确认的生成记录可在确认后删除，运行中的任务需等待结束。
 
-`npm run dev` 同时启动前后端和组件站。默认端口为 5197 / 5188，可通过 `.env.local` 的 `AGENT_CHAT_PORT` / `PLAYGROUND_PORT` 设置固定端口。工作台与原项目数据共用 `.local/agent-chat/data.sqlite`，文件使用现有存储配置，无需 `PROJECT_API_BASE_URL`、`PROJECT_API_TOKEN` 或第二个后端。数据 API 允许本机和同一局域网访问，当前宿主面向本地单用户。
+`npm run dev` 同时启动前后端和组件站。默认端口为 5197 / 5188，可通过 `.env.local` 的 `AGENT_CHAT_PORT` / `PLAYGROUND_PORT` 设置固定端口。工作台默认使用 `.local/agent-chat/data.sqlite`；设置 `AGENT_CHAT_DB_PATH` 可指定相对于该目录的数据库文件名或绝对路径，变更后重启所有服务。文件使用现有存储配置，无需 `PROJECT_API_BASE_URL`、`PROJECT_API_TOKEN` 或第二个后端。数据 API 允许本机和同一局域网访问，当前宿主面向本地单用户。
 
 ### 视频转绘
 
-「设置 → 工作流 Agents」分别配置视频分析、剧本编写、资产提取、正式分镜和视频提示词拆分的模型、系统提示词、Skills 和只读内置工具；整理模型单独配置。每次任务先保存模型原始文本，再整理为页面字段并校验写入；各页面的任务详情可查看输出和工具步骤。整理或写回失败后可从已保存的原始输出重新整理，业务数据发生变化时会阻止覆盖。
+「设置 → 工作流 Agents」分别配置视频分析、剧本编写、资产提取、正式分镜和视频提示词拆分的执行模型、系统提示词、Skills 和只读内置工具，以及各自的整理模型。每个节点先保存执行 Agent 的完整报告，再由整理 Agent 转为页面字段并校验写入；校验未通过时，具体错误会交回整理 Agent 最多自动修正两次。页面只显示整理后的字段，完整报告交给下游节点：剧本、资产、正式分镜和视频提示词节点读取同集、同一原片上游节点最近完成的报告（正式分镜须已应用），与页面记录冲突时以页面记录为准。各页面的「任务详情」分步显示执行、整理和保存状态，可查看交付报告、页面字段和执行过程。整理或写回失败后可从已保存的完整报告重新整理，业务数据发生变化时会阻止覆盖。
+
+顶栏「变更日志」记录页面编辑、对话 Agent、工作流节点和媒体写回的每次写入，默认显示 Agent 与工作流的修改；可切换项目或全局资源，按字段查看修改前后内容，整批或逐条还原。之后又被修改的内容会跳过并说明原因，还原本身也记入日志并可撤销。每个项目保留最近 1000 批记录。
 
 首页「视频转绘」支持日本/日语和欧美/英语。上传 MP4 并创建项目后，Agent 使用视频转绘工具提交分析任务：服务端使用 PySceneDetect 检测候选镜头，直接复用文件服务中原片的 COS 原图地址（历史本地原片通过现有 COS 配置上传并校验后保留同一 fileId），无需网关文件上传，再使用 `VIDEO_ANALYSIS_BASE_URL` 和服务端 `VIDEO_ANALYSIS_API_KEY` 调用视频模型校正切点并生成结构化分镜和资产状态。原片限 300 MB、300 秒；运行环境需安装 `ffmpeg`、`ffprobe` 和 `scenedetect`。任务和分析结果持久保存，失败、取消或服务中断后可查询并重新提交；更换原片后不会复用旧分析。
 
 `VIDEO_ANALYSIS_VIDEO_URL_FORMAT` 控制视频地址在请求中的格式：`object`（默认）发送 `{ "url": "..." }`，`string` 直接发送地址字符串；按视频分析接口的实际要求设置。修改 `.env.local` 后需重启开发服务。
 
-排查转绘工作流时，在 `.env.local` 设置 `VIDEO_REDRAW_DEBUG=1` 开启，设为 `0` 或删除该项关闭，修改后重启服务。日志位于 `.local/agent-chat/logs/workflow-debug.jsonl`：按任务 ID、阶段和模型调用记录完整文本输入、流式输出、工具调用及错误，包含分析 Agent 与整理模型；视频分析调用记录请求正文与响应。密钥、签名参数及内联二进制媒体会脱敏或省略，普通图片/视频文件引用保留。日志包含项目内容，保存在本机且不自动清理，可按需手动删除。
+排查转绘工作流时，在 `.env.local` 设置 `VIDEO_REDRAW_DEBUG=1` 开启，设为 `0` 或删除该项关闭，修改后重启服务。每次任务的日志分别位于 `.local/agent-chat/logs/workflow-debug/`，文件名包含项目、任务类型和任务 ID；同一任务的所有模型调用和工具步骤保存在同一文件。日志记录完整文本输入、合并后的模型输出与推理文本（如有）、工具调用及错误；视频分析调用记录请求正文与响应。密钥、签名参数及内联二进制媒体会脱敏或省略，普通图片/视频文件引用保留。后续模型请求的重复上下文通过 `inputRef` 引用前一轮，新增消息保留在 `input.prompt` 或 `input.messages`；用 `node scripts/read-workflow-log.mjs <日志文件>` 还原整份日志，追加 `--call <模型调用ID>` 查看某次完整请求。日志包含项目内容，保存在本机且不自动清理，可按需手动删除。旧版日志保留原样，读取工具同样支持。
 
-默认模型初始化自 `examples/agent-chat/prompts/video-redraw.json`，工作流 Agent 提示词在「设置 → 工作流 Agents」中配置；整理阶段使用独立的页面字段合同，不再注入默认创作提示词。剧本编写使用独立的执行模型和整理模型，以目标地区、语言及已确认目标对白为准，在已有场次内生成正文并列出待确认事项，已有剧本不会覆盖。资产提取读取已有分析、分镜、场次和资产，不再次调用视频模型。转绘流程依次为原片、剧本、转绘资产、正式分镜、视频制作、短片；原片分析生成的镜头作为正式分镜初稿。正式分镜 Agent 读取剧本、原片分析、资产文字与现有镜头，通过独立模型整理待审核建议，确认后才写入；当前不读取图片像素。镜头运镜及目标时长可编辑，页面显示一位小数，原片来源时间保留原始精度。进入视频制作前检查资产图片和生成任务，并选择视频模型及生成方式；视频制作页可填写补充要求，视频提示词工作流 Agent 根据分镜创建片段提示词；已有片段由用户或 Agent 调整。重新分析不会自动覆盖人工修改。
+默认模型初始化自 `examples/agent-chat/prompts/video-redraw.json`，工作流 Agent 提示词在「设置 → 工作流 Agents」中配置；整理阶段使用独立的页面字段合同，不再注入默认创作提示词。剧本编写使用独立的执行模型和整理模型，以目标地区、语言及已确认目标对白为准，在已有场次内生成正文并列出待确认事项，已有剧本不会覆盖。资产提取读取上游报告、分镜、场次和资产，不再次调用视频模型；整理并校验后直接更新已有资产文字与提示词、保留图片，修改可在「变更日志」查看和还原。已有角色新增的镜头关联须在镜头文字中出现角色名称、别名或编号，否则不写入并在任务详情列出，其余结果照常保存。转绘流程依次为原片、镜头校对、剧本、转绘资产、视频制作、短片；原片分析生成的镜头含景别与运镜，先在镜头校对页核对台词、说话人和切点，再编写剧本。正式分镜 Agent（`plan-storyboard`）不再提供页面入口，仍可由 Agent 调用；它读取剧本、原片分析、资产文字与现有镜头，通过独立模型整理待审核建议，确认后才写入；当前不读取图片像素。镜头运镜及目标时长可编辑，页面显示一位小数，原片来源时间保留原始精度。从转绘资产页进入视频制作前检查资产图片和生成任务，并选择视频模型及生成方式；本集尚无片段时，参考生成会启动视频提示词工作流，四宫格分镜同样启动视频提示词工作流创建片段和视频提示词，分镜提示词需在页面填写或使用调整功能，再生成分镜图。已有片段由用户或 Agent 调整，视频制作页也可填写补充要求手动启动。原片重新分析不会自动覆盖已有分镜；资产提取会按上述规则更新资产文字。
+
+视频转绘新剧集的目标时长默认不设置，可在剧本页填写；原片时长单独保存在原片元数据中。剧本与资产提取节点读取当前目标时长，流程视图显示当前值，历史任务面板保留当次实际输入；当前未设置时不得沿用旧报告中的目标值。转绘项目可在侧栏（手机端在顶部横幅）切换「步骤 / 流程」视图。流程视图（`/studio/flow`）为只读：资产分析与提示词节点涵盖提取、整理和校验，工作流先生成片段与视频提示词；分镜图模式再填写或调整分镜提示词并生成分镜图，最后生成视频；参考生成模式可跳过分镜提示词和分镜成图。节点状态从页面记录、转绘任务和媒体任务推导，不另存流程数据；资产图片齐全时保留最近一次提取失败提示。点开节点可查看已有运行记录的输入、输出和页面内容；实线表示页面数据依赖，虚线表示任务实际收到的上游报告，上游之后又完成新运行时标为旧版。手机端按流程顺序显示节点列表。
+
+剧本项目同样可切换流程视图，查看大纲、剧本编写、美术资产提取与成图、分镜与视频提示词、分镜图、视频及成片；节点数据来自当前页面与已有任务记录。剧本项目调整已有视频提示词时使用「工作流 Agents → 剧本分镜」的执行模型、指令和 Skills，保留原片段的时长和关联；转绘项目使用「视频提示词」工作流。
+
+工作流 Agent 会将所选 Skill 正文中链接的本地 Markdown 参考文件一并提供给执行模型；缺失的 `references/` 文件会报错，脚本和未引用文件不会自动执行或发送。流程视图区分当前 Agent 的 Skill 设置与历史任务当时的设置；视频提示词调整属于独立操作，不会改写首次生成任务的历史记录。
+
+剧本项目在「工作流 Agents → 小说转大纲」配置独立的执行模型、整理模型、指令和 Skills。创建项目后自动分析原始素材并生成大纲；已有大纲可在大纲页填写意见，调用同一工作流修改。项目在运行期间未发生变化时自动保存结果，否则保留草稿供查看，避免覆盖修改；手动表单有未保存内容时须先保存。此流程无需预先创建剧集；大纲页的任务详情展示执行报告、页面字段和执行过程，流程视图可查看实际输入。
 
 目标图片和视频复用现有媒体队列与真实模型配置；片段创建时关联镜头资产，生成前要求目标资产图已准备。当前使用图片参考重新生成，不提供原片连续动作逐帧转绘或精确口型保证。翻译不等于目标配音完成，需试听实际生成结果。「合成导出」按勾选顺序裁剪、拼接选用视频，保留各片段生成音轨，不混入原片声音；导出为统一 480 级 H.264/AAC MP4，记录到现有成片资源。字幕制作、独立配音和更高精度动作编辑仍需对应实际能力。
 
 配套 `examples/agent-chat/skills/video-redraw/` 提供创作规则，`darl-studio` 描述查询、解析、补漏、应用与导出 Tools；工作流阶段提示词在「设置 → 工作流 Agents」维护。技能可加载不代表模型账户可用；上游余额、模型权限或调用失败会显示真实错误。
 
-### Sub Agent 持续会话（Agent Chat）
+剧本项目从美术资产进入分镜时，当前集没有视频片段则自动启动独立的「剧本分镜」工作流。它读取项目大纲、本集剧本与场次、美术资产和默认视频模型时长，生成视频提示词并创建片段，仅分镜图模式额外生成分镜图提示词；已有片段不会覆盖。执行模型、整理模型、提示词及 Skills 在「设置 → 工作流 Agents → 剧本分镜」中配置，任务详情展示真实进度与错误。
 
-主 Agent 委派给同一个专业 Sub Agent 的历史由服务端 SQLite 的 `subagent_threads` 表保存。在同一个主聊天会话中再次委派同一个 Sub Agent，会自动带上**该子会话自己的历史任务和最终回复**；页面刷新或本机服务重启后也可以接续。新建主聊天、切换主 Agent 或切换 Sub Agent 不共享子会话历史。
+`PromptSettingsCard` 可通过可选的 `visibleKeys` 限定显示的提示词项；未传时保持原有行为。
 
-- 子会话身份由本地单用户作用域、主聊天 `sessionId`、主 Agent ID 和 Sub Agent ID 组合确定，与每次执行的新 `runId` / `parentRunId` 不同。
-- 只保存子任务及最终回复，**不会**跨子 Agent 复制上下文，也不持久化原始 MCP 工具结果、隐藏推理或密钥。子 Agent 的提示词、Skills 和 MCP 工具每次从当前配置重新确认；模型使用当前聊天选择的文本模型。
-- 子历史按子模型的上下文预算与 Agent 上下文策略压缩；失败、取消或超时不写入虚假成功回复。同一子会话的并行调用在本地进程内排队，SQLite 版本校验防止其他写入者静默覆盖。
-- 当前示例仅面向**本地单用户**。子会话使用固定 `local` 作用域；部署为多用户服务之前必须接入真实的宿主用户鉴权与隔离，不能把请求头视为身份凭据。
-- 此功能支持主 Agent **间接续聊**协作 Agent；子会话的独立列表、可选多线程切换和 UI 历史查看仍是后续扩展。
+### 服务配置
 
-### 真实模型示例
+复制 `.env.example` 为 `.env.local` 并配置服务端模型凭证；也可通过「设置 → 模型」管理提供方、协议和模型绑定。工作流的模型、提示词、Skills 与工具在「设置 → 工作流 Agents」配置。Skills 库支持导入、编辑与收藏。
 
-聊天请求按连续 3 分钟没有模型输出或工具进展判断超时，持续执行的任务可超过 3 分钟；等待工具确认时暂停计时，批准或拒绝后恢复，主动停止仍立即取消。超时保留已保存内容与工作区文件，继续时应先读取实际状态；刷新或断开连接后不会自动在后台续跑聊天。
+服务默认只接受对应端口的同源请求。反向代理或隧道使用自定义域名时，通过 `AGENT_CHAT_ALLOWED_HOSTS` 配置允许的主机；公开服务前须自行设置访问保护，因为服务持有模型凭证。预览使用 `npm run preview:agent-chat` 和 `AGENT_CHAT_PREVIEW_PORT`。
 
-`examples/agent-chat` 是独立的宿主网站示例，包含客户端和本地服务端。通过 Vite alias 直接引用 `@darl/ui` 的 `src/index.ts` 和样式，组件修改会热更新，无需复制 UI 或重新打包组件库。`playground` 仍用于本地模拟交互。
-
-真实示例顶部的「开发说明」页面解释了 AgentSidebar 的组件接入、模型服务端代理、流式事件、会话与 Skill 数据结构，以及 MCP 应用接入与确认流程。
-
-复制 `.env.example` 为 `.env.local`，配置服务端 `AGENT_CHAT_API_KEY`；默认地址 `https://api.darl.cn/v1`，默认模型 `deepseek-v4.1-flash`。也可直接在示例的「设置 → 模型」中管理提供方、API 协议、模型类型和推理强度。推理强度填写模型实际支持的值，如 `low, medium, high`；留空则不发送此参数。
-
-示例服务端默认只接受 `AGENT_CHAT_PORT` 端口的同源请求。要通过反向代理或 Cloudflare Tunnel 用自定义域名访问，在 `.env.local` 设置 `AGENT_CHAT_ALLOWED_HOSTS=agents.example.com`（逗号分隔可填多个），Vite 的 `server.allowedHosts` 与 API 同源校验会同时读取它。注意：这会把持有真实模型密钥、可执行本机命令的服务端暴露到公网，任何能访问该域名的人都能消耗凭据，仅限自用并保持审批模式。
-
-隧道/反代对外访问请用打包产物而不是 dev server：`npm run preview:agent-chat` 会先 `build:agent-chat`，再在 `AGENT_CHAT_PREVIEW_PORT`（默认 5199）用 preview 模式同时提供静态资源和同一套 `/api` 中间件。dev server 的模块请求数量是打包后的几十倍，慢速上行链路下首屏会拖到几十秒。
-
-独立 worktree 在 `.env.local` 配置自己的 `AGENT_CHAT_PREVIEW_PORT`、`AGENT_CHAT_ALLOWED_HOSTS`、`AGENT_CHAT_PUBLIC_HOST` 和 `AGENT_CHAT_PREVIEW_SERVICE`，隧道指向对应预览端口，launchd 服务的工作目录指向该 worktree。提交钩子根据这些配置重启对应服务；端口占用时预览脚本会报错。AI 影视工作流使用 `drama.darlai.cn`、预览端口 `21639` 和服务 `cn.darlai.drama-preview`，开发端口为 `21637` / `21638`。
-
-- 支持 OpenAI Chat Completions / Responses 流式文本协议、多轮对话、停止、重新生成、新对话和历史搜索。
-- 示例服务端使用 AI SDK Core 和 OpenAI-compatible Provider 运行模型与工具循环；MCP 通过已有 SDK 动态转换为 AI SDK 工具，执行确认仍由宿主处理。每次请求从本地 SQLite 恢复并重建模型上下文，由宿主提供本机文件和 Shell 工具；这些执行能力仅属于宿主示例，不进入组件库浏览器产物。
-- Markdown 使用开源的 `react-markdown`、`remark-gfm` 和 `rehype-sanitize` 渲染；回复中的 `md` / `markdown` 代码块会显示为编译后的内容，复制按钮仍复制原始 Markdown。
-- 系统提示词首次从 `examples/agent-chat/prompts/system.md` 写入本地 SQLite，之后由数据库管理；缺失、空白或过长时报错，代码没有内置默认值。专业 Agent 的提示词在 Agents 编辑器中单独配置。Skill 名称和描述在每轮请求中组成目录，完整指令与资源由模型通过工具按需读取。运行规则从 `examples/agent-chat/prompts/skill-runtime.md` 加载。
-- 对话、Skills、提供方、模型配置和 Agent 配置保存在 Git 忽略的 `.local/agent-chat/data.sqlite`；浏览器只负责调用本机 API，不保存聊天历史。
-- 聊天记录在 SQLite 的 `chat_sessions` 表中逐会话保存，带版本检查，旧页面不能覆盖新记录；历史快照首次迁入后保留原始数据。发送前先保存用户消息，流式回复每秒保存，结束时立即保存；失败会提示并重试，尚未保存时关闭页面会提醒。正常重启不清空记录，部署时须保留整个 `.local/agent-chat/` 数据目录。
-- 进入网站只读取会话目录和短预览，不自动恢复上次打开的历史；点击会话后才请求消息正文，失败可重试。`AgentSession.messagePreview` 可供宿主在未加载消息时显示和搜索预览。
-- 本机执行环境提供技能目录/按需加载、文件列举/分页读取/写入、附件导入、Shell 命令、进程查询/停止和文件交付。技能正文及二进制资源由服务端读取已保存版本，浏览器只传 Skill ID。允许自动调用的技能仅发送目录；关闭自动调用的技能需用户显式引用。
-- 网站默认提供 Anthropic 的 `skill-creator`，所有主 / 子 Agent 都能按需加载。上游完整技能包（含许可）位于 `examples/agent-chat/skills/skill-creator/`，来自 [claude-plugins-official](https://github.com/anthropics/claude-plugins-official/tree/d1adba47161a271799de7b548225d929310046bd/plugins/skill-creator/skills/skill-creator)，固定版本 `d1adba47161a271799de7b548225d929310046bd`，原文件未修改。Claude CLI 专属评测仍依赖对应软件与账号，不属于网站自带能力。
-- 在聊天的「选择 Skill」弹层或「管理 Skill」窗口点击「通过对话创建」，会新开一条对话并将自动引用 skill-creator 的创建请求填入输入框，用户确认发送后才执行，原聊天及草稿保持不变。也可以直接对话「创建一个整理会议行动项的 Skill」或发送技能链接要求安装。Agent 用现有文件 / 命令工具生成或下载完整包，再调用 `builtin_create_skill` 安装进网站 Skills 库；用户要求安装后立即可运行时传 `setup: true`，网站会检查脚本引用的系统命令、准备 `requirements.txt` / `pyproject.toml` / `package.json` 并运行支持 `--selftest` 的脚本，返回真实状态和退出码；已安装技能可用 `builtin_prepare_skill` 重试。普通导入仍不执行包内脚本，不写电脑全局技能目录。准备操作按命令执行权限处理；完全访问模式下可直接执行，其他模式会按审批设置请求确认。默认模式自动批准新增技能，覆盖已有技能需明确 ID、当前版本并确认；内置技能内容只读。同包重复安装复用已有 ID。
-- 聊天的「选择 Skill」弹层支持「全部 Skills」「内置 Skills」「我创建的」「我收藏的」分类和名称 / 原名搜索；「我创建的」沿用 Skills 库的自定义分类，包含手动导入和对话创建的技能。
-- Skills 由 `/api/skills` 单独保存到 SQLite，`/api/state` 只写会话，读状态时合并技能目录；旧版会话中的 Skills 首次自动迁移。手动导入与 Agent 创建共用保存逻辑，创建后发送 `skills-changed` 事件刷新界面，当轮即可加载，新对话及刷新后仍可用。
-- 工作区保存在 `.local/agent-chat/workspaces/`，按聊天及 Agent 分目录，文件跨请求和服务重启保留；聊天附件导入支持普通文件 50 MiB、MP4 视频 300 MiB；导入的技能按内容版本落盘，带 shebang 的脚本及 Shell 脚本可直接执行。命令默认超时 120 秒、最大 10 分钟；调用最多等待 10 秒后返回进程 ID，继续用查询工具获取输出与真实退出码。成功回复后后台命令可继续运行至超时；停止、断连或请求失败会终止本轮启动的命令。重启服务后进程不恢复。
-- 命令运行在后端操作系统用户下，**不是沙箱**；文件工具校验工作区路径和符号链接，Shell 本身仍具有系统用户权限。子进程只继承 PATH、HOME、语言、临时目录等基础环境，不转发后端提供方密钥；需要特定凭证、CLI、系统软件或 MCP 的技能仍需配置真实依赖。执行工具仅向本机/局域网同源请求提供，不适合直接暴露到公网。
-- 「设置 → Tools」可查看实际工具目录；输入框或「设置 → 审批模式」统一控制工具执行。默认“帮我批准”，工作区文件操作自动执行；普通导入 Skill 不会自动执行，传 `setup: true` 的安装准备按命令权限请求确认。用户拒绝或主动停止使用 `cancelled` 状态，页面显示普通状态提示；命令失败、网络错误和超时仍保留错误提示。通过 `publish_file` 保存产物后取得 `/api/files/:id?download=1` 下载链接，HTML 等主动内容作为附件交付。
-- 聊天输入框支持 Ctrl+V / Cmd+V 粘贴剪贴板图片，加入当前会话的附件预览，可移除并随消息发送；同时粘贴的纯文本保留在输入框中。宿主提供 `uploadAttachment` 后，聊天文件选择器支持任意文件；未提供时仍只接受图片。示例将附件保存为 fileId 并告知模型，模型可导入工作区处理；仅图片发送给视觉模型，其他文件不冒充图片预览。
-- 媒体生成输入区支持提示词优化；H3 视频可选择普通优化或 H3 专用优化。请求附带当前生成模型、模式、参数、风格和参考素材元数据。「设置 → 模型 → 提示词优化模型」分别选择执行模型，「设置 → 提示词」编辑普通 / H3 优化规则，保存后下次请求生效。失败或取消保留原文，修改输入或参数会取消旧优化。成功后可查看最近一次优化前后的对比，并一键还原优化。
-- MediaWorkspace 宿主可通过 `/api/media-tasks` 保存单用户任务、批次和结果；协议凭据与生成结果仍由宿主 API 管理。
-- 供应商编辑器通过真实 `/v1/models` 临时预览可用模型；查询、测试连接和保存供应商均不保存查询目录。用户逐个点击「添加」后，在供应商编辑器内确认名称、模型类型、参数模板和调用协议，再保存所选模型；已知模型匹配现有配置，未知模型须明确选择类型和模板。「模型 ID 映射」可设置网站使用的 ID，实际请求仍发送所选供应商模型 ID。高级能力覆盖默认折叠。同一供应商的不同文本模型可分别使用 Chat Completions 或 Responses；实际请求遵循模型绑定协议。接口返回的 ID 无法证明其媒体或推理能力。
-- 支持通过 Streamable HTTP 接入 MCP 应用和真实多步工具调用；AgentSidebar 支持图片附件预览、发送到支持视觉输入的文本模型，以及 MCP 图片结果回传；模型目录仍可设置图片 / 视频 / 音频类型，聊天仅列出启用的文本模型。
-- 聊天请求不设置固定的 100000 字符文本上限；上下文预算按模型 `contextWindow` 能力计算，未声明时按 1M token 的默认预算处理。累计上下文超过预算 50% 后主动压缩较早历史，当前消息和最近上下文优先保留；工具结果仍按 Agent 上下文策略控制。
-
-MCP 连接由宿主示例的服务端管理。将配置保存为 Git 忽略的 `.local/agent-chat/applications.json`（数组，可配置多个服务）：
-
-```json
-[
-  {
-    "id": "assets",
-    "name": "素材库",
-    "url": "https://your-server.example/mcp",
-    "apiKey": "服务端 Bearer 凭证",
-    "readOnlyTools": ["search_assets", "get_asset", "list_asset_types", "get_asset_files"]
-  }
-]
-```
-
-在「设置 → 应用 / MCP」中也可以新增、编辑或移除 Streamable HTTP 连接，填写应用 ID、名称、URL 与可选的 Bearer Token；更新保存在服务端的 `applications.json`，不会向浏览器回显 Token。点击「刷新连接与工具目录」重新发现工具；展开工具条目可以查看完整输入 JSON Schema、可选输出 Schema 和 annotations。OAuth 仍未实现，使用 OAuth 的服务不能通过此表单完成授权。当前本地开发宿主没有用户登录隔离，勿把含凭证的 5197 端口暴露到不可信网络。
-
-`apiKey` 可省略，用于无需鉴权的服务；URL 不接受内嵌凭证或查询参数。`readOnlyTools` 是宿主核实后的只读工具名单，无需这类覆盖时省略。工具 schema、名称和参数从 MCP 动态发现，设置 → 应用 / MCP 可查看连接状态和重新连接。聊天中用 `@` 引用一次应用，其工具在该对话后续消息中持续可用；服务端根据用户消息中的应用引用，每轮重新提供工具定义。刷新恢复后仍有效，新对话不继承，重新生成仅使用该轮之前的历史；已从服务端配置移除的历史应用会被忽略。同名工具通过服务端命名空间区分。询问应用用途或用法时，默认依据工具目录简短回答；只有明确需要真实数据或执行操作时才调用工具，避免额外浏览示例素材和无关文档。
-
-- 模型的 Chat Completions 和 Responses 两种协议均支持工具调用，启用本机执行工具时最多 32 轮，否则默认最多 8 轮（显式联系较多 Agent 时预留一轮汇总）；MCP 应用合计最多 128 个工具，另加宿主内置工具。工具失败会回传模型，界面以紧凑记录展示应用、工具名和状态，不展开原始参数和结果；执行确认时展示待确认参数。
-- 工具失败在服务端同时写入 stderr 和 `.local/agent-chat/logs/failure.log`（每行一条 JSON，含 requestId、runId、toolCallId、错误码、耗时，凭证会被脱敏），便于在浏览器之外回溯失败原因。
-- 输入框与「设置 → 审批模式」共用三档设置，通过 `/api/approval-settings` 保存到 SQLite，替代原有逐项免确认开关。请求批准（`ask`）：只读操作直接执行，其余操作询问。帮我批准（`auto`，默认）：自动执行工作区文件操作、`pwd`、`ls`（含常见选项、指定目录与带引号路径）、常见运行时版本查询及这些只读命令的 `&&` 组合，以及同时声明 `destructiveHint: false` 与 `openWorldHint: false` 的非破坏 MCP 写操作；任意脚本、复杂命令、未知/危险 MCP 操作和付费媒体生成仍询问。完全访问（`full`）：当前工具能力内不再逐次确认，包括危险 MCP 操作和图片/视频费用。完全访问不扩大文件工具的工作区范围，也不提供操作系统沙箱。主 Agent 与子 Agent 共用每轮开始时的模式，切换从下一轮请求生效。图片、视频与 MCP 共用 `InteractiveConfirmDialog` 弹窗，拒绝/停止/超时不会触发待批准的调用。
-- MCP 风险基于动态发现的 annotations 与宿主 `readOnlyTools` 配置判定，未声明安全性的写操作在“帮我批准”模式下仍询问。确认在服务端执行，停止、断连、超时后失效，不因刷新自动重试写操作。
-- MCP 凭证不返回浏览器。原始工具结果只回传给模型，聊天界面和会话历史保存调用摘要；仅待确认操作向界面发送参数。
-- 当前只支持 Streamable HTTP 和可选 Bearer 凭证；OAuth、stdio、旧版 HTTP+SSE、MCP Apps 内嵌界面及文件授权尚未接入。示例仍仅供本机开发，生产环境的用户身份、会话存储和工具权限由宿主提供。
-
-单独启动：`npm run dev:agent-chat`；仅启动组件站：`npm run dev:playground`。示例服务监听 `0.0.0.0`，「项目」「媒体生成」等本地数据 API 只接受本机与同一局域网私有网段（10/8、172.16/12、192.168/16、169.254/16）的调用，公网地址一律返回 403。`npm run build:agent-chat` 只构建前端到 `dist/agent-chat`，生产部署需由宿主提供 API、鉴权和存储。
-
-构建完整项目：
-
-```bash
-npm run typecheck
-npm run test
-npm run build
-```
+`PromptSettingsCard` 可通过可选的 `visibleKeys` 限定显示的提示词项；未传时保持原有行为。
 
 ### 开发文档
 
@@ -330,95 +275,6 @@ import '@darl/ui/styles.css';
 演示入口：`http://localhost:5188/#media-workspace`。包含「创作工作室」与「品牌宣传」两种宿主配置、深浅主题及本地异步模拟。示例媒体为本地示意素材。完整模型类型、API、接入示例和边界见 [MediaWorkspace 文档](docs/media-workspace.md)。
 
 
-## AgentSidebar｜网站辅助 Agent 侧栏
-
-演示入口：`http://localhost:5188/#agent-sidebar`。右侧会话面板包含新对话、历史搜索与切换、会话重命名与删除（需二次确认）、消息发送、应用 / Skill 选择、模型与思考等级的合并选择入口；消息较长时可直接跳到顶部或底部，也可以展开为居中的大对话窗口。回复操作提供复制和重新生成；配置语音适配器后还可播放独立语音内容；整条复制保留原始 Markdown，代码块单独复制代码。Markdown 使用 GFM 渲染，并支持将 `md` / `markdown` 围栏内容渲染为可读内容。
-
-```tsx
-import { AgentSidebar } from '@darl/ui';
-import '@darl/ui/styles.css';
-
-<AgentSidebar
-  open={open}
-  onOpenChange={setOpen}
-  sessions={sessions}
-  activeSessionId={activeSessionId}
-  onSessionChange={setActiveSessionId}
-  onSessionRename={renameSession}
-  onSessionDelete={deleteSession}
-  onNewSession={createSession}
-  onSend={sendMessage}
-  onRegenerate={regenerateMessage}
-  onToolConfirm={confirmToolCall}
-  approvalMode={approvalMode}
-  onApprovalModeChange={saveApprovalMode}
-  approvalModePending={approvalSaving}
-  applications={applications}
-  skills={skills}
-  onSkillImport={saveImportedSkill}
-  onSkillSave={saveSkill}
-  onSkillDelete={deleteSkill}
-  models={models}
-/>
-```
-
-`sessions` 包含会话 ID、标题、消息和可选的固定 `agentId`；`applications`、`skills`、`models` 全部由宿主提供。工具记录通过消息的 `toolCalls` 传入，参数和结果支持任意 JSON，不绑定具体 MCP；普通记录仅显示应用、工具名、状态及失败原因，不提供原始 JSON 展开入口。`onToolConfirm(toolCallId, approved)` 接收用户对 `confirmation` 状态调用的允许或拒绝，宿主必须在服务端落实该决定；确认前会自动展示参数，失败可重试。`onSend` 的正文保留 Agent 稳定 ID 引用，宿主应解析本轮用户消息并校验可调用目录；此外收到会话 ID、应用 / Skill ID、有效模型及推理强度、可选本地附件 `files` 和已编码的图片 `attachments`；组件会在输入区显示缩略图，图片消息可以不带正文。宿主应把 `attachments` 转换为模型供应商的视觉输入，并在 `AgentMessage.attachments` 中回传图片 URL 以显示结果。失败保留草稿并显示错误。模型与思考等级共用一个入口，弹层中先选模型，再选择该模型支持的等级；模型不提供 `reasoningEfforts` 时隐藏等级选项且不发送旧值。当前等级只来自用户选择、宿主受控值或模型记录里的 `defaultReasoningEffort`（该值会由 `toAgentModels` 从能力模板/绑定覆盖带出）；两者都没有时不显示也不提交等级，不会按 `reasoningEfforts` 的列表顺序自行挑选，因此刷新页面不会把默认等级改写成列表第一项。`isGenerating/onStop` 可连接宿主生成状态。完整类型从 `@darl/ui` 导出。
-
-`approvalMode` 为宿主控制的 `ask | auto | full`；同时提供 `onApprovalModeChange` 后显示输入框审批菜单。回调可返回 Promise，保存失败会保留原选择并显示错误。`approvalModePending` 在宿主读取/保存策略时阻止切换及发送；生成中无法切换。组件仅展示策略，宿主必须服务端持久化并统一执行；示例会拒绝客户端模式与服务端设置不一致的聊天请求。独立的 `ApprovalModeSelector` 可在宿主设置页复用，组件库不会自行批准任何调用。Playground 的选择只作用于本地 UI 演示。
-
-可选 `voice: AgentVoice` 适配器为侧栏增加语音回复开关、居中大弹窗的音色搜索/分页/试听和语音输入。`enabled/onEnabledChange`、`voiceId/voiceName/onVoiceChange` 由宿主持久化；`loadVoices(query, page, signal, filters?)` 返回 `{ voices: [{ id, name, description?, tags?, languages?, previewUrl? }], hasMore }`。可选 `catalogFilters` 由宿主提供语言、默认语言、排序与分组标签选项，组件将选择值作为 `{ language, sort, tags }` 传给 `loadVoices`；筛选改变时取消旧请求并从第一页重新查询。音色目录桌面端最多三列，手机端单列，搜索和筛选栏保持可见。试听直接播放 `previewUrl` 指向的已有音频，Fish 示例读取 `samples[].audio`，不调用 TTS；无样本时禁用试听，加载失败显示错误，切换试听或关闭弹窗会停止并释放音频。`synthesize(text, voiceId, signal)` 返回 `{ body: ReadableStream<Uint8Array>, sampleRate }`，音频必须是有符号 16 位小端、单声道 PCM；播放器先缓冲约 0.5 秒音频，再边收边播，不等待完整文件。`transcribe(file, signal)` 可选，返回识别文字并追加到当前会话草稿，用户编辑后发送。录音最长 2 分钟，音频不超过 25MB；麦克风需要 HTTPS 或 localhost。
-
-`onSend` 在配置语音时附带当前轮 `voiceMode`。宿主应按轮给 Agent 注入语音规则；`AgentMessage.outputs` 按顺序接收 `{ output_type: 'text' | 'speech', content: string }`，`content` 拼接文字输出，语音内容单独显示可展开的文稿。新回复在 `streaming: true` 时追加的 speech 输出会自动进入播放队列；历史恢复或事后开启开关不会自动朗读。语音可单独输出，不要求复制文字全文。关闭开关、关闭侧栏、切换会话/音色、停止生成或录音都会清理当前播放和请求；手动停止后不会自动续播本条消息剩余语音。
-
-真实 Fish Audio 示例位于 `examples/agent-chat`：设置 `FISH_API_KEY` 或在「设置 → 语音」保存密钥，再在聊天框选择音色、试听并开启语音回复。默认 TTS 为 `s2.1-pro-free`，可切换 `s2.1-pro` / `s2-pro`；ASR 为 `transcribe-1-pro`。免费模型受供应商当前政策限制。配置保存在宿主 SQLite，密钥不返回浏览器。`/api/voice/settings` 管理配置，`/api/voice/voices` 读取真实音色目录，`/api/voice/transcribe` 接收原始音频，`/api/voice/speech` 代理 PCM 流。
-
-语音模式的模型输出采用单个 JSON 对象 `{ "outputs": [{ "output_type": "text" | "speech", "content": "…" }] }`；Chat Completions 请求通过 `response_format: { "type": "json_object" }` 启用 JSON 模式，Responses 请求使用 JSON Schema 约束。服务端逐项校验渠道、非空内容、语音段落长度与数量，每个完整数组项到达后立即发送 NDJSON `{ type: 'output', output }` 事件，文字与语音并行交付，不向页面泄露半截 JSON。较长回复按语义分段，以便早开始播放。提示词读取 `examples/agent-chat/prompts/voice.md`；Fish S2 标签完整用法保存在 `prompts/voice-tags.json`，同一会话、同一模型首次使用语音时提供完整指南，成功完成后在宿主 SQLite 记住指南版本，后续只发送简短摘要。切换模型或指南更新后重新加载；失败或取消不记为加载成功。刷新页面及重启服务不会重复发送已经加载的完整指南。语音原文保留方括号情绪/语气/停顿提示并传给 TTS，显示和复制的语音文稿隐藏控制标签。语音模式规则只影响当前主 Agent 的用户回复，不修改子 Agent 的执行要求。普通文字模式沿用原有流式协议。语音输出文案随消息保存并带入后续对话，原始录音和合成音频不长期保存，重播会重新调用 TTS。实际首声时间仍包含模型、网络和 TTS 延迟；0.5 秒是音频预缓冲量，不是总延迟保证。流格式错误时会显示错误并保留已收到内容；只读文字或只输出语音均可。
-
-接口依据：[Fish TTS](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech)、[Fish ASR](https://docs.fish.audio/features/speech-to-text)。本地并行开发可在 `.env.local` 设置 `AGENT_CHAT_PORT`、`PLAYGROUND_PORT`，保持固定端口和 `npm run dev` 同时启动。
-
-`AgentMessage.timeline` 可接收按流式顺序排列的 `AgentExecutionEvent`。事件只包含通用的 `source`、`status`、`name`、`runId`、`parentRunId`、`agentId`、时间戳、耗时和安全错误摘要；`source: 'agent'` 区分主 Agent 与子 Agent，`source: 'tool'` 表示工具调用，`source: 'commentary'` 的 `summary` 保存模型执行时输出的普通过程说明（不接收内部推理）。每条回复的执行过程统一放在回答上方，默认折叠为当前状态、调用次数和可用的真实总耗时；仅有 `toolCalls` 的历史记录也适用，无工具的普通回复不增加入口。展开摘要后直接按时间顺序列出每次调用和过程说明，不再增加同类调用的分组层；点击单项查看说明、来源、状态变化、耗时或委派任务。宿主示例将工具调用前后的中间文字移入过程说明，正文只保留最后的回复，刷新后两者仍分别恢复。用户手动展开的记录在运行结束后保持展开，失败提示和确认弹窗始终可见。原始参数和结果仍按既有确认规则展示，不进入执行过程详情。Playground 的「演示执行过程」提供明确标注的本地交互预览。
-
-服务端示例为每次聊天返回 `requestId` 和顶层 `runId`，工具及子 Agent 事件携带 `runId` / `parentRunId` 以便关联。失败事件使用 `AgentErrorInfo`，区分模型、MCP 连接、MCP 工具、工具参数、子 Agent 委派、校验、取消和超时；错误卡片显示错误码、requestId、阶段、是否可重试及下一步建议，不展示完整上游响应或敏感工具参数。
-
-`onSessionDelete` 用于删除会话：组件在历史记录每一行提供删除按钮，点击后弹出二次确认，宿主确认后负责移除会话并切换 `activeSessionId`；删除失败时弹窗保留并显示错误。
-
-`onSkillCreate` 用于接管聊天侧栏的「通过对话创建」，`SkillManager.onCreateViaChat` 提供同一入口（设置后替代工具栏的文件夹按钮），由宿主启动真实对话；未提供回调时保持原有界面。`onSkillImport` 用于接管聊天侧栏的 Skill 上传；Skill 的编辑、导入、收藏和删除统一由「设置 → Skills」页面接管。
-
-组件保留各会话的本地草稿和待发送附件，支持 DarlUIProvider 主题。桌面固定在右侧，手机端全屏。Skill 管理器在「设置 → Skills」中支持新建、编辑、收藏、删除，以及导入 `SKILL.md` 或单个 Skill 目录的 ZIP / 文件集合；支持配套的 `references/`、`scripts/`、`assets/`、`agents/`、根目录依赖清单和其他资源文件。文件按目录分层显示并可折叠；Markdown 默认渲染预览，支持切换源码编辑、表格、代码块和包内相对链接及图片，内置 Skill 的源码只读。普通导入会校验 frontmatter、资源路径和大小，忽略 `.git`、`node_modules` 等缓存，不执行脚本；Agent 通过 `builtin_create_skill({ setup: true })` 安装时可额外准备依赖并运行自检。Skill 版本在保存时递增，真实存储由宿主通过 `onSkillImport/onSkillSave/onSkillDelete` 接管。演示中的历史和 Skill 保存在当前页面内存中，示例回复和工具记录均为本地演示，附件不上传。真实模型、MCP 执行、账号鉴权和服务端历史留给宿主接入。
-
-应用和 Skill 从选择面板插入输入光标处，作为正文内引用，不显示输入框上方标签，也不自动传入当前页面。输入 `@` 引用应用或 Skill；继续输入名称可以筛选，Skill 同时支持原名（`SKILL.md` 的 `name`，保存在 `slug`）和显示名称，忽略大小写，不匹配描述。管理 Skill 分别展示只读原名与可编辑显示名称，搜索也只匹配这两个名称。上下方向键选择，Enter / Tab 插入，Esc 关闭建议。应用引用为蓝色，Skill 引用为紫色，可用 `--darl-agent-app` / `--darl-agent-skill` 覆盖。引用编码为 `[显示名称](app:ID)` / `[显示名称](skill:ID)`，发送时从正文派生应用和 Skill ID；删除引用即取消本次使用。
-
-## AgentPlaza｜主 Agent 广场
-
-`AgentPlaza` 只展示服务端标记为 `main_agent` 且允许用户选择的 Agent；`sub_agent` 不会出现在广场。卡片使用 1:1 图片，展示头像、名称和用途描述；点击后由宿主新建绑定该 Agent 的会话。`AgentSidebar` 顶部显示当前会话的头像和名称，不提供 Agent 切换；`AgentSession.agentId` 优先于兼容的 `selectedAgentId`，原 `onSelectedAgentIdChange` 已弃用。示例的新对话入口沿用当前 Agent 创建空白会话并保留当前页面，Agent 广场入口用于选择其他 Agent；历史会话和刷新保持原 Agent，服务端拒绝同一已绑定会话的跨 Agent 聊天请求。
-
-演示入口：`http://localhost:5188/#agent-plaza`；真实 Agent Chat 示例也提供「Agent 广场」入口。
-
-```tsx
-import { AgentPlaza } from '@darl/ui';
-
-<AgentPlaza agents={agents} onSelect={(agent) => {
-  setSelectedAgentId(agent.id);
-  setChatOpen(true);
-}} />
-```
-
-`AgentConfig` 支持 `type`（`main_agent` / `sub_agent`）、`selectable`、`callable`、`source` 和 `contextStrategy`。真实宿主必须在服务端再次校验这些字段；示例 Agent Chat 会强制系统默认 Agent 保持内置主 Agent，Sub Agent 只能由授权 Agent 委派，并将调用来源、任务、上下文范围和结果写入本地 SQLite。
-
-## Agent 配置与 Sub Agent 委派
-
-输入 `@` 后可按名称选择其他 Agent，再写需要沟通的问题，例如“@文案 Agent 请检查这段文案，再帮我汇总建议”。用户消息保存为 `[名称](agent:稳定ID)`，显示为内联标签；当前主 Agent 继续负责会话，实际联系被提及的对象并汇总回复。可以联系允许调用的其他主 Agent，也可以联系 Sub Agent；当前 Agent、停用或 `callable: false` 的对象不进入建议，服务端再次校验。每轮最多显式联系 8 个 Agent。
-
-Agent 的 `@` 只对当前用户消息生效，历史提及不会每轮重复触发；再次 `@` 同一对象会续接该协作对话自己的历史，新主聊天保持隔离。已有 Sub Agent 的自主委派保留；其他主 Agent 仅在本轮被显式提及时提供调用工具。时间线展示真实联系、执行、完成或失败，协作工具沿用本轮审批模式，停止会中止正在进行的联系。被联系的 Agent 本轮不再递归委派，防止相互调用循环。仅收到真实调用结果后才能汇总，失败和取消如实显示。
-
-实现复用现有 AI SDK `ToolLoopAgent` 与 SQLite 子会话。显式联系通过工具选择约束确保实际尝试；主 Agent 可以继续追问同一对象。该方式对应 [OpenAI 的 agents-as-tools 模式](https://openai.github.io/openai-agents-js/guides/multi-agent/)和 [LangChain 的主管/子 Agent 模式](https://docs.langchain.com/oss/javascript/langchain/multi-agent/subagents)，保留当前会话负责人。
-
-`examples/agent-chat` 的设置中心提供独立的 Agents 页面。每个 Agent 在服务端保存名称和系统提示词；模型与推理强度在聊天输入框旁按当前会话选择。Skills 与 MCP 应用对所有 Agent 默认可用，无需逐个授权；API Key 仍只保存在服务端。从 Agent 广场选择专业 Agent 后开启固定身份的会话，也可以由主 Agent 通过 AI SDK 7 `ToolLoopAgent` 按需委派给其他已启用的 Agent。
-
-设置中心的模型页面顶部同时提供默认媒体模型设置，目前只配置图片和视频：默认图片为 `gpt-image-2`（2K、16:9），也可以选择 `gpt-image-2.5` 或 `gemini-3-pro-image-preview`；默认视频为 `minimax-h3-flash`（480、16:9）。图片产品选项只有画幅、1K/2K/4K 档位和参考图数量；视频清晰度用 H3 协议值 480/768。配置保存在示例服务的本地 SQLite 中；文本模型在聊天输入框旁选择。
-
-每次委派只把任务说明传给子 Agent，子 Agent 使用当前聊天选择的文本模型、自己的提示词和当前会话启用的 Skill / MCP 应用，完成后只返回最终摘要。MCP 写操作继续复用宿主的 `ToolConfirmations`，因此允许、拒绝、停止和超时都在服务端生效；NDJSON 工具事件包含 `runId`、`parentRunId` 和 `agentId`，现有侧栏会显示委派、执行和审批状态。Agent 配置保存在 `.local/agent-chat/data.sqlite`，不会写入浏览器存储。
-
 ## StyleSelector｜风格选择弹窗
 
 `StyleSelector` 提供风格广场弹窗，支持集合切换、分类筛选、搜索、选择、收藏和两步创建风格向导。宿主通过 `styles` 提供风格数据，通过 `onChange`、`onFavoriteChange` 和 `onCreate` 接收结果；`onCreate` 可以返回 Promise，失败时会保留表单并显示错误。创建入口位于「我的风格」卡片；传入 `onUpdate(style, request)` 后自有风格显示编辑按钮，保存后由宿主刷新列表。
@@ -439,7 +295,7 @@ Agent 的 `@` 只对当前用户消息生效，历史提及不会每轮重复触
 
 ## SettingsPage｜整体设置中心
 
-`SettingsPage` 提供设置中心的导航外壳，`ModelManagementCard` 负责逻辑模型、能力模板、供应商渠道和覆盖能力，`ModelSettingsCard` 保留为旧版 Provider + 模型目录适配，`AgentSettingsCard` 负责系统提示词编辑。模型类型统一为 `text`、`image`、`video`、`audio`；模型的推理强度和能力标签由宿主提供，API Key 只通过宿主回调保存，组件不会自行持久化密钥。
+`SettingsPage` 提供设置中心的导航外壳，`ModelManagementCard` 负责逻辑模型、能力模板、供应商渠道和覆盖能力，`ModelSettingsCard` 保留为旧版 Provider + 模型目录适配。模型类型统一为 `text`、`image`、`video`、`audio`；模型的推理强度和能力标签由宿主提供，API Key 只通过宿主回调保存，组件不会自行持久化密钥。
 
 模型配置的数据层导出 `LogicalModel`、`CapabilityTemplate`、`ModelBinding`、`ModelConfiguration` 以及 `resolveCapabilities`、`validateModelConfiguration`、`toAgentModels`、`toMediaModels`。模板字段由绑定覆盖时采用整体替换，`0` 和 `false` 会保留；协议键只在宿主注册后参与运行时路由。
 
@@ -464,20 +320,11 @@ Agent 的 `@` 只对当前用户消息生效，历史提及不会每轮重复触
 </SettingsPage>
 ```
 
-`AgentSettingsCard` 通过 `systemPrompt: string` 接收已保存内容，通过 `onSave: (systemPrompt: string) => void | Promise<void>` 交给宿主持久化。支持多行编辑、保存进度、成功反馈及失败后保留草稿重试；不自行读文件或调用 API。
-
-```tsx
-<SettingsPage activeSection="agent" sections={sections}>
-  <AgentSettingsCard systemPrompt={systemPrompt} onSave={saveSystemPrompt} />
-</SettingsPage>
-```
-
-设置中心当前提供模型、Agents 和应用 / MCP 入口；页面内容由宿主通过 `children` 接入。模型配置完成后，将 `providers` 中启用的模型转换为 `AgentSidebar` 的 `models` 即可复用同一个聊天侧栏。
-
+设置中心按宿主传入的导航项和内容展示设置。
 
 ## RequestRecords｜请求记录
 
-真实示例的「设置 → 请求记录」提供文本、图片、音频、视频类型筛选，并支持状态、供应商、模型、日期范围和请求 ID/错误搜索，服务端分页。详情展示参考图、生成图片、可播放的音频/视频、文本结果、请求参数、响应摘要和真实 Token 用量，支持返回关联对话或媒体任务。素材已删除或加载失败时显示「素材不可用」。
+真实示例的「设置 → 请求记录」提供文本、图片、音频、视频类型筛选，并支持状态、供应商、模型、日期范围和请求 ID/错误搜索，服务端分页。详情展示参考图、生成图片、可播放的音频/视频、文本结果、请求参数、响应摘要和真实 Token 用量，支持打开关联媒体任务。素材已删除或加载失败时显示「素材不可用」。
 
 请求记录保存在同一服务端 SQLite 中。文本在 AI SDK 模型调用边界逐次记录步骤与重试，媒体跟踪任务最终状态，Fish 语音识别保存输入音频及转写结果，语音合成保存可回放的 WAV。已有媒体任务在首次启用时导入；历史聊天无法恢复为准确的模型请求，不倒推生成记录。凭证在写入前脱敏，二进制/Base64 不进入记录，参数与结果正文为有大小上限的快照，不保存隐藏推理。
 
@@ -537,7 +384,7 @@ const [open, setOpen] = useState(false);
 - `accentColor`/`className`: 可选外观覆盖。组件不调用模型 API、不保存配置、不加载远程模型数据。
 - 切换模型时应用该模型默认参数；返回已有步骤保留用户有效的手动选择。宿主替换模型列表后，失效模型/参数自动回退到有效选项。
 
-Playground：`/#agent-sidebar`，点击「默认模型」打开图片和视频配置。
+Playground：`/#settings`，点击「默认模型」打开图片和视频配置。
 
 
 ## InteractiveConfirmDialog｜通用 Agent 交互确认弹窗
@@ -572,12 +419,6 @@ import { InteractiveConfirmDialog } from '@darl/ui';
 - `onConfirm(answers)` 返回 `Record<questionId, string | string[]>`；多选始终是数组，输入题始终是字符串。支持 Promise：处理中禁用按钮，失败保留答案并显示错误；成功后由宿主关闭弹窗并恢复 Agent。
 
 Playground：`/#confirm-dialog`（含原著改编确认示例及模拟提交失败）。
-
-Agent Chat 已接入真实交互提问：模型通过当轮工具目录中的 `builtin_request_user_input` 提供标题及 `questions`，`AgentSidebar` 根据 `AgentToolCall.userInput` 复用此弹窗。宿主通过 `onUserInput(toolCallId, answers)` 提交答案，取消传 `null`；示例调用 `POST /api/user-inputs/:id`，后端校验题目和选项后恢复当前模型循环，并保存选择结果供后续对话读取。等待回答期间暂停无输出超时；停止、断连或刷新会使本轮提问失效。提问弹窗复用模板库的确认方案布局，并继承聊天宿主的背景、文字、边框和品牌色；深色页面使用同样的黑色背景，不套用执行审批配色，仅保留确认按钮；关闭、Esc 或遮罩均取消提问。该交互与执行审批独立，所有审批模式均等待用户实际提交。连续提问会各自初始化表单，提交失败保留选择并允许重试。
-
-AgentSidebar 支持 `embedded` 嵌入宿主容器，使用 `draft` / `onDraftChange` 将草稿交给宿主持久化。`references` / `onReference` 提供稳定 ID 的宿主资料引用（`node:`），`composerHeader`、`composerFooter`、`messageHeader` 和 `renderMessageActions` 用于挂载引用摘要、上下文用量及成果定位等宿主交互。未传这些属性时沿用组件自管草稿与侧栏布局。Agent 管理卡片可通过 `skills` 和 `applications` 编辑默认技能与 MCP 范围，实际权限由宿主后端执行。
-
-AgentSidebar 的 `hideEmptySessions` 可隐藏未发送消息的本地草稿；按需加载消息的宿主可用 `AgentSession.messageCount` 提供已保存消息数量。真实聊天示例默认启用，发送第一条消息后才保存会话。
 
 ## AssetLibrary｜资产库弹窗
 

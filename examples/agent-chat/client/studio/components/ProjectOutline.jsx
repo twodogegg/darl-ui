@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button, Field } from './ui'
+import { Button, Field, Modal } from './ui'
 import { makeOutline } from '../data'
-import { useStore } from '../store'
+import { studioApi, useStore } from '../store'
+import { startPolling } from '../../polling'
 import OutlineTable from './OutlineTable'
+import { WorkflowRunDetails } from './WorkflowRunDetails'
 
 const choices = [
   ['keep', '保留', '哪些主线、人物与关键情节必须保留'],
@@ -27,9 +29,11 @@ const propColumns = [
 ]
 const outlineValue = (project) => ({ ...makeOutline(project), ...(project.outline || {}) })
 
-export default function ProjectOutline({ project, onWrite }) {
-  const { patch, notify, requestAgent } = useStore()
+export default function ProjectOutline({ project, onWrite, writing = false }) {
+  const { patch, notify, ensureWritable, onNavigate, reload } = useStore()
   const [outline, setOutline] = useState(() => outlineValue(project))
+  const [job, setJob] = useState(null), [jobError, setJobError] = useState(''), [submitting, setSubmitting] = useState(false), [preview, setPreview] = useState(false)
+  const [adjustOpen, setAdjustOpen] = useState(false), [feedback, setFeedback] = useState(''), [adjustError, setAdjustError] = useState('')
   const base = useRef({ version: project._version, outline: JSON.stringify(outlineValue(project)) })
   useEffect(() => {
     const next = outlineValue(project)
@@ -39,6 +43,43 @@ export default function ProjectOutline({ project, onWrite }) {
     }
   }, [project._version])
   const dirty = JSON.stringify(outline) !== JSON.stringify(outlineValue(project))
+  const hasOutline = Boolean(String(project.outline?.core || '').trim() || String(project.outline?.story || '').trim())
+  useEffect(() => {
+    const controller = new AbortController()
+    studioApi(`video-redraw/outline?${new URLSearchParams({ projectId: project.id })}`, undefined, controller.signal).then(result => setJob(result.job)).catch(error => { if (!controller.signal.aborted) setJobError(error.message) })
+    return () => controller.abort()
+  }, [project.id])
+  useEffect(() => {
+    if (!job || !['queued', 'running'].includes(job.status)) return
+    return startPolling(async signal => {
+      const result = await studioApi(`video-redraw/outline?${new URLSearchParams({ projectId: project.id, jobId: job.id })}`, undefined, signal)
+      setJob(result.job); setJobError('')
+    }, 3000, error => setJobError(error.message))
+  }, [project.id, job?.id, job?.status])
+  async function generateOutline() {
+    if (submitting || ['queued', 'running'].includes(job?.status)) return
+    setSubmitting(true); setJobError('')
+    try {
+      await ensureWritable()
+      const result = await studioApi('video-redraw/outline', { projectId: project.id, version: project._version, requestId: crypto.randomUUID() })
+      setJob(result.job)
+    } catch (error) { setJobError(error.message) } finally { setSubmitting(false) }
+  }
+  async function adjustOutline() {
+    if (!feedback.trim() || submitting || dirty) return
+    setSubmitting(true); setAdjustError('')
+    try {
+      await ensureWritable()
+      const state = await reload(), current = state.projects.find(item => item.id === project.id)
+      if (!current || current._version !== project._version) throw new Error('项目已变化，请核对最新大纲后重试')
+      const result = await studioApi('video-redraw/outline', { projectId: project.id, version: current._version, requestId: crypto.randomUUID(), autoApply: true, requirements: feedback.trim() })
+      setJob(result.job); setFeedback(''); setAdjustOpen(false); setJobError('')
+    } catch (error) { setAdjustError(error.message) } finally { setSubmitting(false) }
+  }
+  async function cancelOutline() {
+    try { const result = await studioApi('video-redraw/outline', { action: 'cancel', projectId: project.id, jobId: job.id }); setJob(result.job) }
+    catch (error) { setJobError(error.message) }
+  }
   function edit(key, value) {
     setOutline((current) => ({ ...current, [key]: value }))
   }
@@ -79,7 +120,7 @@ export default function ProjectOutline({ project, onWrite }) {
           <span>改编幅度 {project.adaptation || '抽核'}</span>
           <span>单集时长 {project.durationMin && project.durationMax
             ? `${project.durationMin}–${project.durationMax} 分钟`
-            : `${project.duration} 秒`}</span>
+            : project.duration != null ? `${project.duration} 秒` : '未设置'}</span>
           <span>画幅 {project.ratio}</span>
         </p>
         <section aria-label="故事内核">
@@ -125,15 +166,31 @@ export default function ProjectOutline({ project, onWrite }) {
         </section>
       </div>
       <footer className="workspace-footer">
-        <span className="muted">{dirty ? '项目大纲有未保存修改' : '项目大纲已保存，全部剧集共用'}</span>
+        <span className="muted">{jobError || (['failed', 'interrupted', 'cancelled'].includes(job?.status) ? `大纲任务未完成：${job.error || job.status}` : ['queued', 'running'].includes(job?.status) ? `大纲任务进行中：${job.phase}` : dirty ? '项目大纲有未保存修改，请先保存再使用 AI 修改' : job?.status === 'completed' && !job.applied ? '大纲草稿已生成，请查看并核对' : '项目大纲已保存，全部剧集共用')}</span>
         <div className="toolbar">
-          <Button onClick={() => requestAgent({ action: 'outline', projectId: project.id, draftOnly: true }).catch(reason => notify(reason.message))}>AI 生成大纲</Button>
+          <Button onClick={() => onNavigate('workflow-outline-agent')}>配置大纲 Agent</Button>
+          <Button disabled={submitting || dirty || ['queued', 'running'].includes(job?.status)} onClick={() => hasOutline ? (setAdjustError(''), setAdjustOpen(true)) : generateOutline()}>{submitting || ['queued', 'running'].includes(job?.status) ? '大纲任务进行中…' : hasOutline ? 'AI 修改大纲' : 'AI 生成大纲'}</Button>
+          {['queued', 'running'].includes(job?.status) && <Button onClick={cancelOutline}>取消任务</Button>}
+          <WorkflowRunDetails outline projectId={project.id} reload={reload} job={job} onStarted={setJob} />
+          {job?.status === 'completed' && job.outline && <Button onClick={() => setPreview(true)}>查看生成的大纲</Button>}
           <Button onClick={() => save()}>保存项目大纲</Button>
-          {onWrite && <Button primary onClick={() => { if (save(true)) onWrite() }}>
-            编写分集剧本 ↗
+          {onWrite && <Button primary disabled={writing || submitting || ['queued', 'running'].includes(job?.status)} onClick={() => { if (save(true)) onWrite() }}>
+            {writing ? '正在进入剧本…' : '编写分集剧本 ↗'}
           </Button>}
         </div>
       </footer>
+      {adjustOpen && <Modal title="AI 修改大纲" onClose={() => setAdjustOpen(false)} footer={<><Button onClick={() => setAdjustOpen(false)}>取消</Button><Button primary disabled={submitting || !feedback.trim()} onClick={adjustOutline}>{submitting ? '正在提交…' : '开始修改'}</Button></>}>
+        <p className="muted">执行 Agent 会结合当前大纲和你的意见修改，整理 Agent 校验后保存；可在任务详情查看进度和报告。</p>
+        <Field label="修改意见"><textarea rows={5} maxLength={2000} value={feedback} onChange={event => setFeedback(event.target.value)} placeholder="例如：加强主角与家人的冲突，保留其他角色和故事走向" /></Field>
+        {adjustError && <p role="alert">{adjustError}</p>}
+      </Modal>}
+      {preview && job?.outline && <Modal title="小说转大纲 · 生成结果" wide onClose={() => setPreview(false)} footer={<><Button onClick={() => setPreview(false)}>关闭</Button>{!job.applied && <Button primary disabled={dirty || project._version !== job.projectVersion} onClick={() => { setOutline(job.outline); setPreview(false); notify('草稿已填入表单，请核对并保存') }}>填入大纲表单</Button>}</>}>
+        <p className="muted">{job.applied ? '生成结果已自动保存到项目大纲。' : '生成草稿不会自动覆盖项目大纲。填入后可继续修改，保存才会写入项目。'}</p>
+        {dirty && <p role="alert">表单有未保存修改，请先保存或处理后再填入草稿。</p>}
+        {!job.applied && project._version !== job.projectVersion && <p role="alert">项目在生成期间发生变化，请重新生成，避免覆盖新的内容。</p>}
+        {['core', 'story', 'keep', 'remove', 'merge', 'risks', 'episodes'].map(key => <section key={key}><h3>{{ core: '故事内核', story: '完整故事主线', keep: '保留', remove: '砍掉', merge: '合并', risks: '风险', episodes: '分集走向' }[key]}</h3><p style={{ whiteSpace: 'pre-wrap' }}>{job.outline[key] || '未指定'}</p></section>)}
+        {['roles', 'scenes', 'props'].map(key => <section key={key}><h3>{{ roles: '角色', scenes: '场景', props: '关键叙事道具' }[key]}</h3>{job.outline[key].length ? job.outline[key].map(item => <p key={item.id}><strong>{item.name}</strong>：{Object.entries(item).filter(([field, value]) => !['id', 'name'].includes(field) && value).map(([, value]) => value).join('；')}</p>) : <p>无</p>}</section>)}
+      </Modal>}
     </>
   )
 }

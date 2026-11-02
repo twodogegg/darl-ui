@@ -18,6 +18,6 @@ const loadRecord = (id: string, signal: AbortSignal) => request<RequestRecord>(`
 const loadRetention = (signal: AbortSignal) => request<RequestRecordRetention>('/retention', signal);
 const saveRetention = (value: RequestRecordRetention) => request<RequestRecordRetention>('/retention', undefined, value);
 
-export function RequestRecordsPage({ onOpenSession, onOpenTask }: { onOpenSession: (id: string) => void; onOpenTask: (id: string) => void }) {
-  return <RequestRecords loadRecords={loadRecords} loadRecord={loadRecord} loadRetention={loadRetention} saveRetention={saveRetention} onOpenSession={onOpenSession} onOpenTask={onOpenTask} />;
+export function RequestRecordsPage({ onOpenTask }: { onOpenTask: (id: string) => void }) {
+  return <RequestRecords loadRecords={loadRecords} loadRecord={loadRecord} loadRetention={loadRetention} saveRetention={saveRetention} onOpenTask={onOpenTask} />;
 }

@@ -28,14 +28,14 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 ## 创作数据
 
-读取使用 `builtin_read_studio`，创建、修改、删除使用 `builtin_edit_studio`。
+读取使用 `builtin_read_studio`，创建、修改、删除使用 `builtin_edit_studio`；查询和还原修改记录使用 `builtin_read_studio_changes`、`builtin_restore_studio_changes`（见“变更日志与还原”）。
 
 | 分类 | resource | 内容 |
 | --- | --- | --- |
 | 项目与大纲 | `projects` | 项目信息、`sourceScript`（用户提交的原始素材，不是剧集正文）、`requirements`、`outline` |
 | 剧本与场次 | `episodes` | 剧集、`script`、嵌套 `scenes` |
 | 美术资产 | `assets` | 角色、场景、道具、`variants`、单项资产 `prompt` |
-| 正式分镜 | `shots` | 原片来源区间、独立目标时长、景别、运镜、画面、对白、音效与资产关联 |
+| 镜头 | `shots` | 原片来源区间、独立目标时长、景别、运镜、画面、对白、音效与资产关联 |
 | 视频片段 | `clips` | 视频提示词 `prompt`、分镜提示词 `storyboardPrompt`、独立时长 `duration`、资产和参考、片段图片及视频历史 |
 | 成片 | `films` | 成片记录 |
 | 操作记录 | `history` | 项目操作记录 |
@@ -52,6 +52,7 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 - `clips.prompt` 是视频生成的内容依据；`clips.duration` 是独立维护的计划秒数，必须大于 0，单条片段最多 15 秒。生成请求按模型支持的时长向上取整；不改写片段和来源镜头凑整秒，超过上限先缩短或拆分。
 - `clips.assetIds`、描述中的 `<资产名称>` / `<资产名称|形态名称>` 与 `clips.references` 决定参考素材。音色来自片段关联角色、描述中引用的角色和显式音色引用，`disabledVoiceIds` 保存取消勾选项；不从历史 shot 对白补入角色音色。
+- `clips.storyboardPrompt` 可引用 `clips.references` 中的图片：使用 `<参考图|文件身份>`，文件身份取参考项 `fileId`，没有时取原图 URL（去除查询参数），并进行 URL 编码。只引用真实已关联图片；显示名称可重命名，标记不变。生成时按实际附件顺序转换为图片编号；删除被引用图片后须先修正提示词。
 - 片段图片分为分镜图 `image/imageHistory`、故事板 `storyboardImage/storyboardHistory`、站位图 `blockingImage/blockingHistory`。分镜图模式的片段分镜图使用 `clips.storyboardPrompt` 生成；其他片段图片依据当前视频描述生成；原图和各自历史继续保留。视频的“分镜图”方式使用片段当前分镜图，“参考生成”方式使用页面所选的参考素材。`excludedFrameUrls` 保存被“移除引用”的片段图片 URL：这些图片仍保留在片段图片区，但不再作为“参考生成”的参考素材；把某张图片重新设为当前图或删除该图片时会同步清除对应 URL。
 - 保留原片依据和已有用户内容。
 
@@ -84,6 +85,16 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 结果含真实 `id`、`_version`、`total`、`nextCursor`。全站资源不附带项目/剧集筛选。`prompts` 用 `name` 定位，`mode=default` 取 `defaultText`，`mode=replace` 取 `text`。
 
 ### 剧本与场次写入
+
+剧本项目的全项目资产为空时，可用 `builtin_edit_video_redraw` 的 `script-assets` 提交资产提取：传 `projectId`、第一集 `episodeId`、最新项目 `version` 和唯一 `requestId`，可选 `requirements`；通过 `builtin_wait_video_redraw` 等待或 `builtin_read_video_redraw` 查询。该独立工作流读取全项目大纲和剧本，提取角色、场景和关键道具与生图提示词；不需要视频或镜头，不自动生成图片。项目已有资产或提取期间项目、剧集、资产变化时不会覆盖；失败可查看任务详情、重试整理或重新提取。
+
+剧本项目使用 `builtin_edit_video_redraw` 的 `script-storyboard`，传 `projectId`、`episodeId`、最新项目 `version`、唯一 `requestId`，可选 `requirements` 和 `mode`（参考生成或分镜图）；再通过 `builtin_wait_video_redraw` 等待或查询状态。该独立阶段读取大纲、本集剧本和美术资产，按剧情顺序创建本集视频片段及视频提示词，允许回到已有场次；仅分镜图模式生成分镜图提示词，参考生成模式不生成；不读取转绘原片，已有片段不会覆盖。支持任务详情、取消及失败后重试。
+
+剧本项目可使用工作流工具 `builtin_edit_video_redraw` 的 `novel-script` 操作：传 `projectId`、`episodeId`、最新项目 `version`、唯一 `requestId` 和可选 `requirements`；再使用 `builtin_wait_video_redraw` 等待，或用 `builtin_read_video_redraw` 查询任务。该阶段使用独立的小说转剧本执行模型、整理模型、提示词和 Skills，读取小说原文、大纲、时长区间和分集，不依赖原视频或转绘分析；已有正文不会覆盖。任务失败可使用 `retry-format` 或 `retry-save`，具体状态和错误以任务返回为准。
+
+剧本项目的 `projects.durationMin` 和 `durationMax` 是单集时长区间（分钟），`projects.duration` 是可留空的项目级精确时长（秒），`episodes.duration` 是可留空的本集目标时长（秒）。新项目和新剧集的精确时长默认 null；null 表示未设置，不是 0，也不能把区间下限当作确定的目标秒数。用户或 Agent 可明确填写或清空目标；按项目区间创作，不推定固定时长。已有数据不自动改写。视频转绘目标时长与原片时长分开。
+
+视频转绘的 `episodes.duration` 为用户设置的目标秒数，未设置时为 `null`，不得推断为 120 秒或原片时长；原片真实时长在 `sourceVideo.duration`。
 
 剧本页显示 `episodes.scenes[].content`，不是直接显示整集 `script`。每场为 `{id,location,setting,time,suggestedDuration?,content}`；`content` 必须保留按剧情顺序交错的动作、人物名（表演提示）和完整台词，可保存 Markdown 段落与加粗。不要把台词从正文抽到 `scenes[].dialogue`：该字段不受支持，正文直接保留对白。
 
@@ -118,14 +129,23 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 | `values` | 创建所需字段或本次要修改的字段；删除省略；结构从 describe 获取 |
 | `position` | 可选，调整记录排序 |
 
-项目创建后返回实际编号，后续查询和编辑使用返回值。片段引用真实剧集和场次。
+项目创建后返回实际编号，后续查询和编辑使用返回值。片段引用真实剧集和场次。成功写入的批次自动记入全局变更日志，不需要为批量修改另做备份。
+
+### 变更日志与还原
+
+页面编辑、对话 Agent、工作流节点和媒体结果写回的每次写入都按批次记入全局变更日志，保存逐条记录和逐字段的修改前后值；动态消息 `history` 不记录。
+
+- 列表：`builtin_read_studio_changes` 传 `projectId` 按时间倒序读取该项目的批次；省略 `projectId` 读取提示词、素材库、音色等全局资源。`sources` 按来源筛选：`agent` 对话 Agent、`workflow` 工作流节点、`page` 页面编辑、`media` 媒体写回、`restore` 还原、`system` 系统。`limit` 最多 100，用返回的 `nextCursor` 翻页。列表项含 `id`、`source`、`kind`（工作流节点或操作类型）、`jobId`、`agentName`、`count`、`resources`、`labels`、`restoredCount`。
+- 详情：传同一 `projectId` 和批次 `id`。`entries` 每项含 `index`、`resource`、记录 `id`、`op`、`label`、`before`、`after` 和当前 `status`：`restorable` 可还原，`partial` 部分字段之后又被修改，`conflict` 之后又被修改，`unchanged` 已是修改前内容，`restored` 已还原，`unsupported` 不支持（项目的新建和删除）；`fields` 给出逐字段状态。
+- 还原：`builtin_restore_studio_changes` 传唯一 `requestId`、`projectId` 和批次 `id`；可选 `entries`（条目 `index` 数组）只还原部分条目，省略则整批还原。只恢复仍保持该批修改结果的字段，之后又被修改的内容跳过；本批新建的资产或剧集仍被其他内容引用时不删除。返回 `restored` 数量和 `skipped`（`index`、`reason`、`fields`），`reason` 为 `already-restored`、`changed-later`、`partial`、`missing`、`exists`、`in-use` 或 `project-lifecycle`。还原本身记为 `source=restore` 的新批次（`restoreOf` 为被还原批次的 `id`）；还原这条 restore 批次即撤销那次还原，原批次中对应条目恢复为未还原，之后仍可再从原批次还原。
+- 用户要求撤销 Agent 或工作流的修改时，先读取日志定位批次，向用户说明将还原的内容；还原后按返回的 `skipped` 如实报告未还原的部分。
 
 ### 视频片段
 
 根据已确认剧本创建 `clips`，填写真实 `episodeId`、`sceneId`、`title`、`prompt`、`duration` 和所需资产引用。片段最长 15 秒；画面、动作与对白写入 `prompt`。保存后回读，再使用最新版本生成图片或视频。短片页用于剪辑成片。
 
 
-- 视频转绘进入视频制作时，先让用户在页面选择生成方式并填写可选要求，再使用 `builtin_edit_video_redraw` 的 `video-prompts` 提交文本模型任务（mode 为“参考生成”或“分镜图”，requirements 为补充要求）；用 `builtin_wait_video_redraw` 等待并读取真实结果。正式分镜是制作依据，优先保留已确认的镜头画面、景别、运镜、目标时长和对白；视频模型时长档位不匹配时可安排自然停顿，无法协调时明确报告冲突。结果 `plan` 保存每个片段的原视频来源时间、独立的目标内容时长、片段 ID 和镜头 ID；目标内容时长与生成时长一致，须选用任务提交时默认视频模型支持的整数秒（不超过 15 秒，优先 10–15 秒），可与来源时间差不同；应按目标语言对白的自然语速及停顿安排节奏，每个片段可包含多个镜头。切换视频模型后须核对新模型支持该时长。文本模型基于分镜和资产文字写提示词，不能声称看过图片。已有视频片段时保留用户内容，通过 `builtin_edit_studio` 按用户要求调整，不重复创建。
+- 视频转绘进入视频制作时，先让用户在页面选择生成方式并填写可选要求，再使用 `builtin_edit_video_redraw` 的 `video-prompts` 提交文本模型任务（mode 为“参考生成”或“分镜图”，requirements 为补充要求）；用 `builtin_wait_video_redraw` 等待并读取真实结果。校对后的镜头是制作依据，优先保留已确认的镜头画面、景别、运镜、目标时长和对白；视频模型时长档位不匹配时可安排自然停顿，无法协调时明确报告冲突。结果 `plan` 保存每个片段的原视频来源时间、独立的目标内容时长、片段 ID 和镜头 ID；目标内容时长与生成时长一致，须选用任务提交时默认视频模型支持的整数秒（不超过 15 秒，优先 10–15 秒），可与来源时间差不同；应按目标语言对白的自然语速及停顿安排节奏，每个片段可包含多个镜头。切换视频模型后须核对新模型支持该时长。文本模型基于分镜和资产文字写提示词，不能声称看过图片。已有视频片段时保留用户内容，通过 `builtin_edit_studio` 按用户要求调整，不重复创建。
 
 ### 分镜和视频描述中的资产标签
 
@@ -178,19 +198,25 @@ H3 视频模型支持 `minimax-h3-flash` 与 `minimax-h3-standard`；视频清�
 
 ## 视频转绘：原视频生成分镜
 
-流程：原片分析 → 剧本 → 转绘资产 → 正式分镜 → 视频制作 → 短片。原片分析保存的镜头用于正式分镜初稿。
+流程：原片分析 → 镜头校对 → 剧本 → 转绘资产 → 视频制作 → 短片。原片分析保存的镜头含景别 `scale` 与运镜 `camera`，先在镜头校对页核对台词、说话人和切点，再编写剧本；转绘资产页直接进入视频制作。
 
-`analyze`、`write-script`、`extract-assets`、`plan-storyboard`、`video-prompts` 分别使用工作流 Agent，每阶段执行模型和整理模型独立配置。提交后通过 `builtin_wait_video_redraw` 等待，或用 `builtin_read_video_redraw` 传 `projectId`、`episodeId`、`jobId` 查询真实状态；详情的 `outputs` 中 `output_type=raw` 是模型原始输出，`output_type=structured` 是整理后的页面字段，`steps` 是工具调用状态，失败时 `failureStage` 标明原始分析、页面字段整理或校验与保存。失败、中断或取消的任务也可读取已保存输出；`incomplete=true` 表示原始输出被截断或中断，不能用于重新整理。若整理结果已保存但写回校验失败，可用 `builtin_edit_video_redraw` 的 `retry-save`，传原 `jobId`、新 `requestId` 和最新项目 `version`，复用整理结果重新保存，不调用模型。若需要重新整理，使用 `retry-format`；两种操作都需通过版本校验，不能覆盖用户修改。
+`analyze`、`write-script`、`extract-assets`、`plan-storyboard`、`video-prompts` 每个节点使用各自的工作流 Agent：执行 Agent 输出完整报告，独立的整理 Agent 把报告转为页面字段，系统校验后写入；整理结果校验未通过时，系统把具体错误交回整理 Agent 最多自动修正两次，错误记录在详情 `formatErrors`。页面字段只保存页面需要的内容，完整报告交给下游：`write-script`、`extract-assets`、`plan-storyboard`、`video-prompts` 的执行 Agent 会收到同集上游节点最近完成的完整报告（正式分镜须已应用），详情 `handoff` 列出收到的上游任务；报告与页面记录冲突时以页面记录为准。提交后通过 `builtin_wait_video_redraw` 等待，或用 `builtin_read_video_redraw` 传 `projectId`、`episodeId`、`jobId` 查询真实状态；任务详情的 `mode` 是运行时选择的生成方式；详情的 `outputs` 中 `output_type=raw` 是执行 Agent 的完整报告，`output_type=structured` 是整理 Agent 输出的页面字段，`steps` 是工具调用状态；失败时 `failureStage` 标明原始分析、页面字段整理或校验与保存。历史资产任务的 `formatMode=asset-tools` 表示旧版由执行 Agent 多轮提交，仅供查看。各节点写入的修改记入全局变更日志，可按批次或单条还原。失败、中断或取消的任务也可读取已保存输出；`incomplete=true` 表示原始输出被截断或中断，不能用于重新整理。若整理结果已保存但写回校验失败，可用 `builtin_edit_video_redraw` 的 `retry-save`，传原 `jobId`、新 `requestId` 和最新项目 `version`，复用整理结果重新保存，不调用模型。若需要重新整理，使用 `retry-format`；两种操作都需通过版本校验，不能覆盖用户修改。
 
-对已有原片分镜进行重新分析时，`builtin_edit_video_redraw` 使用 `revise-storyboard`，传 `projectId`、`episodeId`、最新项目 `version`、新 `requestId` 和可选 `requirements`。任务将原片、现有场次、镜头和资产交给视频分析 Agent，可用 `builtin_wait_video_redraw` 等待完成，返回可查看的原始分析和逐镜调整建议，不自动覆盖现有记录。读取结果并让用户确认后，使用 `apply-revision` 传 `projectId`、`episodeId`、`jobId` 应用；应用时核对原片和项目、场次、分镜及资产版本。支持调整画面、景别、音效、原片描述及对白；镜头拆合、时长和场次变化留在建议中供人工处理。
+剧本及转绘资产整理要求主体描述、外貌或结构与提示词，角色另需服饰和声音描述；无依据可如实标明待确认，已有衍生状态需有描述和提示词。转绘更新已有资产时可沿用已保存的字段。视频分析要求每镜画面描述和已列出的对白内容，剧本及片段要求各自的正文和提示词。其他字段与关联须符合对应任务校验；报告本身缺少必要内容时应查看原始报告并重新提取，不得为通过校验编造事实。校验通过立即结束整理，草稿或修改建议仍须按页面流程确认。
+
+镜头校对和剧本页可向原阶段工作流 Agent 连续反馈：使用 `builtin_edit_video_redraw` 的 `revise-cuts` 或 `revise-script`，传本集 `projectId`、`episodeId`、最新项目 `version`、唯一 `requestId` 和必填 `requirements`；继续上一轮时传该轮已完成的 `jobId`。任务沿用原工作流 Agent 的配置和历史报告，整理、校验后直接写入；通过 `builtin_wait_video_redraw` 获取结果。写入时核对原片、项目、剧集、资产、镜头和片段版本；按时间同步片段镜头引用并保留视频，跨多个片段的新镜头及关联图片镜头的删改会被拒绝。失败时保留已有内容；可用变更日志查询并还原已应用的修改。已撤销或部分还原的反馈任务在详情中标记 `restored=true`，不能作为下一轮或下游的最新报告。
+
+对已有原片分镜进行重新分析时，`builtin_edit_video_redraw` 使用 `revise-storyboard`，传 `projectId`、`episodeId`、最新项目 `version`、新 `requestId` 和可选 `requirements`。任务将原片、现有场次、镜头和资产交给视频分析 Agent，可用 `builtin_wait_video_redraw` 等待完成，返回可查看的原始分析和逐镜调整建议，不自动覆盖现有记录。读取结果并让用户确认后，使用 `apply-revision` 传 `projectId`、`episodeId`、`jobId` 应用；应用时核对原片和项目、场次、分镜及资产版本。支持调整画面、景别、运镜、音效、原片描述及对白；镜头拆合、时长和场次变化留在建议中供人工处理。
 
 1. 读取项目、剧集、来源视频与已有 `shots`、`assets`。项目已选地区和语言即为有效设定：欧美未指定具体国家时采用通用语境，不为此提问。
 2. 查询 `builtin_read_video_redraw`；没有可复用结果时通过 `builtin_edit_video_redraw` 提交 `analyze`，再调用 `builtin_wait_video_redraw`。服务端自动检测候选切点，直接使用文件服务中原片的 COS 地址，交模型校正并保存镜头及资产条目。已有 COS 原片不重复上传，本地原片需先配置 COS，上传并校验后保留同一 fileId；不依赖网关文件接口；失败时报告真实错误，不重复运行独立切镜或转写。
 3. 回读 `shots` 和 `assets`。根据用户要求使用 `builtin_edit_studio` 调整相应镜头，保留其他镜头和用户修改；画面中的资产以 `<完整资产名称>` 或 `<完整资产名称|状态名称>` 存储，页面显示 @ 标签。 场次的 `assetId` 与可选 `variantId` 关联场景及其状态，连续的同地点同时间镜头属于同一场次；场景无法确认时保留待确认。生成视频片段时必须将所属场次的场景资产和状态带入片段引用与提示词。对白角色必须引用真实角色 ID，原片内容保存在 `source`，目标对白保存在 `dialogue`。
-4. 原片来源区间保存在 `shots.source.start/end`，正式分镜的目标时长是独立的 `shots.duration`；修改目标时长不要改写来源区间。正式分镜支持 `camera` 运镜，时长按 0.1 秒编辑。拆分、合并时检查对白分配和已关联片段，证据不足标记待确认；不要覆盖已完成的媒体。保存后按 ID 回读。
+4. 原片来源区间保存在 `shots.source.start/end`，镜头的目标时长是独立的 `shots.duration`；修改目标时长不要改写来源区间。镜头支持 `camera` 运镜，原片分析写入画面可见的运镜，看不出时留空；时长按 0.1 秒编辑。拆分、合并时检查对白分配和已关联片段，证据不足标记待确认；不要覆盖已完成的媒体。保存后按 ID 回读。
 5. 原片分析完成后可使用 `builtin_edit_video_redraw` 的 `write-script` 提交本集剧本任务，传 `projectId`、`episodeId`、最新项目 `version` 和唯一 `requestId`，可提供 `requirements`；使用 `builtin_wait_video_redraw` 等待。任务基于原始分析、当前分镜和项目目标地区及语言编写，并由独立整理模型写入已有场次及整集剧本，要求按顺序保留目标对白；`openItems` 列出待确认内容。已有正文不会被覆盖。
-6. 使用 `builtin_edit_video_redraw` 的 `extract-assets` 提交资产提取，可在 `requirements` 中提供本次补充要求（最多 2000 字），再通过 `builtin_wait_video_redraw` 等待结果。接口使用资产提取工作流 Agent 配置的文本模型处理分镜、场次、原片分析和已有资产，不重新调用视频理解模型；结果含实际 model 与 providerId，保留既有设定、图片与非空提示词，新增缺失资产、必要状态和镜头关联，并补全本集已有衍生状态的空生图提示词。模型漏掉需要补全的状态时任务失败，报告错误并用新的 requestId 重试。原片分析阶段可先留下空提示词，由资产提取阶段补齐。用户要求调整时使用 studio 工具修改已有资产。
-7. 进入正式分镜后可用 `plan-storyboard` 传项目、剧集、版本、唯一 requestId 和可选 requirements。独立执行模型读取本集剧本、原片分析、资产文字和现有镜头，整理模型输出逐镜建议，不接收图片像素；如历史项目没有完整的分析任务记录，应明确告知仅能读取镜头中保存的原片依据；读取输出并经用户确认后用 `apply-revision` 应用。可调整画面、景别、运镜、音效与 0.1 秒目标时长，不能改写对白或原片信息；版本变化会阻止覆盖。资产图片和任务、视频模型与生成方式在进入视频制作前检查。
+6. 使用 `builtin_edit_video_redraw` 的 `extract-assets` 提交资产提取，可在 `requirements` 中提供本次补充要求（最多 2000 字），再通过 `builtin_wait_video_redraw` 等待结果。资产执行 Agent 使用配置的文本模型处理分镜、场次、上游报告和已有资产，不重新调用视频理解模型，输出完整资产报告；整理 Agent 将报告转为资产字段，系统核对生图提示词与报告一致后写入。结果含实际 model 与 providerId，直接更新已有资产的非空文字设定、声音描述和生图提示词，保留已有图片；新增缺失资产、必要状态和镜头关联。已有角色的新增镜头关联须在该镜头文字中找到角色名称、别名或 ID，找不到的关联不写入，在结果 `skippedLinks` 中列出角色与镜头，其余结果照常保存；用户确认后可用 studio 工具手动关联。修改记录在全局变更日志中查看和还原。模型漏掉需要补全的状态时任务失败，报告错误并用新的 requestId 重试。原片分析阶段可先留下空提示词，由资产提取阶段补齐。用户要求调整时使用 studio 工具修改已有资产。
+
+资产提取保存时会检查本集相关资产的主形象和衍生状态是否有生图提示词；缺少时整批不保存。先查看任务原始报告：若报告已有完整提示词，可重新整理；若报告本身遗漏，需用新的 requestId 重新提取，不能从上下文编造原文。
+7. 需要时可用 `plan-storyboard`（页面不再提供入口） 传项目、剧集、版本、唯一 requestId 和可选 requirements。独立执行模型读取本集剧本、原片分析、资产文字和现有镜头，整理模型输出逐镜建议，不接收图片像素；如历史项目没有完整的分析任务记录，应明确告知仅能读取镜头中保存的原片依据；读取输出并经用户确认后用 `apply-revision` 应用。可调整画面、景别、运镜、音效与 0.1 秒目标时长，不能改写对白或原片信息；版本变化会阻止覆盖。资产图片和任务、视频模型与生成方式在进入视频制作前检查。
 
 ## 工作区文件与命令
 
@@ -220,7 +246,7 @@ Agent 配置、模型供应商、审批模式等按当轮工具目录中的对�
 
 ## 交互提问
 
-当需要用户选择方案或补充偏好时，使用目录中支持交互提问的工具。当前内置名称为 `builtin_request_user_input`。
+当需要用户选择方案或补充偏好时，使用当前宿主提供的交互提问能力。
 
 - 输入 `title`、可选 `description` 和 1–8 个 `questions`。
 - 每题提供唯一的 `id`、`label` 与 `type`：`single` 为互斥单选，`multiple` 为可同时选择多项，`text`/`textarea` 为自由输入。

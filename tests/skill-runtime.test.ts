@@ -45,7 +45,9 @@ describe('generic local Skill runtime', () => {
     const result = await execute('run_command', { command: `${node} ${quote(join(loaded.directory, 'scripts/report.mjs'))}`, waitMs: 1000 });
     expect(result).toMatchObject({ status: 'exited', exitCode: 0, isError: false });
     expect(result.output).toContain('rendered');
-    expect((await execute('run_command', { command: quote(join(loaded.directory, 'scripts/check')), waitMs: 1000 })).output).toBe('executable');
+    const check = await execute('run_command', { command: quote(join(loaded.directory, 'scripts/check')), waitMs: 1000 });
+    const completed = check.status === 'running' ? await execute('process_status', { processId: check.processId, waitMs: 10000 }) : check;
+    expect(completed).toMatchObject({ status: 'exited', exitCode: 0, output: 'executable' });
     const published = await execute('publish_file', { path: 'report.html' });
     expect(published.url).toMatch(/^\/api\/files\/.+\?download=1$/);
     expect((await files.getBytes(published.fileId))?.bytes.toString()).toBe('<h1>实际输入</h1>');

@@ -1,4 +1,4 @@
-import type { AgentModel } from '../agent-sidebar/types';
+import type { AgentModel } from '../skill-manager/types';
 import type { MediaModel } from '../media-workspace/types';
 import type { AgentModelCapabilities, AgentModelType, ModelProvider } from './types';
 

@@ -1,18 +1,17 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 import { promptGroups } from '../data'
-import promptCatalog from '../../../prompts/studio-prompt-catalog.json'
-import agentButtons from '../../../prompts/studio-agent-buttons.json'
 import { Button, Field, Confirm } from '../components/ui'
 
-const buttonPromptIds = new Set(promptCatalog.filter(item => Object.hasOwn(agentButtons, item.action)).map(item => item.id))
+const buttonPromptIds = new Set(['0-0', '0-1', '0-2', '0-3'])
 
 export default function Prompts() {
   const { data, patch, notify } = useStore()
   const [group, setGroup] = useState(0)
-  const [selected, setSelected] = useState('0-0')
+  const [selected, setSelected] = useState(() => data.prompts.find(item => item.group === 0 && !buttonPromptIds.has(item.id))?.id || '')
   const [reset, setReset] = useState(false)
-  const item = data.prompts.find((p) => p.id === selected)
+  const available = data.prompts.filter(item => !buttonPromptIds.has(item.id))
+  const item = available.find(p => p.id === selected)
   return (
     <div className="prompt-settings-page">
       <header className="prompt-settings-head">
@@ -26,19 +25,19 @@ export default function Prompts() {
             key={g.label}
             onClick={() => {
               setGroup(i)
-              setSelected(`${i}-0`)
+              setSelected(available.find(item => item.group === i)?.id || '')
             }}
           >
             <i>{i + 1}</i>
             <strong>{g.label}</strong>
-            <small>{g.names.length} 项</small>
+            <small>{available.filter(item => item.group === i).length} 项</small>
           </button>
         ))}
       </nav>
       <div className="prompt-layout">
         <aside className="prompt-tabs">
           <p className="muted">提示词项</p>
-          {data.prompts
+          {available
             .filter((p) => p.group === group)
             .map((p) => (
               <button
@@ -48,13 +47,13 @@ export default function Prompts() {
               >
                 <span>
                   <strong>{p.name}</strong>
-                  <small>{buttonPromptIds.has(p.id) ? '在工作流 Agents 中配置按钮指令' : '查看默认内容或自定义替换'}</small>
+                  <small>查看默认内容或自定义替换</small>
                 </span>
-                <em>{buttonPromptIds.has(p.id) ? '按钮配置' : p.mode === 'default' ? '默认' : '替换'}</em>
+                <em>{p.mode === 'default' ? '默认' : '替换'}</em>
               </button>
             ))}
         </aside>
-        {item && buttonPromptIds.has(item.id) ? <section className="prompt-editor"><h3>{item.name}</h3><p>此 Agent 按钮的任务指令可在「设置 → 工作流 Agents → 工作台 Agent 按钮」中配置；此处保存的旧设置不影响该按钮。</p></section> : item && <PromptEditor
+        {item && <PromptEditor
           key={item?.id || selected}
           item={item}
           onReset={() => setReset(true)}

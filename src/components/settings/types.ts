@@ -32,6 +32,8 @@ export interface ModelProvider {
   baseUrl: string;
   /** Legacy provider adapter default; ModelManagementCard hosts resolve protocol from each model binding. */
   protocol: ModelProviderProtocol;
+  /** Video URL shape expected by the provider's chat completions endpoint. */
+  videoUrlFormat?: 'string' | 'object';
   hasApiKey?: boolean;
   status?: ModelProviderStatus;
   models: AgentModelConfig[];
@@ -51,48 +53,11 @@ export interface AgentModelConfig {
 export type AgentChildContextMode = 'task-only' | 'selected-context';
 export type AgentHistoryMode = 'recent' | 'summary' | 'full';
 export type AgentToolResultMode = 'brief' | 'standard' | 'detailed';
-export type AgentType = 'main_agent' | 'sub_agent';
-export type AgentSource = 'system_default' | 'user_created' | 'imported';
-export type AgentContextStrategy = 'isolated' | 'inherit_filtered' | 'inherit_full';
 
 export interface AgentContextPolicy {
   childContext: AgentChildContextMode;
   historyMode: AgentHistoryMode;
   toolResultMode: AgentToolResultMode;
-}
-
-/** A server-managed assistant configuration. Credentials are kept on the host. */
-export interface AgentConfig {
-  id: string;
-  name: string;
-  type?: AgentType;
-  source?: AgentSource;
-  selectable?: boolean;
-  callable?: boolean;
-  contextStrategy?: AgentContextStrategy;
-  /** Wire-format alias accepted when integrating with snake_case Agent APIs. */
-  context_strategy?: AgentContextStrategy;
-  /** Optional MCP application allow-list; omitted means the host default. */
-  applicationIds?: string[];
-  builtIn?: boolean;
-  /** Emoji, short label, or a host-managed image URL. */
-  avatar?: string;
-  description?: string;
-  instructions: string;
-  /** Host website rules, appended after this Agent's general instructions. */
-  websiteInstructions?: string;
-  skillIds?: string[];
-  contextPolicy?: AgentContextPolicy;
-  enabled?: boolean;
-  isDefault?: boolean;
-}
-
-export interface AgentsSettingsCardProps {
-  agents: AgentConfig[];
-  skills?: Array<{ id: string; name: string; enabled?: boolean }>;
-  applications?: Array<{ id: string; name: string }>;
-  onSave?: (agent: AgentConfig) => void | Promise<void>;
-  onDelete?: (agentId: string) => void | Promise<void>;
 }
 
 export interface SettingsSection {
@@ -147,11 +112,6 @@ export type {
   VideoGenerationMode,
 } from './model-config';
 
-export interface AgentSettingsCardProps {
-  systemPrompt: string;
-  onSave: (systemPrompt: string) => void | Promise<void>;
-}
-
 export type PromptKey = 'system' | 'voice' | 'optimization' | 'h3Optimization';
 export interface PromptSettingsPrompts {
   system: string;
@@ -161,6 +121,7 @@ export interface PromptSettingsPrompts {
   defaults?: Partial<Record<PromptKey, string>>;
 }
 export interface PromptSettingsCardProps {
+  visibleKeys?: PromptKey[];
   prompts: PromptSettingsPrompts;
   onSave: (patch: Partial<Record<PromptKey, string>>) => void | Promise<void>;
   onReset?: (prompts: PromptSettingsPrompts) => void | Promise<void>;

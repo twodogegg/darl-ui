@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { logWorkflowDebug } from './workflow-debug';
 import { generate, safeError, toolResultForModel, type FunctionTool, type StoredProvider, type ToolExecution } from './models';
 import type { AgentModelConfig } from '../../../src/index';
-import type { AgentSkill } from '../../../src/components/agent-sidebar/types';
+import type { AgentSkill } from '../../../src/components/skill-manager/types';
 import type { WorkflowAgent } from './workflow-agents';
 
 export type WorkflowStep = { tool: string; status: 'running' | 'completed' | 'failed'; error?: string };
@@ -43,8 +43,21 @@ export function workflowExecution(config: WorkflowAgent, skills: AgentSkill[], j
     } catch (error) { step.status = 'failed'; step.error = safeError(error); save(); logWorkflowDebug('tool.error', { toolCallId: call.id, tool: call.name, error }); throw error; }
   } };
 }
+/** Include linked Markdown resources from the selected package, without executing scripts or reading unrelated files. */
+export function workflowSkillResources(skill: AgentSkill) {
+  const links = [...(skill.instructions || '').matchAll(/\]\(([^\s)]+\.md)(?:#[^\s)]*)?\)/gi)].map(match => match[1].replace(/^\.\//, ''));
+  const paths = [...new Set(links.filter(path => !/^(?:https?:|\/|\.\.\/)/i.test(path)))];
+  const resources = paths.flatMap(path => {
+    const file = skill.resources?.find(item => item.path === path);
+    if (!file) { if (path.startsWith('references/')) throw new Error(`Skill「${skill.name}」缺少引用文件：${path}`); return []; }
+    if (file.encoding === 'base64') throw new Error(`Skill「${skill.name}」引用文件不是文本：${path}`);
+    return [file];
+  });
+  if (resources.reduce((size, file) => size + file.content.length, 0) > 200_000) throw new Error(`Skill「${skill.name}」引用文件超过 200000 字，请精简后重试`);
+  return resources;
+}
 export function workflowInstructions(config: WorkflowAgent, skills: AgentSkill[]) {
-  return [config.instructions, ...skills.map(skill => `# Skill: ${skill.name}\n${skill.instructions || ''}`)].join('\n\n');
+  return [config.instructions, ...skills.map(skill => [`# Skill: ${skill.name}\n${skill.instructions || ''}`, ...workflowSkillResources(skill).map(file => `## Skill 参考文件：${file.path}\n${file.content}`)].join('\n\n'))].join('\n\n');
 }
 export async function runTextWorkflow(provider: StoredProvider, model: AgentModelConfig, context: unknown, instructions: string, signal: AbortSignal, execution?: ToolExecution, onPartial?: (text: string) => void) {
   if (execution && model.capabilities?.tools === false) throw new Error('所选模型不支持工具调用，请更换模型或移除工具');

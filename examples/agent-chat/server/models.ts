@@ -2,15 +2,16 @@ import type { ModelProvider, AgentModelConfig } from '../../../src/index';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
-import { dynamicTool, jsonSchema, stepCountIs, streamText, ToolLoopAgent, wrapLanguageModel, type LanguageModel, type ModelMessage, type OutputInterface } from 'ai';
+import { dynamicTool, jsonSchema, stepCountIs, streamText, wrapLanguageModel, type LanguageModel, type ModelMessage, type OutputInterface } from 'ai';
 import { failure } from './errors';
-import { sourceBoundMessage, structuredAgentResult, type StructuredAgentResult } from './context';
+import { sourceBoundMessage } from './context';
 import { recordLanguageModel } from './model-records';
 import { recordWorkflowDebugModel } from './workflow-debug';
 
 export interface StoredProvider extends ModelProvider { apiKey: string }
 export interface ChatImage { type: 'image'; name: string; mimeType: string; data: string; size?: number; fileId?: string }
-export type ChatContent = string | Array<{ type: 'text'; text: string } | ChatImage>;
+export interface ChatVideo { type: 'video'; name: string; mimeType: string; url: string; fileId: string }
+export type ChatContent = string | Array<{ type: 'text'; text: string } | ChatImage | ChatVideo>;
 export interface ChatMessage { role: 'user' | 'assistant'; content: ChatContent }
 
 export function validateProvider(value: ModelProvider): ModelProvider {
@@ -18,6 +19,7 @@ export function validateProvider(value: ModelProvider): ModelProvider {
   const url = new URL(value.baseUrl);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('请填写有效的 HTTP(S) API 地址');
   if (!['openai-completions', 'openai-responses'].includes(value.protocol)) throw new Error('不支持的 API 协议');
+  if (value.videoUrlFormat !== undefined && !['string', 'object'].includes(value.videoUrlFormat)) throw new Error('视频地址格式无效');
   if (!Array.isArray(value.models) || value.models.length > 2000) throw new Error('模型目录无效');
   const ids = new Set<string>();
   const models: AgentModelConfig[] = value.models.map((model) => {
@@ -26,7 +28,7 @@ export function validateProvider(value: ModelProvider): ModelProvider {
     if (model.reasoningEfforts && (!Array.isArray(model.reasoningEfforts) || model.reasoningEfforts.some((effort) => !['minimal', 'low', 'medium', 'high', 'xhigh', '低', '中', '高'].includes(effort)))) throw new Error('请填写模型支持的推理强度，如 low, medium, high');
     return { id: model.id, name: model.name, type: model.type, providerId: value.id, enabled: model.enabled !== false, reasoningEfforts: model.reasoningEfforts, capabilities: model.capabilities };
   });
-  return { id: value.id, name: value.name.trim(), baseUrl: url.toString().replace(/\/$/, ''), protocol: value.protocol, status: 'unknown', models };
+  return { id: value.id, name: value.name.trim(), baseUrl: url.toString().replace(/\/$/, ''), protocol: value.protocol, ...(value.videoUrlFormat ? { videoUrlFormat: value.videoUrlFormat } : {}), status: 'unknown', models };
 }
 
 export function publicProvider({ apiKey, ...provider }: StoredProvider): ModelProvider {
@@ -105,14 +107,6 @@ export interface ToolExecution {
   execute: (call: FunctionCall, signal?: AbortSignal) => Promise<string | ToolImageOutput>;
 }
 
-export interface AgentDelegation {
-  name: string;
-  /** Explicit mentions must be attempted before the main Agent can finish. */
-  required?: boolean;
-  description: string;
-  execute: (task: string, context: Array<Record<string, unknown>>, signal: AbortSignal) => Promise<StructuredAgentResult>;
-}
-
 /** Hold only a possible protocol prefix, so split markers never reach the UI. */
 export async function* checkedText(chunks: AsyncIterable<string>) {
   const markers = ['<budget:token_budget', '<｜｜DSML｜｜'];
@@ -158,11 +152,16 @@ function reasoningValue(effort: string | undefined) {
   return effort && ({ 低: 'low', 中: 'medium', 高: 'high' }[effort] || effort);
 }
 
+export function videoUrlRequestBody(body: Record<string, any>, format: 'string' | 'object' = 'string') {
+  if (format === 'object' || !Array.isArray(body.messages)) return body;
+  return { ...body, messages: body.messages.map((message: { content?: unknown }) => ({ ...message, content: Array.isArray(message.content) ? message.content.map(part => part.type === 'video_url' && typeof part.video_url?.url === 'string' ? { ...part, video_url: part.video_url.url } : part) : message.content })) };
+}
+
 export function languageModel(provider: StoredProvider, model: AgentModelConfig, onActivity?: () => void): LanguageModel {
   if (!provider.apiKey) throw new Error('请先在设置中保存 API Key');
   const upstreamModel = provider.protocol === 'openai-responses'
     ? createOpenAI({ baseURL: provider.baseUrl, apiKey: provider.apiKey, name: provider.id }).responses(model.id)
-    : createOpenAICompatible({ baseURL: provider.baseUrl, apiKey: provider.apiKey, name: provider.id, includeUsage: true }).chatModel(model.id);
+    : createOpenAICompatible({ baseURL: provider.baseUrl, apiKey: provider.apiKey, name: provider.id, includeUsage: true, supportedUrls: () => ({ 'video/*': [/^https?:\/\//] }), transformRequestBody: body => videoUrlRequestBody(body, provider.videoUrlFormat) }).chatModel(model.id);
   const observed = onActivity ? wrapLanguageModel({ model: upstreamModel, middleware: {
     wrapGenerate: async ({ doGenerate }) => { onActivity(); const result = await doGenerate(); onActivity(); return result; },
     wrapStream: async ({ doStream }) => {
@@ -179,6 +178,7 @@ export function modelMessages(messages: ChatMessage[]): ModelMessage[] {
     role: message.role,
     content: typeof message.content === 'string' ? message.content : message.content.map((item) => item.type === 'text'
       ? { type: 'text' as const, text: item.text }
+      : item.type === 'video' ? { type: 'file' as const, data: new URL(item.url), mediaType: item.mimeType, filename: item.name }
       : { type: 'image' as const, image: `data:${item.mimeType};base64,${item.data}`, mediaType: item.mimeType }),
   })) as ModelMessage[];
 }
@@ -238,68 +238,4 @@ export async function* generate(provider: StoredProvider, model: AgentModelConfi
   if (finishReason === 'length') throw new Error('已达到模型输出长度限制');
   if (finishReason === 'tool-calls') throw failure('runtime', 'TOOL_STEP_LIMIT', '已达到本轮工具调用上限，任务尚未结束。工作区文件已保留，可继续对话。', false);
   if (!hasText) throw new Error('模型没有返回文本内容');
-}
-
-function loopTools(execution: ToolExecution | undefined, delegations: AgentDelegation[] | undefined, signal: AbortSignal) {
-  const tools: Record<string, unknown> = { ...(aiTools(execution, signal) || {}) };
-  for (const delegation of delegations || []) {
-    tools[delegation.name] = dynamicTool({
-      description: delegation.description,
-      inputSchema: jsonSchema({ type: 'object', properties: { task: { type: 'string', description: '只包含完成任务所需的说明，不要复制主 Agent 的完整历史' }, context: { type: 'array', maxItems: 20, items: { type: 'object', additionalProperties: true }, description: '仅在明确需要时传递的结构化资料引用' } }, required: ['task'], additionalProperties: false }),
-      execute: async (input, options) => {
-        const task = (input as { task?: unknown })?.task;
-        if (typeof task !== 'string' || !task.trim()) throw new Error('子任务说明不能为空');
-        const context = (input as { context?: unknown }).context;
-        return delegation.execute(task, Array.isArray(context) ? context as Array<Record<string, unknown>> : [], options.abortSignal ? AbortSignal.any([signal, options.abortSignal]) : signal);
-      },
-    });
-  }
-  return tools;
-}
-
-function createToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, delegations?: AgentDelegation[], output?: OutputInterface, onActivity?: () => void) {
-  const reasoning = reasoningValue(effort);
-  const providerOptionsName = provider.protocol === 'openai-responses' ? 'openai' : provider.id;
-  const pending = new Set(delegations?.filter(item => item.required).map(item => item.name));
-  const tracked = delegations?.map(item => ({ ...item, execute: (...args: Parameters<AgentDelegation['execute']>) => { pending.delete(item.name); return item.execute(...args); } }));
-  return new ToolLoopAgent({
-    model: languageModel(provider, model, onActivity),
-    instructions,
-    output,
-    tools: model.capabilities?.tools === false ? {} : loopTools(execution, tracked, signal),
-    prepareStep: ({ messages }: { messages: ModelMessage[] }) => {
-      const name = pending.values().next().value;
-      return { messages: toolImageMessages(messages), ...(name ? { activeTools: [name], toolChoice: { type: 'tool' as const, toolName: name } } : {}) };
-    },
-    stopWhen: stepCountIs(Math.max(execution?.maxSteps ?? 8, pending.size + 1)),
-    toolCallConcurrency: 1,
-    maxRetries: 2,
-    ...(reasoning ? { providerOptions: { [providerOptionsName]: { reasoningEffort: reasoning } } } : {}),
-  } as never);
-}
-
-/** Stream a configured Agent. Each call receives only the messages passed by the host. */
-export async function* generateWithToolLoop(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, delegations?: AgentDelegation[], output?: OutputInterface, onActivity?: () => void) {
-  signal.throwIfAborted();
-  if (!messages.length) throw new Error('对话消息不能为空');
-  const agent = createToolLoopAgent(provider, model, instructions, effort, signal, execution, delegations, output, onActivity);
-  const result = await agent.stream({ messages: modelMessages(messages.map(sourceBoundMessage)), abortSignal: signal });
-  let hasText = false;
-  for await (const text of execution?.onIntermediateText ? agentStepText(result.fullStream, execution.onIntermediateText) : checkedText(result.textStream)) { hasText = true; yield text; }
-  signal.throwIfAborted();
-  const finishReason = await result.finishReason;
-  if (finishReason === 'length') throw new Error('已达到模型输出长度限制');
-  if (finishReason === 'tool-calls') throw failure('runtime', 'TOOL_STEP_LIMIT', '已达到本轮工具调用上限，任务尚未结束。工作区文件已保留，可继续对话。', false);
-  if (!hasText) throw new Error('模型没有返回文本内容');
-}
-
-/** Execute one isolated child context and return only its final text. */
-export async function runToolLoopAgent(provider: StoredProvider, model: AgentModelConfig, messages: ChatMessage[], instructions: string, effort: string | undefined, signal: AbortSignal, execution?: ToolExecution, onActivity?: () => void) {
-  signal.throwIfAborted();
-  const agent = createToolLoopAgent(provider, model, instructions, effort, signal, execution, undefined, undefined, onActivity);
-  if (!messages.length) throw new Error('子 Agent 对话不能为空');
-  const result = await agent.generate({ messages: modelMessages(messages.map(sourceBoundMessage)), abortSignal: signal });
-  signal.throwIfAborted();
-  if (result.finishReason === 'tool-calls') throw failure('runtime', 'TOOL_STEP_LIMIT', '子 Agent 已达到本轮工具调用上限，任务尚未结束。', false);
-  return structuredAgentResult(result.text);
 }

@@ -51,14 +51,14 @@ describe('model configuration', () => {
     expect(validateModelConfiguration(configuration).map((error) => error.message)).toContain('文本模型必须提供思考等级，且不能包含 none');
   });
 
-  it('only exposes executable text bindings to AgentSidebar models', () => {
+  it('only exposes executable text bindings to host models', () => {
     const configuration = defaultModelConfiguration();
     const models = toAgentModels(configuration, [{ id: 'darl', name: 'Darl', baseUrl: 'https://example.test/v1', protocol: 'openai-completions', models: [] }]);
     expect(models.map((model) => model.logicalModelId)).toEqual(expect.arrayContaining(['deepseek-v4.1-flash', 'gpt-6.1-sol', 'gemini-4-argon', 'gpt-6-astra']));
     expect(models.every((model) => model.id.startsWith('darl/'))).toBe(true);
   });
 
-  it('passes the configured default reasoning effort to AgentSidebar models', () => {
+  it('passes the configured default reasoning effort to host models', () => {
     const configuration = defaultModelConfiguration();
     const models = toAgentModels(configuration, [{ id: 'darl', name: 'Darl', baseUrl: 'https://example.test/v1', protocol: 'openai-completions', models: [] }]);
     const deepseek = models.find((model) => model.logicalModelId === 'deepseek-v4.1-flash')!;

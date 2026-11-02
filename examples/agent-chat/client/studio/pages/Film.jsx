@@ -16,8 +16,7 @@ function FilmWorkspace({ context }) {
   const { data, update, notify, mediaJobs } = useStore()
   const navigate = useNavigate()
   const scenes = episodeScenes(context.episode)
-  const all = data.clips.filter(item => item.episodeId === context.episode.id)
-  const clips = [...scenes.flatMap(scene => all.filter(clip => clip.sceneId === scene.id)), ...all.filter(clip => !scenes.some(scene => scene.id === clip.sceneId))]
+  const clips = data.clips.filter(item => item.episodeId === context.episode.id)
   const [sceneId, setSceneId] = useState('all')
   const visible = sceneId === 'all' ? clips : clips.filter(clip => clip.sceneId === sceneId)
   const [activeId, setActiveId] = useState(clips[0]?.id)

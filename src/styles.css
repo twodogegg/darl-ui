@@ -3,7 +3,7 @@
 
 @import './components/video-compare/video-compare.css';
 @import './components/media-workspace/media-workspace.css';
-@import './components/agent-sidebar/agent-sidebar.css';
+@import './components/skill-manager/skill-manager.css';
 @import './components/style-selector/style-selector.css';
 @import './components/asset-library/asset-library.css';
 @import './components/default-model-selector/default-model-selector.css';
@@ -14,6 +14,6 @@
    iOS/WebKit 会为字号 < 16px 的输入框自动放大页面且失焦后不还原；
    Android 键盘弹起时的缩放行为同理。触屏设备的字号基准也应更大。 */
 @media (pointer: coarse) {
-  :is(.darl-ui-root, .darl-agent-sidebar, .darl-media-workspace, .darl-settings-page, .darl-compare, .darl-confirm-dialog, .darl-default-model-selector)
+  :is(.darl-ui-root, .darl-media-workspace, .darl-settings-page, .darl-compare, .darl-confirm-dialog, .darl-default-model-selector)
   :is(input, select, textarea, [contenteditable='true']):not(:where([type='range'], [type='checkbox'], [type='radio'], [type='file'], [type='color'], [type='button'], [type='submit'], [type='reset'])) { font-size: 16px; }
 }

@@ -2,12 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProject, Workflow } from '../components/Shell'
 import { studioApi, useStore } from '../store'
+import { WorkflowAdjustment } from '../components/WorkflowAdjustment'
 import AssetMentionInput from '../components/AssetMentionInput'
 import DialogueEditor from '../components/DialogueEditor'
-import { StoryboardRevision } from '../components/StoryboardRevision'
-import { Button, Field, Modal } from '../components/ui'
-import { startPolling } from '../../polling'
-import { redrawImageReadiness } from '../art'
 import { assetMentionCandidates, mentionedAssets } from '../../../asset-mentions'
 
 function ShotVideo({ source, projectId, episodeId, shotId, index }) {
@@ -41,28 +38,17 @@ function ShotRow({ shot, index, projectId, episodeId, assets, onPatch, onSplit, 
 }
 
 export default function RedrawStoryboard() {
-  const context = useProject(), { data, update, notify, reload, mediaJobs, models, mediaDefaults, setModelSelections } = useStore(), navigate = useNavigate()
+  const context = useProject(), { data, update, reload, notify } = useStore(), navigate = useNavigate()
   const [busy, setBusy] = useState(false)
   const [editingDialogue, setEditingDialogue] = useState(null)
-  const [nextOpen, setNextOpen] = useState(false), [nextModel, setNextModel] = useState('minimax-h3'), [nextMode, setNextMode] = useState('参考生成')
-  const [extraction, setExtraction] = useState(null)
-  const { project, episode, episodes, projectId } = context
+  const { episode, projectId } = context
   const shots = data.shots.filter(item => item.episodeId === episode?.id).sort((a, b) => Number(a._position || 0) - Number(b._position || 0))
   const assets = data.assets.filter(item => item.projectId === projectId)
   const scenes = episode?.scenes || []
-  const readiness = redrawImageReadiness(data.assets, mediaJobs, projectId)
-  useEffect(() => {
-    if (!episode?.id || !projectId) return
-    return startPolling(async signal => {
-      const result = await studioApi(`video-redraw/status?${new URLSearchParams({ projectId, episodeId: episode.id })}`, undefined, signal)
-      setExtraction(result.jobs.find(item => item.kind === 'extract-assets') || null)
-    }, 3000, error => notify(`读取资产任务失败：${error.message}`))
-  }, [projectId, episode?.id])
   const sceneAssets = assets.filter(item => item.type === '场景')
   const groups = shots.reduce((result, shot, index) => { const last = result[result.length - 1]; if (last?.sceneId === shot.sceneId) last.shots.push({ shot, index }); else result.push({ sceneId: shot.sceneId, shots: [{ shot, index }] }); return result }, [])
   async function updateScene(id, values) { await update(draft => { const scene = draft.episodes.find(item => item.id === episode.id)?.scenes.find(item => item.id === id); if (scene) Object.assign(scene, values) }) }
   async function addScene() { await update(draft => { draft.episodes.find(item => item.id === episode.id).scenes.push({ id: crypto.randomUUID(), location: '待确认', setting: '内外', time: '待确认', content: '', suggestedDuration: '' }) }) }
-  const video = episode?.sourceVideo || (episode?.id === episodes[0]?.id ? project?.sourceVideo : null)
   async function patchShot(shot, values) {
     if (Object.entries(values).every(([key, value]) => shot[key] === value)) return
     const saved = await update(draft => {
@@ -106,26 +92,24 @@ export default function RedrawStoryboard() {
     if (busy || !shots.length) return
     setBusy(true)
     try {
-      const [latest, jobs, status] = await Promise.all([reload(), studioApi('media-generation/jobs'), studioApi(`video-redraw/status?${new URLSearchParams({ projectId, episodeId: episode.id })}`)])
-      if (!redrawImageReadiness(latest.assets, jobs, projectId).ready) { notify('请先完成所有资产主图和衍生形态图片'); return }
-      if (status.jobs.some(job => job.kind === 'extract-assets' && ['queued', 'running'].includes(job.status))) { notify('资产提取进行中，请等待完成'); return }
-      const modelId = mediaDefaults.video?.modelId
-      if (!models.some(model => model.id === modelId && model.type === 'video' && model.enabled !== false && ['minimax-h3-flash', 'minimax-h3-standard'].includes(model.id))) { notify('请先在设置中配置并启用 MiniMax H3 视频模型'); return }
       const saved = await update(draft => { const current = draft.episodes.find(item => item.id === episode.id); if (current) current.stage = Math.max(current.stage, 4) })
       if (!saved) return
-      setModelSelections(current => ({ ...current, video: modelId }))
-      navigate(`/video?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(episode.id)}`, { state: { promptMode: nextMode } })
-    } catch (error) { notify(`进入视频制作失败：${error.message}`) } finally { setBusy(false) }
+      const latest = await reload()
+      const current = latest.episodes.find(item => item.id === episode.id)
+      const project = latest.projects.find(item => item.id === projectId)
+      if (!current || !project) throw new Error('项目或剧集已不存在')
+      if (!String(current.script || '').trim() && !(current.scenes || []).some(scene => String(scene.content || '').trim())) {
+        const params = new URLSearchParams({ projectId, episodeId: episode.id })
+        const status = await studioApi(`video-redraw/status?${params}`)
+        if (!status.jobs.some(job => job.kind === 'write-script' && ['queued', 'running'].includes(job.status))) {
+          await studioApi('video-redraw/action', { action: 'write-script', projectId, episodeId: episode.id, requestId: crypto.randomUUID(), version: project._version })
+        }
+      }
+      navigate(`/script?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(episode.id)}`)
+    } catch (error) { notify(`启动剧本生成失败：${error.message}`) } finally { setBusy(false) }
   }
-  return <Workflow context={context}><header className="workspace-toolbar"><div><h2>正式分镜</h2><p className="muted">根据剧本、原片分析和资产完善分镜；原片时间用于对照，目标时长可单独编辑。</p></div><button className="btn primary" disabled={!shots.length || busy} onClick={() => setNextOpen(true)}>确认分镜，进入视频制作</button></header>
-    <div className="redraw-shot-list"><div className="toolbar"><button type="button" className="btn" onClick={addScene}>添加场次</button><StoryboardRevision scriptReady={!!String(episode?.script || '').trim() && scenes.every(scene => !shots.some(shot => shot.sceneId === scene.id) || !!String(scene.content || '').trim())} projectId={projectId} episodeId={episode?.id} shots={shots} source={video} reload={reload} /></div>{!shots.length ? <p>暂无分镜，请在原片页生成。</p> : <table className="redraw-shot-table"><thead><tr>{['镜头', '时间与时长', '景别', '运镜', '画面描述', '对白与旁白', '音效', '操作'].map(label => <th key={label}>{label}</th>)}</tr></thead>{groups.map((group, groupIndex) => { const scene = scenes.find(item => item.id === group.sceneId); const sceneAsset = sceneAssets.find(item => item.id === scene?.assetId); return <tbody key={`${group.sceneId}-${groupIndex}`}><tr className="redraw-scene-row"><td colSpan={8}><div className="redraw-scene-header"><strong>第 {scenes.findIndex(item => item.id === group.sceneId) + 1} 场</strong><input key={`${group.sceneId}-location-${scene?.location}`} aria-label="场次地点" defaultValue={scene?.location || ''} onBlur={e => { if (e.target.value !== scene?.location) updateScene(group.sceneId, { location: e.target.value }) }} /><select aria-label="场次场景资产" value={scene?.assetId || ''} onChange={e => updateScene(group.sceneId, { assetId: e.target.value, variantId: '' })}><option value="">场景待确认</option>{sceneAssets.map(asset => <option key={asset.id} value={asset.id}>@{asset.name}</option>)}</select>{sceneAsset?.variants?.length > 0 && <select aria-label="场景状态" value={scene?.variantId || ''} onChange={e => updateScene(group.sceneId, { variantId: e.target.value })}><option value="">默认状态</option>{sceneAsset.variants.map(variant => <option key={variant.id} value={variant.id}>{variant.name}</option>)}</select>}<select aria-label="内外景" value={scene?.setting || '内外'} onChange={e => updateScene(group.sceneId, { setting: e.target.value })}>{['内', '外', '内外'].map(value => <option key={value}>{value}</option>)}</select><input key={`${group.sceneId}-time-${scene?.time}`} aria-label="场次时间" defaultValue={scene?.time || ''} onBlur={e => { if (e.target.value !== scene?.time) updateScene(group.sceneId, { time: e.target.value }) }} /></div></td></tr>{group.shots.map(({ shot, index }) => <ShotRow key={shot.id} shot={shot} index={index} projectId={projectId} episodeId={episode.id} assets={assets} onPatch={patchShot} onSplit={splitShot} onMerge={mergeShot} onEditDialogue={setEditingDialogue} notify={notify} canMerge={index < shots.length - 1 && shots[index + 1]?.sceneId === shot.sceneId} />)}</tbody> })}</table>}</div>
-    {nextOpen && <Modal title="选择视频制作方式" onClose={() => setNextOpen(false)} footer={<><Button onClick={() => setNextOpen(false)}>取消</Button><Button primary disabled={busy || nextModel !== 'minimax-h3' || !readiness.ready || ['queued', 'running'].includes(extraction?.status)} onClick={next}>{busy ? '正在进入…' : '进入视频制作'}</Button></>}>
-      <Field label="视频模型"><select aria-label="视频模型" value={nextModel} onChange={event => setNextModel(event.target.value)}><option value="seedance-2.5">Seedance 2.5</option><option value="seedance-2.0">Seedance 2.0</option><option value="minimax-h3">MiniMax H3</option></select></Field>
-      {nextModel !== 'minimax-h3' && <p className="muted" role="status">当前工作台尚未接入所选模型，请选择 MiniMax H3。</p>}
-      <Field label="生成模式"><select aria-label="生成模式" value={nextMode} onChange={event => setNextMode(event.target.value)}><option value="分镜图">四宫格分镜</option><option value="参考生成">参考生成</option></select></Field>
-      {!readiness.ready && <p className="muted" role="status">{readiness.running ? '图片生成中，请等待完成' : readiness.missing ? `还有 ${readiness.missing} 张资产图片未生成` : '请先添加资产并生成图片'}</p>}
-      {['queued', 'running'].includes(extraction?.status) && <p className="muted" role="status">资产提取进行中，请等待完成。</p>}
-    </Modal>}
+  return <Workflow context={context}><header className="workspace-toolbar"><div><h2>镜头校对</h2><p className="muted">核对原片分析出的镜头、台词与说话人，确认后进入剧本；原片时间用于对照，目标时长可单独编辑。</p></div><div className="toolbar"><WorkflowAdjustment projectId={projectId} episodeId={episode?.id} kind="cuts" reload={reload} disabled={!shots.length || busy} /><button className="btn primary" disabled={!shots.length || busy} onClick={next}>确认镜头，进入剧本</button></div></header>
+    <div className="redraw-shot-list"><div className="toolbar"><button type="button" className="btn" onClick={addScene}>添加场次</button></div>{!shots.length ? <p>暂无镜头，请先在原片页分析原片。</p> : <table className="redraw-shot-table"><thead><tr>{['镜头', '时间与时长', '景别', '运镜', '画面描述', '对白与旁白', '音效', '操作'].map(label => <th key={label}>{label}</th>)}</tr></thead>{groups.map((group, groupIndex) => { const scene = scenes.find(item => item.id === group.sceneId); const sceneAsset = sceneAssets.find(item => item.id === scene?.assetId); return <tbody key={`${group.sceneId}-${groupIndex}`}><tr className="redraw-scene-row"><td colSpan={8}><div className="redraw-scene-header"><strong>第 {scenes.findIndex(item => item.id === group.sceneId) + 1} 场</strong><input key={`${group.sceneId}-location-${scene?.location}`} aria-label="场次地点" defaultValue={scene?.location || ''} onBlur={e => { if (e.target.value !== scene?.location) updateScene(group.sceneId, { location: e.target.value }) }} /><select aria-label="场次场景资产" value={scene?.assetId || ''} onChange={e => updateScene(group.sceneId, { assetId: e.target.value, variantId: '' })}><option value="">场景待确认</option>{sceneAssets.map(asset => <option key={asset.id} value={asset.id}>@{asset.name}</option>)}</select>{sceneAsset?.variants?.length > 0 && <select aria-label="场景状态" value={scene?.variantId || ''} onChange={e => updateScene(group.sceneId, { variantId: e.target.value })}><option value="">默认状态</option>{sceneAsset.variants.map(variant => <option key={variant.id} value={variant.id}>{variant.name}</option>)}</select>}<select aria-label="内外景" value={scene?.setting || '内外'} onChange={e => updateScene(group.sceneId, { setting: e.target.value })}>{['内', '外', '内外'].map(value => <option key={value}>{value}</option>)}</select><input key={`${group.sceneId}-time-${scene?.time}`} aria-label="场次时间" defaultValue={scene?.time || ''} onBlur={e => { if (e.target.value !== scene?.time) updateScene(group.sceneId, { time: e.target.value }) }} /></div></td></tr>{group.shots.map(({ shot, index }) => <ShotRow key={shot.id} shot={shot} index={index} projectId={projectId} episodeId={episode.id} assets={assets} onPatch={patchShot} onSplit={splitShot} onMerge={mergeShot} onEditDialogue={setEditingDialogue} notify={notify} canMerge={index < shots.length - 1 && shots[index + 1]?.sceneId === shot.sceneId} />)}</tbody> })}</table>}</div>
     {editingDialogue && shots.find(shot => shot.id === editingDialogue) && <DialogueEditor shot={shots.find(shot => shot.id === editingDialogue)} characters={assets.filter(asset => asset.type === '角色')} onClose={() => setEditingDialogue(null)} onSave={async lines => { const saved = await update(draft => { const shot = draft.shots.find(item => item.id === editingDialogue); if (shot) shot.dialogue = lines }); if (saved) setEditingDialogue(null); else notify('台词未保存') }} />}
   </Workflow>
 }

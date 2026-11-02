@@ -1,13 +1,15 @@
 import { imageUrl } from '../../image-url'
 import { useState } from 'react'
-import { ReferencePicker, MediaPreview } from './ui'
+import { ReferencePicker, MediaPreview, Modal, Field, Button } from './ui'
 import { useStore } from '../store'
-import { clipMediaReferences, clipVoices, referenceKey, CLIP_IMAGE_COLUMNS } from '../storyboard'
+import { clipMediaReferences, clipVoices, referenceKey, updateClipReferences, CLIP_IMAGE_COLUMNS } from '../storyboard'
 
 export default function ClipReferences({ clip, projectId }) {
   const { data, patch } = useStore()
   const [picker, setPicker] = useState(null)
   const [preview, setPreview] = useState(null)
+  const [renaming, setRenaming] = useState(null)
+  const [referenceName, setReferenceName] = useState('')
   const { assets, additional, images } = clipMediaReferences(clip, data)
   const voices = clipVoices(clip, data)
   const excludedFrameUrls = new Set(clip.excludedFrameUrls || [])
@@ -102,13 +104,12 @@ export default function ClipReferences({ clip, projectId }) {
               )}
               <span className="sb-asset-chip__name">{r.name}</span>
             </button>
+            <button className="sb-asset-chip__remove" aria-label={`重命名${r.name}`} title="重命名" onClick={() => { setRenaming(r); setReferenceName(r.name) }}>✎</button>
             <button
               className="sb-asset-chip__remove"
               aria-label={`移除${r.name}`}
               onClick={() =>
-                patch('clips', clip.id, {
-                  references: additional.filter((x) => referenceKey(x) !== referenceKey(r)),
-                })
+                patch('clips', clip.id, updateClipReferences(clip, (clip.references || []).filter((x) => referenceKey(x) !== referenceKey(r))))
               }
             >
               ×
@@ -148,7 +149,7 @@ export default function ClipReferences({ clip, projectId }) {
               clip.id,
               picker === 'assets'
                 ? { assetIds: items.map((i) => i.id) }
-                : { references: items },
+                : updateClipReferences(clip, items),
             )
             setPicker(null)
           }}
@@ -157,6 +158,10 @@ export default function ClipReferences({ clip, projectId }) {
       {preview && (
         <MediaPreview item={preview} onClose={() => setPreview(null)} />
       )}
+      {renaming && <Modal title="重命名参考素材" onClose={() => setRenaming(null)} footer={<><Button onClick={() => setRenaming(null)}>取消</Button><Button primary disabled={!referenceName.trim()} onClick={async () => {
+        const saved = await patch('clips', clip.id, { references: (clip.references || []).map(item => referenceKey(item) === referenceKey(renaming) ? { ...(typeof item === 'string' ? { url: item, kind: 'image' } : item), name: referenceName.trim() } : item) })
+        if (saved) setRenaming(null)
+      }}>保存</Button></>}><Field label="名称"><input aria-label="参考素材名称" maxLength={80} value={referenceName} onChange={event => setReferenceName(event.target.value)} /></Field></Modal>}
     </>
   )
 }

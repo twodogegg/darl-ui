@@ -30,6 +30,15 @@ export function videoDuration(seconds, model) {
   return supported
 }
 export { referenceKey, assetMentionCandidates }
+export function updateClipReferences(clip, references) {
+  const retained = new Set(references.map(referenceKey))
+  let storyboardPrompt = clip.storyboardPrompt || ''
+  for (const ref of clip.references || []) {
+    const key = referenceKey(ref)
+    if (key && !retained.has(key)) storyboardPrompt = storyboardPrompt.split(`<参考图|${encodeURIComponent(key)}>`).join('')
+  }
+  return { references, ...(storyboardPrompt !== (clip.storyboardPrompt || '') ? { storyboardPrompt } : {}) }
+}
 export function clipMediaReferences(clip, data, { includeFrames = true, selectedOnly = false } = {}) {
   const episode = data.episodes?.find(episode => episode.id === clip.episodeId)
   const projectAssets = episode ? data.assets.filter(asset => asset.projectId === episode.projectId) : data.assets
@@ -53,6 +62,20 @@ export function clipMediaReferences(clip, data, { includeFrames = true, selected
   }
   const images = [...new Map([...imageRefs, ...additional.filter(ref => ref.kind === 'image')].map(ref => [referenceKey(ref), ref])).values()]
   return { assets, additional, images, frames: frames.filter(frame => !assets.some(asset => asset.image && referenceKey(asset.image) === referenceKey(frame))) }
+}
+/** 分镜图引用以文件身份保存，提交时按实际附件顺序生成编号与说明。 */
+export function storyboardImageRequest(clip, data) {
+  const refs = clipMediaReferences(clip, data, { includeFrames: false, selectedOnly: true })
+  const candidates = assetMentionCandidates(data.assets.filter(asset => refs.assets.some(item => item.id === asset.id)), { references: refs.additional.filter(ref => ref.kind === 'image'), stableReferences: true })
+  let prompt = String(clip.storyboardPrompt || '').trim()
+  for (const candidate of candidates.filter(item => item.type === '图片')) {
+    const index = refs.images.findIndex(ref => referenceKey(ref) === candidate.referenceKey)
+    if (index >= 0) prompt = prompt.split(candidate.protocol).join(`图片${index + 1}`)
+  }
+  if (/<参考图\|[^<>]+>/.test(prompt)) throw new Error('分镜提示词中的参考图已移除，请重新选择')
+  const additionalKeys = new Set(refs.additional.map(referenceKey))
+  const labels = refs.images.map((ref, index) => `图片${index + 1}：${additionalKeys.has(referenceKey(ref)) ? `参考图「${ref.name}」` : ref.protocol || `<${ref.name}>`}`)
+  return { prompt: labels.length ? `${labels.join('\n')}\n\n${prompt}` : prompt, references: refs.images.map(ref => ref.url) }
 }
 /** 视频制作使用片段当前分镜图或页面所选参考素材。 */
 export function videoImageReferences(clip, references, mode, shots = []) {

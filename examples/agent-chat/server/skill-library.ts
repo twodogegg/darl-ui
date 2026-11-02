@@ -2,8 +2,8 @@ import { lstat, readFile, readdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import type { AgentSkill } from '../../../src/components/agent-sidebar/types';
-import { importSkillPackage, nextSkillVersion, skillPathIgnored, validateSkill } from '../../../src/components/agent-sidebar/skill-package';
+import type { AgentSkill } from '../../../src/components/skill-manager/types';
+import { importSkillPackage, nextSkillVersion, skillPathIgnored, validateSkill } from '../../../src/components/skill-manager/skill-package';
 import { LocalStorage, type ClientState } from './storage';
 
 /** Read a single package without following links or executing package code. */

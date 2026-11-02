@@ -105,8 +105,8 @@ export function studioPositions(before: Array<{ id: string; _position?: number }
   return positions;
 }
 export const studioDefaults: Partial<Record<StudioResource, Record<string, unknown>>> = {
-  projects: { cover: '', generationMode: '故事版', adaptation: '抽核', planned: null, durationMin: 2, durationMax: 5, duration: 120, requirements: '', outline: { core: '', story: '', keep: '', remove: '', merge: '', risks: '', episodes: '', roles: [], scenes: [], props: [] }, sourceScript: '', creationMode: 'script' },
-  episodes: { number: 1, title: '新剧集', cover: '', script: '', scenes: [], duration: 120, stage: 1 },
+  projects: { cover: '', generationMode: '故事版', adaptation: '抽核', planned: null, durationMin: 2, durationMax: 5, duration: null, requirements: '', outline: { core: '', story: '', keep: '', remove: '', merge: '', risks: '', episodes: '', roles: [], scenes: [], props: [] }, sourceScript: '', creationMode: 'script' },
+  episodes: { number: 1, title: '新剧集', cover: '', script: '', scenes: [], duration: null, stage: 1 },
   dialogues: { projectId: '', episodeId: '', idCode: '', sourceText: '', sourceSpeaker: '', sourceStart: 0, sourceEnd: 0, targetText: '', targetSpeaker: '', tone: '', timingStatus: 'estimate_not_measured', estimatedSeconds: 0, plannedSeconds: 0, note: '' },
   assets: { episodeIds: [], name: '', type: '角色', role: '', alias: '', description: '', appearance: '', costume: '', voiceDescription: '', image: '', prompt: '', variants: [], history: [], voiceId: '', references: [], dependencies: [], imageDependencies: {} },
   shots: { description: '', scale: '中景', camera: '固定', transition: '硬切', dialogue: [], effects: '', duration: 3, assetIds: [], image: '', imageHistory: [], storyboardPrompt: '', clipId: '' },
@@ -195,6 +195,8 @@ export function studioValueSchema(resource: StudioResource): Record<string, unkn
     if (resource === 'assets' && key === 'prompt') schema.description = '生图提示词。场景、道具主形象生图时必填；衍生形态另存 variants[].prompt。角色填写后优先用于生成，留空则按 appearance 与当前 costume/形态 description 生成，均不回退叙事描述或声音。最终提示词由生图模板提示词与项目全局风格在生成时自动追加。';
     if (resource === 'episodes' && key === 'scenes') schema = { type: 'array', items: sceneSchema, description: '剧本项目场次的 content 保存完整动作与对白；视频转绘按连续地点和时间划分场次，assetId 与 variantId 关联同项目场景资产和状态，镜头以 sceneId 关联，保留已有场次 ID。' };
     if (resource === 'episodes' && key === 'script') schema.description = '整集完整文学剧本。仅修改 script 不会更新已有 scenes 的页面正文；须同时更新对应 scenes.content。';
+    if (resource === 'projects' && key === 'duration') schema = { type: ['number', 'null'], description: '项目级精确时长（秒），null 表示未设置。durationMin 和 durationMax 是单集时长范围（分钟）；不能把区间下限或 null 当作确定的目标秒数。' };
+    if (resource === 'episodes' && key === 'duration') schema = { type: ['number', 'null'], description: '本集目标时长（秒）。省略或设为 null 表示未设置；剧本创作参考项目 durationMin、durationMax（分钟），有明确目标时可填写秒数。视频转绘的目标时长不等同于原片时长。' };
     return [key, schema];
   })) };
 }
@@ -217,7 +219,7 @@ export function validateStudioValues(resource: StudioResource, values: unknown):
     if (!allowed.has(key)) throw new Error(`资源 ${resource} 不允许修改字段 ${key}`);
     if (idFields.has(key) && typeof value !== 'string') throw new Error(`${key} 必须是记录编号`);
     if (arrayFields.has(key) && !Array.isArray(value)) throw new Error(`${key} 必须是数组`);
-    if (numericFields.has(key) && !(key === 'planned' && value === null) && (typeof value !== 'number' || !Number.isFinite(value))) throw new Error(`${key} 必须是有限数字`);
+    if (numericFields.has(key) && !((key === 'planned' || (['projects', 'episodes'].includes(resource) && key === 'duration')) && value === null) && (typeof value !== 'number' || !Number.isFinite(value))) throw new Error(`${key} 必须是有限数字`);
     if (objectFields.has(key) && (!value || typeof value !== 'object' || Array.isArray(value))) throw new Error(`${key} 必须是对象`);
     if (!idFields.has(key) && !arrayFields.has(key) && !numericFields.has(key) && !objectFields.has(key) && key !== 'favorite' && typeof value !== 'string') throw new Error(`${key} 必须是文本`);
     if (key === 'favorite' && typeof value !== 'boolean') throw new Error('收藏状态无效');

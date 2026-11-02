@@ -11,9 +11,9 @@ const meta: { key: PromptKey; label: string; eyebrow: string; description: strin
 ];
 
 /** 提示词设置：查看/编辑宿主提供的提示词，支持恢复默认。 */
-export function PromptSettingsCard({ prompts, onSave, onReset }: PromptSettingsCardProps) {
-  const [active, setActive] = useState<PromptKey>('system');
-  const [draft, setDraft] = useState(prompts.system);
+export function PromptSettingsCard({ prompts, onSave, onReset, visibleKeys }: PromptSettingsCardProps) {
+  const [active, setActive] = useState<PromptKey>(visibleKeys?.[0] || 'system');
+  const [draft, setDraft] = useState(prompts[visibleKeys?.[0] || 'system'] || '');
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -42,12 +42,12 @@ export function PromptSettingsCard({ prompts, onSave, onReset }: PromptSettingsC
     setNotice('已载入默认内容，点击保存后生效。');
   };
 
-  const rows = useMemo(() => meta.filter((item) => prompts[item.key] !== undefined).map((item) => {
+  const rows = useMemo(() => meta.filter((item) => prompts[item.key] !== undefined && (!visibleKeys?.length || visibleKeys.includes(item.key))).map((item) => {
     const fallback = prompts.defaults?.[item.key];
     // 与默认内容比较时忽略首尾空白，避免换行差异误判为“已修改”。
     const changed = typeof fallback === 'string' ? prompts[item.key]?.trim() !== fallback.trim() : false;
     return { ...item, changed };
-  }), [prompts]);
+  }), [prompts, visibleKeys]);
 
   return <section className="darl-prompt-settings-card" aria-label="提示词设置">
     <header className="darl-settings-card-header"><div><span className="darl-settings-eyebrow">PROMPTS</span><h2>提示词设置</h2><p>管理当前网站使用的提示词，保存后下次请求生效。</p></div></header>

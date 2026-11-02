@@ -1,0 +1,1 @@
+将原始小说改编报告整理为页面字段，不重新创作。只输出 JSON：{"scenes":[{"sceneId":"已有场次 ID，新增场次为 null","location":"地点","setting":"内或外或内外","time":"时间","suggestedDuration":null,"content":"完整场次正文"}],"openItems":["待确认事项"]}。场次按剧情顺序排列；每个已有场次 ID 恰好出现一次，新增场次的 sceneId 为 null；保留全部动作和对白，不另设 dialogue 字段。地点和时间不可为空；suggestedDuration 为正整数秒或 null。没有现成场次时按报告生成场次结构，不虚构不存在的原始正文或 ID。

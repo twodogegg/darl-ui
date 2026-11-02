@@ -16,12 +16,12 @@ import { studioApi, useStore } from '../store'
 import { steps, makeOutline } from '../data'
 import { StyleSelector } from '@darl/ui'
 import { createWorkspaceStyle, styleOptionsFromCatalog } from '../../workspace-styles'
-import { FileButton, Processing, DirectorSelect, TextModelSelect } from '../components/ui'
+import { FileButton, Processing } from '../components/ui'
 import { parseSource } from '../files'
 import { CreateRedraw } from '../components/VideoRedraw'
 
 export default function Home() {
-  const { data, update, notify, reload, requestAgent, cancelAgent } = useStore()
+  const { data, update, notify, reload, cancelAgent } = useStore()
   const navigate = useNavigate()
   const [requirements, setRequirements] = useState('')
   const [projectName, setProjectName] = useState('')
@@ -89,13 +89,19 @@ export default function Home() {
       projectId = String(result.data.project_id)
       if (images[0]?.fileId) await studioApi(`workspace/projects/${projectId}/covers/files/${images[0].fileId}/select`, {})
       await reload()
-      await update(draft => {
-        Object.assign(draft.projects.find(item => item.id === projectId), { sourceScript: text, requirements: requirements.trim(), generationMode, adaptation, planned: Number(planned), durationMin: Number(durationMin), durationMax: Number(durationMax), duration: Number(durationMin)*60, outline: makeOutline({ summary: text.slice(0,2000) }) })
+      const saved = await update(draft => {
+        Object.assign(draft.projects.find(item => item.id === projectId), { sourceScript: text, requirements: requirements.trim(), generationMode, adaptation, planned: Number(planned), durationMin: Number(durationMin), durationMax: Number(durationMax), outline: makeOutline({}) })
       })
+      if (!saved) throw new Error('原始素材保存失败')
+      const latest = await reload()
+      const project = latest.projects.find(item => item.id === projectId)
+      await studioApi('video-redraw/outline', { projectId, version: project._version, requestId: crypto.randomUUID(), autoApply: true })
       navigate(`/outline?projectId=${projectId}`)
-      await requestAgent({ action: 'outline', projectId, draftOnly: true })
-      notify('已填入项目大纲提示词，请确认后发送')
-    } catch (reason) { notify(reason.message + (projectId ? '。项目已创建，可在我的项目中继续。' : '')) }
+      notify('项目已创建，正在分析并生成大纲')
+    } catch (reason) {
+      if (projectId) navigate(`/outline?projectId=${projectId}`)
+      notify(reason.message + (projectId ? '。项目已创建，可在大纲页重试。' : ''))
+    }
     finally { if (alive.current) setBusy(false) }
   }
 
@@ -215,7 +221,7 @@ export default function Home() {
               <IconSettings size={16} /> 项目设置
             </p>
             <p className="br-setting-hint">
-              填写项目名称，按需设置视觉风格、创作导演、生成模式、改编幅度、画幅、集数和时长。
+              填写项目名称，按需设置视觉风格、生成模式、改编幅度、画幅、集数和时长。
             </p>
             <div className="br-settings">
               <div className="br-field br-field--wide">
@@ -246,8 +252,6 @@ export default function Home() {
                   <option value="借壳">借壳</option>
                 </select>
               </div>
-              <div className="br-field"><DirectorSelect label="剧本导演" /></div>
-              <div className="br-field"><TextModelSelect label="剧本模型" /></div>
               <div className="br-field"><label>视觉风格 *</label><button type="button" className="btn" onClick={() => setStyleOpen(true)}>{styles.find(item => item.id === styleId)?.name || '选择视觉风格'}</button></div>
               <div className="br-field">
                 <label htmlFor="home-aspect">视频画幅</label>

@@ -11,6 +11,19 @@ import { failure } from './errors';
 import { sendRevalidatedJson } from './http-cache';
 
 export class StudioConflict extends Error {}
+/** Who made a batch. Labels are rendered by the client; the server only stores stable codes. */
+export const CHANGE_SOURCES = ['page', 'agent', 'workflow', 'media', 'restore', 'system'] as const;
+export type ChangeSource = typeof CHANGE_SOURCES[number];
+export type ChangeOrigin = { source: ChangeSource; kind?: string; jobId?: string; agentId?: string; agentName?: string; restoreOf?: number };
+type ChangeLabel = { name?: string; episode?: number; index?: number };
+type ChangeEntry = { resource: StudioResource; id: string; op: 'create' | 'update' | 'delete'; label: ChangeLabel; before: Record<string, unknown> | null; after: Record<string, unknown> | null; position?: number };
+type ChangeRow = { id: number; batch_id: string; project_id: string; source: ChangeSource; meta: string; summary: string; entries: string; restored: string; created_at: string };
+const CHANGE_LOG_LIMIT = 1000;
+const globalResources = new Set<StudioResource>(['folders', 'library', 'audio', 'voices', 'prompts']);
+/** Key order differs between client edits and stored JSON; compare values, not serialisation order. */
+const canonical = (value: unknown) => JSON.stringify(value ?? null, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
+const same = (a: unknown, b: unknown) => canonical(a) === canonical(b);
+const recordValues = (record: StudioRecord) => { const { id: _id, _version, _position, ...values } = record; return values; };
 const recordId = (value: unknown) => {
   if (typeof value !== 'string' || !/^[\w:.-]{1,160}$/.test(value)) throw new Error('记录编号无效');
   return value;
@@ -24,13 +37,73 @@ function projectForMode(item: StudioRecord): StudioRecord {
   return project;
 }
 
+function changeProject(resource: StudioResource, record: StudioRecord, data: StudioData) {
+  if (globalResources.has(resource)) return '';
+  if (resource === 'projects') return String(record.id);
+  if (resource === 'shots' || resource === 'clips') return String(data.episodes.find(item => item.id === record.episodeId)?.projectId ?? '');
+  return String(record.projectId ?? '');
+}
+/** Structured label so the log stays readable after the record is renamed or removed. */
+function changeLabel(resource: StudioResource, record: StudioRecord, data: StudioData): ChangeLabel {
+  const episode = Number(data.episodes.find(item => item.id === record.episodeId)?.number) || undefined;
+  if (resource === 'episodes') return { episode: Number(record.number) || undefined, name: String(record.title || '') };
+  if (resource === 'shots' || resource === 'clips') {
+    const siblings = data[resource].filter(item => item.episodeId === record.episodeId).sort((a, b) => Number(a._position ?? 0) - Number(b._position ?? 0));
+    return { episode, index: siblings.findIndex(item => item.id === record.id) + 1, ...(resource === 'clips' && record.title ? { name: String(record.title) } : {}) };
+  }
+  if (resource === 'dialogues') return { episode, name: String(record.idCode || '') };
+  return { name: String(record.name || record.title || record.id) };
+}
+const list = (value: unknown) => Array.isArray(value) ? value as Array<Record<string, unknown>> : [];
+/** Records that would break reference validation if the target were deleted. */
+function references(resource: StudioResource, record: Record<string, unknown>, target: StudioResource, id: string) {
+  if (target === 'assets') return ((resource === 'shots' || resource === 'clips') && (record.assetIds as unknown[] || []).includes(id))
+    || (resource === 'shots' && list(record.dialogue).some(line => line?.assetId === id))
+    || (resource === 'episodes' && list(record.scenes).some(scene => scene?.assetId === id))
+    || (resource === 'assets' && list(record.dependencies).some(item => item?.assetId === id));
+  if (target === 'episodes') return record.episodeId === id || (resource === 'assets' && (record.episodeIds as unknown[] || []).includes(id));
+  return false;
+}
+type RestorePlan = { status: 'restorable' | 'partial' | 'conflict' | 'unchanged' | 'unsupported'; reason?: string; fields?: Record<string, 'restorable' | 'conflict' | 'unchanged' | 'unsupported'>; change?: StudioChange };
+/** Field-level plan: only values that still equal what the batch wrote are reverted, later edits are kept. */
+function planRestore(entry: ChangeEntry, state: StudioData): RestorePlan {
+  const current = state[entry.resource].find(item => item.id === entry.id);
+  const allowed = new Set(studioFields[entry.resource].split(' '));
+  if (entry.resource === 'projects' && entry.op !== 'update') return { status: 'unsupported', reason: 'project-lifecycle' };
+  if (entry.op === 'create') {
+    if (!current) return { status: 'unchanged', reason: 'missing' };
+    if (!same(recordValues(current), entry.after)) return { status: 'conflict', reason: 'changed-later' };
+    return { status: 'restorable', change: { resource: entry.resource, id: entry.id, op: 'delete', version: current._version } };
+  }
+  if (entry.op === 'delete') {
+    if (current) return { status: 'conflict', reason: 'exists' };
+    const values = Object.fromEntries(Object.entries(entry.before || {}).filter(([field]) => allowed.has(field)));
+    return { status: 'restorable', change: { resource: entry.resource, id: entry.id, op: 'create', values, ...(entry.position !== undefined ? { position: entry.position } : {}) } };
+  }
+  if (!current) return { status: 'conflict', reason: 'missing' };
+  const fields: NonNullable<RestorePlan['fields']> = {}, values: Record<string, unknown> = {};
+  for (const [field, after] of Object.entries(entry.after || {})) {
+    const before = Object.hasOwn(entry.before || {}, field) ? entry.before![field] : studioDefaults[entry.resource]?.[field];
+    if (before === undefined || !allowed.has(field)) fields[field] = 'unsupported';
+    else if (same(current[field], before)) fields[field] = 'unchanged';
+    else if (same(current[field], after)) { fields[field] = 'restorable'; values[field] = structuredClone(before); }
+    else fields[field] = 'conflict';
+  }
+  const states = Object.values(fields);
+  if (!Object.keys(values).length) return { status: states.includes('conflict') ? 'conflict' : states.every(item => item === 'unchanged') ? 'unchanged' : 'unsupported', reason: states.includes('conflict') ? 'changed-later' : undefined, fields };
+  return { status: states.every(item => item === 'restorable' || item === 'unchanged') ? 'restorable' : 'partial', fields, change: { resource: entry.resource, id: entry.id, op: 'update', version: current._version, values } };
+}
+
 /** Shared business service for UI and Agent. One batch is one SQLite transaction. */
 export class StudioStore {
   private get db() { return this.projects.db; }
   constructor(readonly projects: ProjectStore) {
     this.db.exec(`CREATE TABLE IF NOT EXISTS studio_records (resource TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, position INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(resource,id));
       CREATE TABLE IF NOT EXISTS studio_versions (resource TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,PRIMARY KEY(resource,id));
-      CREATE TABLE IF NOT EXISTS studio_batches (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, result TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
+      CREATE TABLE IF NOT EXISTS studio_batches (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, result TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS studio_change_log (id INTEGER PRIMARY KEY, batch_id TEXT NOT NULL, project_id TEXT NOT NULL, source TEXT NOT NULL, meta TEXT NOT NULL, summary TEXT NOT NULL, entries TEXT NOT NULL, restored TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS studio_change_log_project ON studio_change_log(project_id, id);
+      CREATE INDEX IF NOT EXISTS studio_change_log_batch ON studio_change_log(batch_id);`);
     // Remove obsolete rollback snapshots while preserving request fingerprints/results for safe retries.
     const batchColumns = this.db.prepare('PRAGMA table_info(studio_batches)').all() as Array<{ name: string }>;
     for (const column of ['inverse', 'entry_source']) if (batchColumns.some(item => item.name === column)) this.db.exec(`ALTER TABLE studio_batches DROP COLUMN ${column}`);
@@ -93,7 +166,7 @@ export class StudioStore {
     const page = items.slice(offset, offset + limit).map(item => input.fields ? Object.fromEntries(['id', '_version', ...input.fields as string[]].filter(key => Object.hasOwn(item, key)).map(key => [key, item[key]])) : resource === 'clips' ? Object.fromEntries(Object.entries(item).filter(([key]) => key !== 'description')) : item);
     return { resource, items: page, total: items.length, nextCursor: offset + limit < items.length ? String(offset + limit) : null };
   }
-  apply(requestId: string, changes: StudioChange[]) {
+  apply(requestId: string, changes: StudioChange[], origin: ChangeOrigin = { source: 'system' }, afterApply?: (result: { requestId: string; changed: Array<{ resource: StudioResource; id: string; version: number; op: string }> }) => void) {
     recordId(requestId);
     if (!Array.isArray(changes) || !changes.length || changes.length > 500) throw new Error('每批需要 1–500 项修改');
     const fingerprint = createHash('sha256').update(JSON.stringify(changes)).digest('hex');
@@ -175,7 +248,7 @@ export class StudioStore {
         if (!item || typeof item[field] !== 'string') continue;
         const episode = data.episodes.find(record => record.id === item.episodeId);
         const assets = data.assets.filter(record => record.projectId === episode?.projectId);
-        const candidates = assetMentionCandidates(assets);
+        const candidates = assetMentionCandidates(assets, field === 'storyboardPrompt' && change.resource === 'clips' ? { references: Array.isArray(item.references) ? item.references : [], stableReferences: true } : []);
         const error = validateAssetMentions(item[field], candidates);
         if (error) {
           const names = assets.map(asset => String(asset.name)).join('、');
@@ -183,6 +256,7 @@ export class StudioStore {
         }
         }
       }
+      const entries: Array<ChangeEntry & { projectId: string }> = [];
       for (const resource of Object.keys(data) as StudioResource[]) {
         const old = new Map(original[resource].map(item => [item.id, item]));
         for (const before of original[resource]) if (!data[resource].some(item => item.id === before.id)) {
@@ -190,10 +264,17 @@ export class StudioStore {
           if (resource === 'projects') this.projects.archive(Number(before.id));
           this.db.prepare('INSERT INTO studio_versions(resource,id,version) VALUES(?,?,?) ON CONFLICT(resource,id) DO UPDATE SET version=excluded.version').run(resource,before.id,before._version+1);
           changed.push({ resource, id: before.id, version: before._version + 1, op: 'delete' });
+          if (resource !== 'history') entries.push({ resource, id: before.id, op: 'delete', label: changeLabel(resource, before, original), before: recordValues(before), after: null, position: before._position, projectId: changeProject(resource, before, original) });
         }
         for (const after of data[resource]) {
           const before = old.get(after.id);
           if (before && JSON.stringify(before) === JSON.stringify(after)) continue;
+          if (resource !== 'history') {
+            const fields = before ? Object.keys(recordValues(after)).filter(field => !same(before[field], after[field])) : [];
+            // A pure reorder only moves _position; the log keeps content changes.
+            if (!before) entries.push({ resource, id: after.id, op: 'create', label: changeLabel(resource, after, data), before: null, after: recordValues(after), position: after._position, projectId: changeProject(resource, after, data) });
+            else if (fields.length) entries.push({ resource, id: after.id, op: 'update', label: changeLabel(resource, after, data), before: Object.fromEntries(fields.filter(field => Object.hasOwn(before, field)).map(field => [field, before[field]])), after: Object.fromEntries(fields.map(field => [field, after[field]])), projectId: changeProject(resource, after, data) });
+          }
           const sequence = this.db.prepare('SELECT version FROM studio_versions WHERE resource=? AND id=?').get(resource,after.id) as { version: number } | undefined;
           after._version = Math.max(before?._version || 0, sequence?.version || 0) + 1;
           if (resource === 'projects') {
@@ -210,9 +291,107 @@ export class StudioStore {
       }
       const result = { requestId, changed };
       this.db.prepare('INSERT INTO studio_batches(id,fingerprint,result) VALUES(?,?,?)').run(requestId, fingerprint, JSON.stringify(result));
+      this.logChanges(requestId, origin, entries);
+      afterApply?.(result);
       this.db.exec('COMMIT');
       return result;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  /** One row per batch and project; history messages are activity notes, not content. */
+  private logChanges(batchId: string, origin: ChangeOrigin, entries: Array<ChangeEntry & { projectId: string }>) {
+    if (!entries.length) return;
+    if (!origin || !CHANGE_SOURCES.includes(origin.source)) throw new Error('变更来源无效');
+    const { source, ...meta } = origin, groups = new Map<string, ChangeEntry[]>();
+    for (const { projectId, ...entry } of entries) { const items = groups.get(projectId) || []; items.push(entry); groups.set(projectId, items); }
+    const createdAt = new Date().toISOString();
+    const insert = this.db.prepare('INSERT INTO studio_change_log(batch_id,project_id,source,meta,summary,entries,created_at) VALUES(?,?,?,?,?,?,?)');
+    const prune = this.db.prepare('DELETE FROM studio_change_log WHERE project_id=? AND id <= (SELECT id FROM studio_change_log WHERE project_id=? ORDER BY id DESC LIMIT 1 OFFSET ?)');
+    for (const [projectId, items] of groups) {
+      const resources: Record<string, number> = {};
+      for (const item of items) resources[item.resource] = (resources[item.resource] || 0) + 1;
+      insert.run(batchId, projectId, source, JSON.stringify(meta), JSON.stringify({ count: items.length, resources, labels: items.slice(0, 5).map(({ resource, op, label }) => ({ resource, op, label })) }), JSON.stringify(items), createdAt);
+      prune.run(projectId, projectId, CHANGE_LOG_LIMIT);
+    }
+  }
+  private changeRow(id: unknown, projectId: string) {
+    const rowId = Number(id);
+    if (!Number.isSafeInteger(rowId) || rowId < 1) throw new Error('变更记录编号无效');
+    const row = this.db.prepare('SELECT * FROM studio_change_log WHERE id=? AND project_id=?').get(rowId, projectId) as ChangeRow | undefined;
+    if (!row) throw new Error('变更记录不存在或不属于当前项目');
+    return row;
+  }
+  private changeSummary(row: Omit<ChangeRow, 'entries'>) {
+    const restored = JSON.parse(row.restored) as Record<string, string>;
+    return { id: row.id, batchId: row.batch_id, source: row.source, ...JSON.parse(row.meta) as Omit<ChangeOrigin, 'source'>, createdAt: row.created_at, ...JSON.parse(row.summary) as { count: number; resources: Record<string, number>; labels: unknown[] }, restoredCount: Object.keys(restored).length };
+  }
+  /** List batches newest first, or pass id for entries with their current restore status. */
+  changeLog(input: Record<string, unknown>) {
+    if (Object.keys(input).some(key => !['projectId', 'sources', 'id', 'cursor', 'limit'].includes(key))) throw new Error('变更日志仅支持 projectId、sources、id、cursor 和 limit');
+    const projectId = input.projectId === undefined || input.projectId === null || input.projectId === '' ? '' : recordId(input.projectId);
+    if (input.id !== undefined) {
+      const row = this.changeRow(input.id, projectId), state = this.snapshot();
+      const restored = JSON.parse(row.restored) as Record<string, string>;
+      return { ...this.changeSummary(row), entries: (JSON.parse(row.entries) as ChangeEntry[]).map((entry, index) => {
+        const { change: _change, ...plan } = planRestore(entry, state);
+        return { index, ...entry, ...plan, ...(restored[index] ? { status: 'restored', restoredAt: restored[index] } : {}) };
+      }) };
+    }
+    const sources = input.sources === undefined ? [...CHANGE_SOURCES] : input.sources;
+    if (!Array.isArray(sources) || !sources.length || sources.some(item => !CHANGE_SOURCES.includes(item))) throw new Error(`变更来源筛选无效，可选：${CHANGE_SOURCES.join(', ')}`);
+    const cursor = input.cursor === undefined || input.cursor === null || input.cursor === '' ? 0 : Number(input.cursor), limit = input.limit === undefined ? 30 : Number(input.limit);
+    if (!Number.isSafeInteger(cursor) || cursor < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('分页参数无效');
+    const rows = this.db.prepare(`SELECT id,batch_id,project_id,source,meta,summary,restored,created_at FROM studio_change_log WHERE project_id=? AND source IN (${sources.map(() => '?').join(',')})${cursor ? ' AND id<?' : ''} ORDER BY id DESC LIMIT ?`).all(projectId, ...sources as string[], ...(cursor ? [cursor] : []), limit + 1) as Array<Omit<ChangeRow, 'entries'>>;
+    return { items: rows.slice(0, limit).map(row => this.changeSummary(row)), nextCursor: rows.length > limit ? String(rows[limit - 1].id) : null };
+  }
+  /** Revert a logged batch, or chosen entries, in one atomic batch that is itself logged. */
+  restoreChanges(input: Record<string, unknown>, origin: ChangeOrigin) {
+    if (Object.keys(input).some(key => !['requestId', 'projectId', 'id', 'entries'].includes(key))) throw new Error('还原仅支持 requestId、projectId、id 和 entries');
+    const requestId = String(input.requestId || '');
+    if (!/^[\w-]{8,120}$/.test(requestId)) throw new Error('还原须提供唯一 requestId，原样重试沿用');
+    const batchId = `restore-${requestId}`;
+    const previous = this.db.prepare('SELECT result FROM studio_batches WHERE id=?').get(batchId) as { result: string } | undefined;
+    if (previous) return { requestId, restored: (JSON.parse(previous.result) as { changed: unknown[] }).changed.length, skipped: [], repeated: true };
+    const projectId = input.projectId === undefined || input.projectId === null || input.projectId === '' ? '' : recordId(input.projectId);
+    const row = this.changeRow(input.id, projectId);
+    const entries = JSON.parse(row.entries) as ChangeEntry[], restored = JSON.parse(row.restored) as Record<string, string>;
+    const selected = input.entries === undefined ? entries.map((_, index) => index) : input.entries;
+    if (!Array.isArray(selected) || !selected.length || new Set(selected).size !== selected.length || selected.some(index => !Number.isInteger(index) || index < 0 || index >= entries.length)) throw new Error('还原条目无效');
+    const state = this.snapshot(), planned: Array<{ index: number; change: StudioChange }> = [];
+    const skipped: Array<{ index: number; resource: StudioResource; label: ChangeLabel; reason: string; fields?: string[] }> = [];
+    for (const index of selected as number[]) {
+      const entry = entries[index], skip = (reason: string, fields?: string[]) => skipped.push({ index, resource: entry.resource, label: entry.label, reason, ...(fields?.length ? { fields } : {}) });
+      if (restored[index]) { skip('already-restored'); continue; }
+      const plan = planRestore(entry, state);
+      if (!plan.change) { skip(plan.reason || plan.status); continue; }
+      planned.push({ index, change: plan.change });
+      if (plan.status === 'partial') skip('partial', Object.entries(plan.fields || {}).filter(([, status]) => status === 'conflict' || status === 'unsupported').map(([field]) => field));
+    }
+    // Deleting an asset or episode that later work still references would fail validation; keep it and say why.
+    const deleting = new Set(planned.filter(item => item.change.op === 'delete').map(item => `${item.change.resource}:${item.change.id}`));
+    const pending = new Map(planned.filter(item => item.change.op === 'update').map(item => [`${item.change.resource}:${item.change.id}`, item.change.values!]));
+    for (const item of [...planned]) {
+      const { resource, id, op } = item.change;
+      if (op !== 'delete' || !['assets', 'episodes'].includes(resource)) continue;
+      const used = (['episodes', 'shots', 'clips', 'assets', 'films', 'dialogues'] as StudioResource[]).some(owner => state[owner].some(record => !deleting.has(`${owner}:${record.id}`) && references(owner, { ...record, ...pending.get(`${owner}:${record.id}`) }, resource, id)));
+      if (!used) continue;
+      planned.splice(planned.indexOf(item), 1);
+      skipped.push({ index: item.index, resource, label: entries[item.index].label, reason: 'in-use' });
+    }
+    if (!planned.length) return { requestId, restored: 0, skipped };
+    const meta = JSON.parse(row.meta) as Omit<ChangeOrigin, 'source'>;
+    // 撤销一次还原时，被那次还原恢复的原批次条目重新变为未还原，之后仍可从原批次还原。
+    const original = row.source === 'restore' && meta.restoreOf ? this.db.prepare('SELECT id,entries,restored FROM studio_change_log WHERE id=?').get(meta.restoreOf) as { id: number; entries: string; restored: string } | undefined : undefined;
+    this.apply(batchId, planned.map(item => item.change), { source: 'restore', kind: meta.kind || row.source, restoreOf: row.id, ...(origin.source === 'agent' ? { agentId: origin.agentId, agentName: origin.agentName } : {}) }, () => {
+      const at = new Date().toISOString();
+      for (const item of planned) restored[item.index] = at;
+      this.db.prepare('UPDATE studio_change_log SET restored=? WHERE id=?').run(JSON.stringify(restored), row.id);
+      if (!original) return;
+      const records = new Set(planned.map(item => `${entries[item.index].resource}:${entries[item.index].id}`));
+      const originalEntries = JSON.parse(original.entries) as ChangeEntry[], marks = JSON.parse(original.restored) as Record<string, string>;
+      for (const index of Object.keys(marks)) if (records.has(`${originalEntries[Number(index)].resource}:${originalEntries[Number(index)].id}`)) delete marks[index];
+      this.db.prepare('UPDATE studio_change_log SET restored=? WHERE id=?').run(JSON.stringify(marks), original.id);
+    });
+    return { requestId, restored: planned.length, skipped };
   }
   mediaTarget(value: unknown, type: string): Record<string, unknown> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('生成目标无效');
@@ -289,7 +468,7 @@ export class StudioStore {
       values[history] = [...urls, ...(item[history] as string[] || [])];
       if (current) values[target.field === 'videos' ? 'currentVideo' : String(target.field)] = urls[0];
     }
-    this.apply(requestId, [{ resource, id: item.id, op: 'update', version: item._version, values }]);
+    this.apply(requestId, [{ resource, id: item.id, op: 'update', version: item._version, values }], { source: 'media', kind: job.type, jobId: job.id });
   }
   private validate(data: StudioData) {
     validateAssetDependencies(data.assets);
@@ -349,7 +528,8 @@ export class StudioStore {
       if (resource === 'prompts' && !['default','replace'].includes(String(item.mode))) throw new Error('提示词模式无效');
       if (resource === 'episodes') {
         if (item.sourceVideo !== undefined) { if (required('projects', item.projectId, path).creationMode !== 'video-redraw') throw new Error('仅转绘剧集可设置原片'); validateVideo(item.sourceVideo as Record<string, unknown>); }
-        if (!Number.isInteger(item.number) || Number(item.number) < 1 || !finitePositive(item.duration)) throw new Error('剧集编号或目标时长无效');
+        required('projects', item.projectId, path);
+        if (!Number.isInteger(item.number) || Number(item.number) < 1 || !(finitePositive(item.duration) || item.duration === null)) throw new Error('剧集编号或目标时长无效');
         if (!Array.isArray(item.scenes)) throw new Error('场次必须是数组');
         const ids = new Set<string>();
         for (const scene of item.scenes as Array<Record<string, unknown>>) {
@@ -452,8 +632,18 @@ const agentResources = Object.keys(studioFields);
 const agentChangeSchema = { ...studioChangeSchema, properties: { ...studioChangeSchema.properties, resource: { type: 'string', enum: agentResources } } };
 export const STUDIO_TOOLS = [
   { name: 'builtin_read_studio', title: '查询短剧创作数据', description: '读取项目、剧集、场次、资产、镜头 shots 和视频片段。先用 describe 获取字段与规则；shots 保存原片分镜，clips.prompt 为视频描述。结果含版本与分页信息。', risk: 'read' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { resource: { type: 'string', enum: [...agentResources, 'styles'] }, describe: { type: 'boolean' }, projectId: { type: 'string' }, episodeId: { type: 'string' }, sceneId: { type: 'string' }, ids: { type: 'array', items: { type: 'string' }, maxItems: 500 }, fields: { type: 'array', items: { type: 'string' } }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500 } }, required: ['resource'], additionalProperties: false } },
-  { name: 'builtin_edit_studio', title: '批量修改短剧内容', description: '按查询结果与字段 schema 原子编辑短剧内容；更新和删除传最新版本，requestId 用于安全重试。正式分镜维护 shots 的原片来源区间、独立目标时长、景别、运镜、资产关联、画面与对白；视频片段维护 clips.prompt 和 duration。', risk: 'write' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { requestId: { type: 'string' }, changes: { type: 'array', minItems: 1, maxItems: 500, items: agentChangeSchema } }, required: ['requestId', 'changes'], additionalProperties: false } },
+  { name: 'builtin_edit_studio', title: '批量修改短剧内容', description: '按查询结果与字段 schema 原子编辑短剧内容；更新和删除传最新版本，requestId 用于安全重试。正式分镜维护 shots 的原片来源区间、独立目标时长、景别、运镜、资产关联、画面与对白；视频片段维护 clips.prompt 和 duration。每批修改会写入全局变更日志，可用变更日志工具查询和还原。', risk: 'write' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { requestId: { type: 'string' }, changes: { type: 'array', minItems: 1, maxItems: 500, items: agentChangeSchema } }, required: ['requestId', 'changes'], additionalProperties: false } },
+  { name: 'builtin_read_studio_changes', title: '查询变更日志', description: '读取全局变更日志。传 projectId 按批次倒序列出该项目的修改，省略则读取提示词、素材库等全局资源；sources 按来源筛选：page 页面编辑、agent 对话 Agent、workflow 工作流节点、media 媒体结果写回、restore 还原、system 系统。列表项含 id、source、kind（工作流节点或操作类型）、jobId、agentName、count、resources、labels 和 restoredCount，用 nextCursor 翻页。传 id 读取该批次 entries：每项含 index、resource、记录 id、op、label、before、after 及当前 status（restorable 可还原、partial 部分字段之后被改、conflict 之后被修改、unchanged 已是修改前内容、restored 已还原、unsupported 不支持），fields 给出逐字段状态。', risk: 'read' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { projectId: { type: 'string' }, sources: { type: 'array', items: { type: 'string', enum: [...CHANGE_SOURCES] }, minItems: 1 }, id: { type: 'integer', minimum: 1 }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, additionalProperties: false } },
+  { name: 'builtin_restore_studio_changes', title: '还原变更', description: '把变更日志中的一个批次还原为修改前内容；传 entries（index 数组）只还原指定条目。逐字段核对：仅还原仍等于该批次写入值的字段，之后被再次修改的字段、已存在或仍被引用的记录会跳过并在 skipped 中说明原因（changed-later、exists、in-use、missing、partial、already-restored、project-lifecycle）。可还原内容在一个原子批次内写入，并作为 restore 记录进入日志；还原一条 restore 记录即撤销那次还原，原批次中对应条目恢复为未还原。须传 projectId（全局资源省略）、日志 id 和唯一 requestId，原样重试沿用。', risk: 'write' as const, appId: 'builtin:studio', appName: '短剧工作台', approval: 'workspace' as const, parameters: { type: 'object', properties: { requestId: { type: 'string' }, projectId: { type: 'string' }, id: { type: 'integer', minimum: 1 }, entries: { type: 'array', items: { type: 'integer', minimum: 0 }, minItems: 1, maxItems: 500 } }, required: ['requestId', 'id'], additionalProperties: false } },
 ] as const;
+
+export function executeStudioTool(store: StudioStore, name: string, args: Record<string, unknown>, origin: ChangeOrigin) {
+  if (name === 'builtin_read_studio') return store.query(args);
+  if (name === 'builtin_edit_studio') return store.apply(String(args.requestId), args.changes as StudioChange[], origin);
+  if (name === 'builtin_read_studio_changes') return store.changeLog(args);
+  if (name === 'builtin_restore_studio_changes') return store.restoreChanges(args, origin);
+  throw new Error(`工作台工具不存在：${name}`);
+}
 
 export async function handleStudioRequest(req: IncomingMessage, res: ServerResponse, store: StudioStore): Promise<boolean> {
   const path = new URL(req.url || '/', 'http://localhost').pathname;
@@ -462,14 +652,20 @@ export async function handleStudioRequest(req: IncomingMessage, res: ServerRespo
   if (!isLocalOrLanAddress(req.socket.remoteAddress)) { send(403, { error: '工作台仅允许本机或局域网访问' }); return true; }
   try {
     if (path === '/api/studio/state' && req.method === 'GET') { sendRevalidatedJson(req, res, store.snapshot()); return true; }
+    if (path === '/api/studio/change-log' && req.method === 'GET') {
+      const params = new URL(req.url || '/', 'http://localhost').searchParams;
+      send(200, store.changeLog({ projectId: params.get('projectId') || undefined, ...(params.get('sources') ? { sources: params.get('sources')!.split(',') } : {}), ...(params.get('id') ? { id: Number(params.get('id')) } : {}), ...(params.get('cursor') ? { cursor: params.get('cursor') } : {}), ...(params.get('limit') ? { limit: Number(params.get('limit')) } : {}) }));
+      return true;
+    }
     let text = '';
     for await (const part of req) { text += part.toString(); if (Buffer.byteLength(text) > 16 * 1024 * 1024) throw new Error('请求超过16MB'); }
     const body = text ? JSON.parse(text) : {};
     if (path === '/api/studio/query' && req.method === 'POST') send(200, store.query(body));
     else if (path === '/api/studio/changes' && req.method === 'POST') {
       if (Object.keys(body).some(key => !['requestId', 'changes'].includes(key))) throw new Error('修改请求仅支持 requestId 和 changes');
-      send(200, store.apply(body.requestId, body.changes));
+      send(200, store.apply(body.requestId, body.changes, { source: 'page' }));
     }
+    else if (path === '/api/studio/change-log/restore' && req.method === 'POST') send(200, store.restoreChanges(body, { source: 'page' }));
     else send(404, { error: '工作台接口不存在' });
   } catch (error) { send(error instanceof StudioConflict ? 409 : 422, { error: error instanceof Error ? error.message : '操作失败', atomic: true }); }
   return true;

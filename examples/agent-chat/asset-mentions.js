@@ -7,6 +7,7 @@ export const mediaReferenceKey = item => {
 }
 
 // Callers supply only current-project assets and currently enabled images, never the global library.
+/** @param {any[]} assets @param {any[] | { references?: any[], stableReferences?: boolean, assetIds?: string[] }} input */
 export function assetMentionCandidates(assets = [], input = []) {
   const options = Array.isArray(input) ? { references: input } : input || {}
   // The caller has already scoped assets to the current project. Keep the full
@@ -22,7 +23,8 @@ export function assetMentionCandidates(assets = [], input = []) {
   })
   ;(options.references || []).forEach((reference, index) => {
     if (!(typeof reference === 'string' || reference?.url) || reference?.kind && reference.kind !== 'image') return
-    candidates.push({ id: `picture:${reference.id || mediaReferenceKey(reference)}`, name: reference.name || `图片 ${index + 1}`, type: '图片', typeKey: 'reference', image: typeof reference === 'string' ? reference : reference.url, protocol: `<Picture ${index + 1}>` })
+    const key = mediaReferenceKey(reference)
+    candidates.push({ id: `picture:${key}`, referenceKey: key, name: reference.name || `图片 ${index + 1}`, type: '图片', typeKey: 'reference', image: typeof reference === 'string' ? reference : reference.url, protocol: options.stableReferences ? `<参考图|${encodeURIComponent(key)}>` : `<Picture ${index + 1}>` })
   })
   return mentionGroups.flatMap(type => candidates.filter(candidate => candidate.type === type))
 }

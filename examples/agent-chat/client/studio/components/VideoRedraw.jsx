@@ -39,7 +39,7 @@ export function CreateRedraw() {
         const episodeId = crypto.randomUUID()
         const saved = await update(draft => {
           Object.assign(draft.projects.find(project => project.id === projectId), { creationMode: 'video-redraw', adaptation: '忠实', targetRegion: region, targetLanguage: region === 'japan' ? 'ja' : 'en', requirements: notes, sourceVideo: { fileId: source.fileId, url: `/api/files/${source.fileId}`, name: file.name } })
-          draft.episodes.push({ ...studioDefaults.episodes, id: episodeId, projectId, title: '原片转绘', scenes: [] })
+          draft.episodes.push({ ...studioDefaults.episodes, id: episodeId, projectId, title: '原片转绘', scenes: [], duration: null })
         })
         if (!saved) throw new Error('项目创建后设置未保存，请重新加载核对')
         preparation.current = { projectId, episodeId }

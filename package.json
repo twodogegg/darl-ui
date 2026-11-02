@@ -58,6 +58,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "@xyflow/react": "^12.12.0",
     "ai": "^7.0.141",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",

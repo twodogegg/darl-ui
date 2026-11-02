@@ -467,7 +467,7 @@ export async function submitVideo(job: MediaJob, key: string, localMedia?: Local
     ...(audios.length ? { referenceAudios: audios } : {}),
     ...(firstFrameImage ? { firstFrameImage } : {}),
     ...(lastFrameImage ? { lastFrameImage } : {}),
-  }, AbortSignal.timeout(60000));
+  }, AbortSignal.timeout(300000));
   return result.id;
 }
 export async function checkVideo(job: MediaJob, key: string): Promise<{ state: 'running' | 'failed' | 'completed'; progress?: number; provider?: Record<string, unknown>; error?: string; media?: Buffer }> {

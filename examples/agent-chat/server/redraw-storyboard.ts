@@ -4,7 +4,7 @@ import { StudioConflict, StudioStore } from './studio';
 
 type ModelAsset = { name: string; type: string; description?: string; appearance?: string; costume?: string; variants?: Array<{ name: string; description?: string }> };
 type ModelLine = { speaker?: string; type: string; text: string; sourceText?: string; description?: string };
-type ModelShot = { sceneKey: string; start: number; end: number; scale: string; description: string; originalDescription?: string; dialogue: ModelLine[]; effects: string; assets: string[] };
+type ModelShot = { sceneKey: string; start: number; end: number; scale: string; camera?: string; description: string; originalDescription?: string; dialogue: ModelLine[]; effects: string; assets: string[] };
 
 export function saveRedrawStoryboard(studio: StudioStore, project: StudioRecord, episode: StudioRecord, source: Record<string, unknown>, raw: unknown, jobId: string) {
   if (!raw || typeof raw !== 'object') throw new Error('视频模型没有返回结构化分镜');
@@ -78,12 +78,12 @@ export function saveRedrawStoryboard(studio: StudioStore, project: StudioRecord,
       return { id: randomUUID(), type: line.type, ...(speaker ? { assetId: speaker.id, speaker: line.speaker } : {}), text: line.text, description: typeof line.description === 'string' ? line.description : '' };
     });
     const sourceDialogue = shot.dialogue.map(line => line.sourceText || '').filter(Boolean).join('\n');
-    changes.push({ resource: 'shots', id: randomUUID(), op: 'create', position: index, values: { episodeId: episode.id, sceneId, duration: end - start, scale: String(shot.scale || ''), description, dialogue: lines, effects: String(shot.effects || ''), assetIds: [...new Set(selected)], source: { fileId: source.fileId, start, end, frames: [], description: String(shot.originalDescription || ''), dialogue: sourceDialogue, confirmed: false } } });
+    changes.push({ resource: 'shots', id: randomUUID(), op: 'create', position: index, values: { episodeId: episode.id, sceneId, duration: end - start, scale: String(shot.scale || ''), camera: String(shot.camera || ''), description, dialogue: lines, effects: String(shot.effects || ''), assetIds: [...new Set(selected)], source: { fileId: source.fileId, start, end, frames: [], description: String(shot.originalDescription || ''), dialogue: sourceDialogue, confirmed: false } } });
   }
   if (Number(value.shots[0].start) > .2 || Number(liveSource.duration) - previousEnd > .2) throw new Error('模型分镜没有覆盖完整原视频，请重新分析');
   for (const [key, template] of sceneTemplates) if (!usedScenes.has(key)) scenes.push({ id: randomUUID(), ...template });
   changes.push({ resource: 'episodes', id: episode.id, op: 'update', version: liveEpisode._version, values: { scenes } });
   if (changes.length > 500) throw new Error('分镜与资产数量超过单次保存限制');
-  studio.apply(`redraw-storyboard-${jobId}`, changes);
+  studio.apply(`redraw-storyboard-${jobId}`, changes, { source: 'workflow', kind: 'analyze', jobId });
   return { shots: value.shots.length, assets: value.assets.length };
 }

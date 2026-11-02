@@ -103,27 +103,6 @@ describe('SkillManager', () => {
     expect(screen.queryByRole('button', { name: '删除资源' })).not.toBeInTheDocument();
   });
 
-  it('replaces the folder entry with host conversation creation and reports failures', async () => {
-    render(<SkillManager open skills={[]} onClose={() => {}} onSave={() => {}} onDelete={() => {}} onImport={() => {}} onFavoriteChange={() => {}} onCreateViaChat={() => { throw new Error('请先配置文本模型'); }} />);
-    expect(screen.queryByRole('button', { name: '文件夹' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '通过对话创建' }));
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('请先配置文本模型'));
-  });
-
-  it('allows disabling automatic invocation while keeping manual @ references', async () => {
-    const skill: AgentSkill = { id: 'summary', name: '客户摘要', description: '整理客户信息', instructions: '整理输入。', scope: 'custom', allowImplicitInvocation: true };
-    const onSave = vi.fn().mockResolvedValue(undefined);
-    render(<SkillManager open skills={[skill]} onClose={vi.fn()} onSave={onSave} onDelete={vi.fn()} onImport={vi.fn()} onFavoriteChange={vi.fn()} />);
-
-    const toggle = screen.getByRole('switch', { name: '允许自动调用' });
-    expect(toggle).toBeChecked();
-    fireEvent.click(toggle);
-    expect(toggle).not.toBeChecked();
-    fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ id: 'summary', allowImplicitInvocation: false })));
-  });
-
   it('imports directly when the skill name is available', async () => {
     const onImport = vi.fn().mockResolvedValue(undefined);
     render(<SkillManager open skills={[]} onClose={vi.fn()} onSave={vi.fn()} onDelete={vi.fn()} onImport={onImport} onFavoriteChange={vi.fn()} />);
@@ -194,19 +173,6 @@ describe('SkillManager', () => {
     resolveBody({ ...documentSkill });
     expect(await screen.findByRole('heading', { name: '使用说明' })).toBeInTheDocument();
     expect(screen.getByRole('status')).not.toHaveTextContent('正在加载 Skill 正文');
-  });
-
-  it('waits for a built-in Skill body before saving its settings', async () => {
-    const summary: AgentSkill = { id: 'builtin', name: '内置技能', description: '内置描述', scope: 'builtin' };
-    let resolveBody: (skill: AgentSkill) => void = () => {};
-    const onSave = vi.fn();
-    render(<SkillManager open skills={[summary]} onClose={vi.fn()} onSave={onSave} onDelete={vi.fn()} onImport={vi.fn()} onFavoriteChange={vi.fn()} loadSkill={() => new Promise((resolve) => { resolveBody = resolve; })} />);
-    fireEvent.click(screen.getByLabelText('允许自动调用'));
-    expect(screen.getByRole('button', { name: '保存修改' })).toBeDisabled();
-    resolveBody({ ...summary, instructions: '内置正文', resources: [] });
-    await waitFor(() => expect(screen.getByRole('button', { name: '保存修改' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
-    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ instructions: '内置正文', allowImplicitInvocation: false })));
   });
 
   it('selects the first Skill when its catalog arrives after opening', async () => {

@@ -18,7 +18,7 @@ export class OpenCutProjects {
     if (!episode || !data.projects.some(item => item.id === episode.projectId)) throw new Error('剧集不存在');
     const file = await this.files.put(bytes, 'video/mp4', `第${episode.number}集剪辑成片.mp4`);
     const filmId = randomUUID();
-    this.studio.apply(randomUUID(), [{ resource: 'films', id: filmId, op: 'create', values: { projectId: episode.projectId, episodeId: id, title: `第${episode.number}集剪辑成片`, url: this.files.originalUrl(file)! } }]);
+    this.studio.apply(randomUUID(), [{ resource: 'films', id: filmId, op: 'create', values: { projectId: episode.projectId, episodeId: id, title: `第${episode.number}集剪辑成片`, url: this.files.originalUrl(file)! } }], { source: 'page', kind: 'opencut' });
     return { id: filmId };
   }
   async read(id: string) {

@@ -9,6 +9,13 @@ const prompts = {
 };
 
 describe('PromptSettingsCard', () => {
+  it('只展示指定的提示词并打开第一个可用项', () => {
+    render(<PromptSettingsCard visibleKeys={['optimization', 'h3Optimization']} prompts={{ ...prompts, optimization: '普通规则', h3Optimization: 'H3 规则' }} onSave={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /系统提示词/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '普通提示词优化' })).toHaveValue('普通规则');
+    fireEvent.click(screen.getByRole('button', { name: /H3 提示词优化/ }));
+    expect(screen.getByRole('textbox', { name: 'H3 提示词优化' })).toHaveValue('H3 规则');
+  });
   it('可独立编辑普通和 H3 优化模板', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<PromptSettingsCard prompts={{ ...prompts, optimization: '普通规则', h3Optimization: 'H3 规则' }} onSave={onSave} />);

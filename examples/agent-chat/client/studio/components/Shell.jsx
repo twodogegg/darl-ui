@@ -17,11 +17,13 @@ import {
   IconVideo,
   IconFileText,
 } from '@tabler/icons-react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../store'
+import { ChangeLog } from './ChangeLog'
 import { projectSteps } from '../data'
 
 const stepIcons = [IconNotebook, IconScript, IconPhoto, IconVideo, IconMovie]
-const redrawStepIcons = [IconFileText, IconScript, IconPhoto, IconLayoutList, IconVideo, IconMovie]
+const redrawStepIcons = [IconFileText, IconLayoutList, IconScript, IconPhoto, IconVideo, IconMovie]
 // 项目级步骤：整个项目共用同一份内容，不按集拆分
 const projectLevelPaths = ['/source', '/outline', '/script', '/art']
 const isProjectPath = (path, project) => projectLevelPaths.includes(path) && !(project?.creationMode === 'video-redraw' && ['/source', '/film'].includes(path))
@@ -40,11 +42,20 @@ const nav = [
     icon: IconSettings,
   },
 ]
+// 项目可在步骤页与流程视图间切换；从流程视图切回时回到最近停留的步骤。
+const lastStep = { current: '/source' }
+function ViewSwitch({ project, pathname, link }) {
+  if (!project) return null
+  const paths = projectSteps(project).map((s) => s.path)
+  const step = paths.includes(pathname) ? pathname : paths.includes(lastStep.current) ? lastStep.current : paths[0]
+  return <div className="br-flow-view" role="group" aria-label="切换视图"><NavLink to={link(step)} end>步骤</NavLink><NavLink to={link('/flow')}>流程</NavLink></div>
+}
 export default function Shell({ children }) {
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const { data, onNavigate } = useStore()
   const [params] = useSearchParams()
+  const [logOpen, setLogOpen] = useState(false)
   const projectId = params.get('projectId')
   const activeProject = data.projects.find((p) => p.id === projectId)
   const flowSteps = projectSteps(activeProject)
@@ -63,9 +74,11 @@ export default function Shell({ children }) {
     isProjectPath(path, activeProject) || !activeEpisode
       ? `${path}?projectId=${encodeURIComponent(projectId)}`
       : `${path}?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(activeEpisode.id)}`
+  const isFlowView = pathname === '/flow'
+  useEffect(() => { if (workflow) lastStep.current = pathname }, [workflow, pathname])
   const crumb =
-    workflow?.label || (pathname === '/source' ? '原始素材' : nav.find((n) => n.to === pathname)?.label) || '工作台'
-  const showFlow = !!activeProject && (!!workflow || isProjectPath(pathname, activeProject) || pathname === '/media')
+    (isFlowView ? '流程视图' : workflow?.label) || (pathname === '/source' ? '原始素材' : nav.find((n) => n.to === pathname)?.label) || '工作台'
+  const showFlow = !!activeProject && (!!workflow || isFlowView || isProjectPath(pathname, activeProject) || pathname === '/media')
   const mediaLink = activeProject ? `/media?projectId=${encodeURIComponent(projectId)}` : '/media'
   return (
     <div className="app">
@@ -113,6 +126,7 @@ export default function Shell({ children }) {
                     : '本集'}
               </span>
             </div>
+            <ViewSwitch project={activeProject} pathname={pathname} link={flowLink} />
             {!isProjectLevel && activeProject.creationMode === 'video-redraw' && activeEpisodeList.length > 1 && <select className="br-flow-episode" aria-label="选择剧集" value={activeEpisode?.id || ''} onChange={event => navigate(`${pathname}?projectId=${encodeURIComponent(projectId)}&episodeId=${encodeURIComponent(event.target.value)}`)}>{activeEpisodeList.map(episode => <option key={episode.id} value={episode.id}>第{episode.number}集 · {episode.title}</option>)}</select>}
             <p className="br-group-title">创作流程</p>
             {flowSteps.map((s, i) => {
@@ -231,15 +245,16 @@ export default function Shell({ children }) {
             <IconMovie className="br-mobile-mark" size={20} />
             <span>本入剧出</span> / <strong>{crumb}</strong>
           </div>
-          <div className="br-top-actions"><button onClick={() => onNavigate('agents')}>Agents</button><button onClick={() => navigate(mediaLink)}>独立生成</button><button onClick={() => onNavigate('settings')}>设置</button></div>
+          <div className="br-top-actions"><button onClick={() => setLogOpen(true)}>变更日志</button><button onClick={() => navigate(mediaLink)}>独立生成</button><button onClick={() => onNavigate('settings')}>设置</button></div>
         </header>
         <main
           id="main-content"
-          className={`br-content ${workflow ? 'br-content--flush' : ''}`}
+          className={`br-content ${workflow || isFlowView ? 'br-content--flush' : ''}`}
         >
           {children}
         </main>
       </div>
+      {logOpen && <ChangeLog projectId={activeProject?.id} onClose={() => setLogOpen(false)} />}
       <nav className="br-mobile-nav" aria-label="移动导航">
         {nav.map((n) => (
           <NavLink
@@ -324,6 +339,7 @@ export function Banner({ context, projectLevel = false }) {
           ))}
         </select>}
       </div>
+      <ViewSwitch project={project} pathname={pathname} link={stepLink} />
       <nav className="workflow-steps" aria-label="创作流程">
         {projectSteps(project).map((s, i) => (
           <Link
