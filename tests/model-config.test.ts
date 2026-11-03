@@ -117,7 +117,7 @@ describe('model configuration', () => {
   it('exposes only the product image options for the first batch', () => {
     const configuration = defaultModelConfiguration();
     const models = toMediaModels(configuration);
-    expect(models.filter((model) => model.type === 'image').map((model) => model.id)).toEqual(['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-image-preview']);
+    expect(models.filter((model) => model.type === 'image').map((model) => model.id)).toEqual(['gpt-image-2', 'gpt-image-2.5', 'seedream-v5-pro-n', 'gemini-3-pro-image-preview']);
     const gpt = models.find((model) => model.id === 'gpt-image-2')!;
     expect(gpt.capabilities).toMatchObject({
       images: 16,
@@ -125,6 +125,8 @@ describe('model configuration', () => {
       aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'],
     });
     expect(gpt.capabilities.maxOutputs).toBeUndefined();
+    const seedream = models.find((model) => model.id === 'seedream-v5-pro-n')!;
+    expect(seedream.capabilities).toMatchObject({ images: 10, maxOutputs: 1, resolutions: ['1K', '2K'] });
     const gemini = models.find((model) => model.id === 'gemini-3-pro-image-preview')!;
     expect(gemini.capabilities).toMatchObject({ images: 14, resolutions: ['1K', '2K', '4K'] });
     const gpt25 = models.find((model) => model.id === 'gpt-image-2.5')!;

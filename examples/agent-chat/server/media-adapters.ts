@@ -245,9 +245,15 @@ async function readImage(value: unknown): Promise<MediaImage> {
  */
 export async function generateImages(job: MediaJob, key: string, localMedia?: LocalMediaReader): Promise<{ images: MediaImage[]; provider: unknown }> {
   ensureHttp(job.baseUrl);
+  if (['seedream-v5-pro-n', 'gpt-image-2.5-sunburst'].includes(job.upstreamModelId)) return generateTieredImages(job, key, localMedia);
   const prompt = promptFor(job);
   const size = imageSize(job.options);
-  const references = await normalizeImageReferences(job.options.references, MAX_REFERENCE_IMAGES, localMedia);
+  let references = await normalizeImageReferences(job.options.references, MAX_REFERENCE_IMAGES, localMedia);
+  if (job.upstreamModelId === 'gpt-image-2' && references?.some(reference => 'url' in reference)) references = await uploadableImageReferences(references);
+  if (job.upstreamModelId === 'gpt-image-2' && job.options.responseFormat !== undefined) {
+    const { responseFormat: _, ...options } = job.options;
+    job = { ...job, options };
+  }
   const request = (requestedSize: string) => references?.length
     ? fetch(url(job.baseUrl, 'images/edits'), references.some((reference) => 'url' in reference)
         ? { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(editJson(job, requestedSize, references)), signal: AbortSignal.timeout(180000) }
@@ -286,6 +292,48 @@ export async function generateImages(job: MediaJob, key: string, localMedia?: Lo
     }
   }
   return { images, provider: { requestedSize: size, usedSize, ...imageResponseRecord(payload, images[0]?.kind === 'url' ? 'url' : 'b64_json') } };
+}
+
+async function uploadableImageReferences(references: ImageReference[]): Promise<ImageReference[]> {
+  return Promise.all(references.map(async (reference, index) => {
+    if (!('url' in reference)) return reference;
+    const response = await fetch(reference.url, { signal: AbortSignal.timeout(30000) });
+    if (!response.ok) throw new Error(`参考图片 ${index + 1} 下载失败：HTTP ${response.status}`);
+    const data = Buffer.from(await response.arrayBuffer());
+    const mimeType = sniffMime(data);
+    if (!mimeType) throw new Error(`参考图片 ${index + 1} 格式无效`);
+    return { data, mimeType, name: `reference-${index + 1}.${mimeType.split('/')[1]}` };
+  }));
+}
+
+async function generateTieredImages(job: MediaJob, key: string, localMedia?: LocalMediaReader): Promise<{ images: MediaImage[]; provider: unknown }> {
+  const references = await normalizeImageReferences(job.options.references, job.upstreamModelId === 'seedream-v5-pro-n' ? 10 : 16, localMedia);
+  const fields = {
+    ...(job.upstreamModelId === 'gpt-image-2.5-sunburst' ? jsonOptions(job.options) : {}),
+    model: job.upstreamModelId, prompt: promptFor(job), n: 1,
+    resolution: String(job.options.resolution || '2K').toLowerCase(),
+    aspect_ratio: String(job.options.aspectRatio || '16:9'),
+    response_format: 'b64_json',
+  };
+  const endpoint = references?.length ? 'images/edits' : 'images/generations';
+  let body: string | FormData;
+  const headers: Record<string, string> = { Authorization: 'Bearer ' + key };
+  if (references?.some(reference => !('url' in reference))) {
+    const form = new FormData();
+    for (const [name, value] of Object.entries(fields)) form.set(name, String(value));
+    for (const reference of await uploadableImageReferences(references)) {
+      if (!('url' in reference)) form.append('image[]', new Blob([new Uint8Array(reference.data)], { type: reference.mimeType }), reference.name);
+    }
+    body = form;
+  } else {
+    headers['Content-Type'] = 'application/json';
+    body = JSON.stringify({ ...fields, ...(references?.length ? { image: references.map(reference => 'url' in reference ? reference.url : '') } : {}) });
+  }
+  const response = await checked(await fetch(url(job.baseUrl, endpoint), { method: 'POST', headers, body, signal: AbortSignal.timeout(660000) }), key);
+  const payload = await response.json() as { data?: unknown[] };
+  if (!Array.isArray(payload.data) || !payload.data.length) throw new Error('供应商没有返回图片');
+  const images = await Promise.all(payload.data.map(readImage));
+  return { images, provider: imageResponseRecord(payload, images[0].kind === 'url' ? 'url' : 'b64_json') };
 }
 
 const GEMINI_TIERS = new Set(['0.5K', '1K', '2K', '4K']);

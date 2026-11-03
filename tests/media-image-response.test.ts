@@ -165,11 +165,11 @@ describe('reference images', () => {
     const fetchMock = vi.fn().mockResolvedValue(respond({ data: [{ url: 'https://cdn.example.test/out.png' }] }));
     vi.stubGlobal('fetch', fetchMock);
     const { generateImages } = await import('../examples/agent-chat/server/media-adapters');
-    await generateImages(job({ references: ['https://cdn.example.test/ref.png'] }), 'key');
+    await generateImages(job({ references: ['https://cdn.example.test/ref.png'] }, { upstreamModelId: 'other-image' }), 'key');
     const [target, init] = fetchMock.mock.calls[0];
     expect(String(target)).toBe('https://api.example.test/v1/images/edits');
     expect(init.headers['Content-Type']).toBe('application/json');
-    expect(JSON.parse(init.body)).toMatchObject({ model: 'gpt-image-2', image: ['https://cdn.example.test/ref.png'] });
+    expect(JSON.parse(init.body)).toMatchObject({ model: 'other-image', image: ['https://cdn.example.test/ref.png'] });
   });
 
   it('sends base64 references as multipart', async () => {

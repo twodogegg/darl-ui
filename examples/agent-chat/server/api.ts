@@ -63,13 +63,13 @@ const uploadMimeType = (type: string) => type === 'image/jpg' ? 'image/jpeg' : /
  * settings page can render the exact schema the model receives.
  */
 export const MEDIA_TOOLS = [
-  { name: 'builtin_generate_media', description: '向后台提交一条图片或视频生成任务。图片支持 gpt-image-2、gpt-image-2.5、gemini-3-pro-image-preview（可用参考图编辑），视频支持 minimax-h3-flash、minimax-h3-standard、h3-nsfw 和 h3-nsfw-opt。调用前必须明确用户的生成意图，提交遵循项目审批模式。返回任务 ID，不等待媒体完成。', parameters: { type: 'object', properties: {
-    modelId: { type: 'string', enum: ['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-image-preview', 'minimax-h3-flash', 'minimax-h3-standard', 'h3-nsfw', 'h3-nsfw-opt'] },
+  { name: 'builtin_generate_media', description: '向后台提交一条图片或视频生成任务。图片支持 gpt-image-2、gpt-image-2.5、seedream-v5-pro-n、gemini-3-pro-image-preview（可用参考图编辑），视频支持 minimax-h3-flash、minimax-h3-standard、h3-nsfw 和 h3-nsfw-opt。调用前必须明确用户的生成意图，提交遵循项目审批模式。返回任务 ID，不等待媒体完成。', parameters: { type: 'object', properties: {
+    modelId: { type: 'string', enum: ['gpt-image-2', 'gpt-image-2.5', 'seedream-v5-pro-n', 'gemini-3-pro-image-preview', 'minimax-h3-flash', 'minimax-h3-standard', 'h3-nsfw', 'h3-nsfw-opt'] },
     requestId: { type: 'string', description: '可选唯一请求编号，同一生成请求重试时沿用。' },
     prompt: { type: 'string', minLength: 1, maxLength: 16000, description: '图片描述或编辑指令。改编用户提供的图片时，描述要改什么，不需要复述原图内容。' },
     options: { type: 'object', properties: {
-      aspectRatio: { type: 'string', enum: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9', 'adaptive'], description: '画幅：图片支持 1:1、2:3、3:2、3:4、4:3、9:16、16:9；视频另外支持 21:9 和 adaptive（adaptive 需要图片或视频参考）。' },
-      resolution: { type: 'string', enum: ['1K', '2K', '4K', '480P', '768P', '1080P'], description: '清晰度档位：图片为 1K/2K/4K，视频为 480P/768P/1080P（H3 Standard 不支持 1080P）。' },
+      aspectRatio: { type: 'string', enum: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9', 'adaptive'], description: '画幅：图片支持 1:1、2:3、3:2、3:4、4:3、9:16、16:9；Seedream 另支持 21:9。视频支持 21:9 和 adaptive（adaptive 需要图片或视频参考）。' },
+      resolution: { type: 'string', enum: ['1K', '2K', '4K', '480P', '768P', '1080P'], description: '清晰度档位：图片为 1K/2K/4K（Seedream 不支持 4K），视频为 480P/768P/1080P（H3 Standard 不支持 1080P）。' },
       references: { type: 'array', maxItems: 16, items: { type: 'string' }, description: '必填场景：当用户提供了图片 URL 或要求改编已有图片（改风格、换背景、换配色、保持人物/物体一致性）时，必须把该 URL 放进这个数组。不填则视为纯文生图，原图会被忽略。支持站内 /api/files/ URL、公网 HTTP(S) URL 或 data: URL。图片编辑及视频图片参考可用，数量以模型能力为准，Gemini 最多 14 张。' },
       duration: { type: 'integer', minimum: 4, maximum: 15, description: '视频时长（秒），仅视频' },
       referenceVideos: { type: 'array', maxItems: 3, items: { type: 'string' }, description: 'H3 视频参考，支持站内 /api/files/ URL 或公网 HTTP(S) URL，数量以模型能力为准。' },
@@ -80,10 +80,10 @@ export const MEDIA_TOOLS = [
   { name: 'builtin_get_media_task', description: '按后台生成任务 ID 查询图片或视频的真实状态与结果（含结果 URL、供应商原始返回）。不会触发新的付费生成。', parameters: { type: 'object', properties: { taskId: { type: 'string', minLength: 36, maxLength: 36 } }, required: ['taskId'], additionalProperties: false } },
 ] as const;
 type DefaultMediaSelection = {
-  image: { modelId: string; resolution: '1K' | '2K' | '4K'; aspectRatio: '1:1' | '2:3' | '3:2' | '3:4' | '4:3' | '9:16' | '16:9' };
+  image: { modelId: string; resolution: '1K' | '2K' | '4K'; aspectRatio: '1:1' | '2:3' | '3:2' | '3:4' | '4:3' | '9:16' | '16:9' | '21:9' };
   video: { modelId: 'minimax-h3-flash' | 'minimax-h3-standard' | 'h3-nsfw' | 'h3-nsfw-opt'; resolution: '480P' | '768P' | '1080P'; aspectRatio: 'adaptive' | '21:9' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16' };
 };
-const IMAGE_MODEL_IDS = ['gpt-image-2', 'gpt-image-2.5', 'gemini-3-pro-image-preview'];
+const IMAGE_MODEL_IDS = ['gpt-image-2', 'gpt-image-2.5', 'seedream-v5-pro-n', 'gemini-3-pro-image-preview'];
 const IMAGE_ASPECT_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'];
 const defaultMediaSelection: DefaultMediaSelection = {
   image: { modelId: 'gpt-image-2', resolution: '2K', aspectRatio: '16:9' },
@@ -99,7 +99,7 @@ function validateDefaultMediaSelection(value: unknown): DefaultMediaSelection {
   const imageChoice = image as Record<string, unknown>;
   const videoChoice = video as Record<string, unknown>;
   const imageResolutions = ['1K', '2K', '4K'];
-  if (!IMAGE_MODEL_IDS.includes(String(imageChoice.modelId)) || !imageResolutions.includes(String(imageChoice.resolution)) || !IMAGE_ASPECT_RATIOS.includes(String(imageChoice.aspectRatio))) throw new Error('默认图片模型参数不受支持');
+  if (!IMAGE_MODEL_IDS.includes(String(imageChoice.modelId)) || !imageResolutions.includes(String(imageChoice.resolution)) || (imageChoice.modelId === 'seedream-v5-pro-n' && imageChoice.resolution === '4K') || !(IMAGE_ASPECT_RATIOS.includes(String(imageChoice.aspectRatio)) || (imageChoice.modelId === 'seedream-v5-pro-n' && imageChoice.aspectRatio === '21:9'))) throw new Error('默认图片模型参数不受支持');
   const videoModels: Record<string, string[]> = { 'minimax-h3-flash': ['480P', '768P', '1080P'], 'minimax-h3-standard': ['480P', '768P'], 'h3-nsfw': ['480P', '768P', '1080P'], 'h3-nsfw-opt': ['480P', '768P', '1080P'] };
   if (['h3-nsfw', 'h3-nsfw-opt'].includes(String(videoChoice.modelId)) && !['16:9', '9:16'].includes(String(videoChoice.aspectRatio))) throw new Error('当前视频模型只支持 16:9 或 9:16');
   if (!videoModels[String(videoChoice.modelId)]?.includes(String(videoChoice.resolution)) || !['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'].includes(String(videoChoice.aspectRatio))) throw new Error('默认视频模型参数不受支持');

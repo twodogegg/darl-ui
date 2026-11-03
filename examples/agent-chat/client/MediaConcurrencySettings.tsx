@@ -5,6 +5,7 @@ import { Input } from '../../../src/components/ui/FormControls';
 type Limits = Record<string, number>;
 const names: Array<{ id: string; title: string }> = [
   { id: 'gpt-image-2', title: 'GPT Image 2 图片并发' },
+  { id: 'seedream-v5-pro-n', title: 'Seedream V5 Pro N 图片并发' },
   { id: 'gpt-image-2.5', title: 'GPT Image 2.5 图片并发' },
   { id: 'gemini-3-pro-image-preview', title: 'Gemini 3 Pro Image Preview 图片并发' },
   { id: 'minimax-h3-flash', title: 'MiniMax H3 Flash 视频并发' },

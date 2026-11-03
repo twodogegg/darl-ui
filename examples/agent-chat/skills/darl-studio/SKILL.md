@@ -1,9 +1,9 @@
 ---
 name: darl-studio
-description: 通过本入剧出网站现有 Tools，分类查询和修改项目、剧本、资产、视频片段、提示词，操作媒体任务、工作区文件和 Skills；按“大纲→剧本→资产→分镜→短片”创作工作流程衔接各站内创作 Skill。
+description: 通过AI Film Studio网站现有 Tools，分类查询和修改项目、剧本、资产、视频片段、提示词，操作媒体任务、工作区文件和 Skills；按“大纲→剧本→资产→分镜→短片”创作工作流程衔接各站内创作 Skill。
 ---
 
-# 本入剧出网站 Tools
+# AI Film Studio网站 Tools
 
 从当轮工具目录确认名称与参数。以下为当前内置 Tools 的调用说明；同能力工具名称变化时使用当轮定义。网站操作直接调用相应 Tool。
 
@@ -194,7 +194,7 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 | `builtin_generate_media` | `modelId`、`prompt` 和可选 `options`；提交真实媒体任务，返回任务 ID 和状态，受审批模式控制 |
 | `builtin_get_media_task` | `taskId`；返回任务真实状态和结果 |
 
-`modelId` 与生成参数采用当轮 Tool schema。`options` 可含 `resolution`、`aspectRatio`、`duration`、`references`。参考编辑时将指定图片放入 `references`。H3 视频另支持 `referenceVideos`（视频 URL 数组）、`referenceAudios`（音频或音色试听 URL 数组），各最多 3 个且以模型能力为准；音频须搭配图片或视频。支持站内 `/api/files/` 与公网 HTTP(S) URL；已有可访问的 HTTPS/HTTP 素材直接传引用，本地素材由文件服务提供可访问 URL，无法直接访问时才上传到模型供应商。音色引用传真实音频地址，不传音色 ID；是否保持目标声音须试听真实生成结果。
+`modelId` 与生成参数采用当轮 Tool schema。`options` 可含 `resolution`、`aspectRatio`、`duration`、`references`。参考编辑时将指定图片放入 `references`。`seedream-v5-pro-n` 支持 1K、2K 和最多 10 张参考图。GPT Image 2 参考图以文件上传；GPT Image 2.5 使用分辨率和画幅参数，最多支持 16 张参考图。H3 视频另支持 `referenceVideos`（视频 URL 数组）、`referenceAudios`（音频或音色试听 URL 数组），各最多 3 个且以模型能力为准；音频须搭配图片或视频。支持站内 `/api/files/` 与公网 HTTP(S) URL；已有可访问的 HTTPS/HTTP 素材直接传引用，本地素材由文件服务提供可访问 URL，无法直接访问时才上传到模型供应商。音色引用传真实音频地址，不传音色 ID；是否保持目标声音须试听真实生成结果。
 
 H3 视频模型支持 `minimax-h3-flash`、`minimax-h3-standard`、`h3-nsfw` 和 `h3-nsfw-opt`；清晰度使用 `480P`、`768P`，其中 Flash 和 NSFW 支持 `1080P`。NSFW 只支持 16:9、9:16 和多参考或文生视频；`h3-nsfw` 保留原提示词，`h3-nsfw-opt` 自动优化。NSFW 的本地参考素材由宿主通过文件接口上传并取得地址，无需 Agent 手工上传或拼接上游字段。
 

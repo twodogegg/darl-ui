@@ -129,6 +129,11 @@ export const BUILTIN_TEMPLATES: CapabilityTemplate[] = [
     defaults: { resolution: '2K', aspectRatio: '16:9' },
   },
   {
+    id: 'seedream-v5-pro-n', name: 'Seedream V5 Pro N', type: 'image',
+    capabilities: { supportsTextToImage: true, supportsReferenceEdit: true, maxReferenceImages: 10, maxOutputs: 1, resolutions: ['1K', '2K'], aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9'] },
+    defaults: { resolution: '2K', aspectRatio: '16:9' },
+  },
+  {
     id: 'gemini-pro-image', name: 'Gemini 3 Pro Image', type: 'image',
     capabilities: {
       supportsTextToImage: true, supportsReferenceEdit: true, maxReferenceImages: 14,
@@ -166,6 +171,7 @@ export const BUILTIN_MODELS: LogicalModel[] = [
   { id: 'gpt-6-astra', displayName: 'GPT-6 Astra', type: 'text', capabilityTemplateId: 'gpt-reasoning', bindings: [{ id: 'gpt-astra-darl', providerId: 'darl', upstreamModelId: 'gpt-6-astra', protocolKey: 'openai-responses', enabled: true }] },
   { id: 'gpt-image-2', displayName: 'GPT Image 2', type: 'image', capabilityTemplateId: 'gpt-image-2', bindings: [{ id: 'gpt-image-darl', providerId: 'darl', upstreamModelId: 'gpt-image-2', protocolKey: 'openai-images', enabled: true }] },
   { id: 'gpt-image-2.5', displayName: 'GPT Image 2.5', type: 'image', capabilityTemplateId: 'gpt-image-2', bindings: [{ id: 'gpt-image-2.5-darl', providerId: 'darl', upstreamModelId: 'gpt-image-2.5-sunburst', protocolKey: 'openai-images', enabled: true }] },
+  { id: 'seedream-v5-pro-n', displayName: 'Seedream V5 Pro N', type: 'image', capabilityTemplateId: 'seedream-v5-pro-n', bindings: [{ id: 'seedream-v5-provider', providerId: 'seedream-gateway', upstreamModelId: 'seedream-v5-pro-n', protocolKey: 'openai-images', enabled: true }] },
   { id: 'gemini-3-pro-image-preview', displayName: 'Gemini 3 Pro Image Preview', type: 'image', capabilityTemplateId: 'gemini-pro-image', bindings: [{ id: 'gemini-image-darl', providerId: 'darl', upstreamModelId: 'gemini-3-pro-image-preview', protocolKey: 'gemini-generate-content', enabled: true }] },
   { id: 'minimax-h3-flash', displayName: 'MiniMax H3 Flash', type: 'video', capabilityTemplateId: 'h3-flash', bindings: [{ id: 'h3-darl', providerId: 'darl', upstreamModelId: 'minimax-h3-flash', protocolKey: 'darl-h3-flash-unified', enabled: true }] },
   { id: 'minimax-h3-standard', displayName: 'MiniMax H3 Standard', type: 'video', capabilityTemplateId: 'h3-standard', bindings: [{ id: 'h3-standard-darl', providerId: 'darl', upstreamModelId: 'minimax-h3-standard', protocolKey: 'darl-h3-flash-unified', enabled: true }] },
@@ -228,7 +234,7 @@ export function upgradeModelConfiguration(configuration: ModelConfiguration): Mo
       duration: Number(defaults.duration ?? 5),
     };
   }
-  const addedTemplates: CapabilityTemplate[] = BUILTIN_TEMPLATES.filter((template) => ['gemini-pro-image', 'h3-standard'].includes(template.id));
+  const addedTemplates: CapabilityTemplate[] = BUILTIN_TEMPLATES.filter((template) => ['gemini-pro-image', 'h3-standard', 'seedream-v5-pro-n'].includes(template.id));
   for (const template of addedTemplates) {
     if (!next.templates.some((item) => item.id === template.id)) {
       next.templates.push({ ...template, capabilities: { ...template.capabilities } as CapabilityValues });
@@ -238,7 +244,7 @@ export function upgradeModelConfiguration(configuration: ModelConfiguration): Mo
   for (const protocol of BUILTIN_PROTOCOLS) {
     if (!next.protocols.some((item) => item.key === protocol.key)) next.protocols.push({ ...protocol });
   }
-  const addedModels: LogicalModel[] = BUILTIN_MODELS.filter((model) => ['gpt-image-2.5', 'gemini-3-pro-image-preview', 'minimax-h3-standard'].includes(model.id));
+  const addedModels: LogicalModel[] = BUILTIN_MODELS.filter((model) => ['gpt-image-2.5', 'gemini-3-pro-image-preview', 'minimax-h3-standard', 'seedream-v5-pro-n'].includes(model.id));
   for (const model of addedModels) {
     if (!next.models.some((item) => item.id === model.id)) {
       next.models.push({ ...model, bindings: model.bindings.map((binding) => ({ ...binding })) });
