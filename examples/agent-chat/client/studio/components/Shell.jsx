@@ -105,8 +105,8 @@ export default function Shell({ children }) {
             </svg>
           </span>
           <span>
-            <span className="br-brand-title">本入剧出</span>
-            <span className="br-brand-sub">AI FILM STUDIO</span>
+            <span className="br-brand-title">AI Film Studio</span>
+            <span className="br-brand-sub">AI 影视工作站</span>
           </span>
         </Link>
         {showFlow ? (
@@ -243,7 +243,7 @@ export default function Shell({ children }) {
         <header className="br-topbar">
           <div className="br-crumb">
             <IconMovie className="br-mobile-mark" size={20} />
-            <span>本入剧出</span> / <strong>{crumb}</strong>
+            <span>AI Film Studio</span> / <strong>{crumb}</strong>
           </div>
           <div className="br-top-actions"><button onClick={() => setLogOpen(true)}>变更日志</button><button onClick={() => navigate(mediaLink)}>独立生成</button><button onClick={() => onNavigate('settings')}>设置</button></div>
         </header>

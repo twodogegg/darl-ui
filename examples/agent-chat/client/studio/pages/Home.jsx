@@ -121,7 +121,7 @@ export default function Home() {
       {creationMode === 'video-redraw' ? <CreateRedraw /> : <section className="br-hero" aria-label="新建创作">
         <div className="br-hero-left">
           <p className="br-overline">NEW PROJECT / 创作起点</p>
-          <h2 className="br-hero-title">本入剧出，让故事开场。</h2>
+          <h2 className="br-hero-title">AI Film Studio，让故事开场。</h2>
           <p className="br-hero-desc">
             上传或粘贴小说、剧本等原始素材，填写创作要求，开始从故事到影像的创作。
           </p>
@@ -371,7 +371,7 @@ export default function Home() {
           })}
         </ol>
       </section>
-      <p className="br-bottom-note">本入剧出 · AI FILM STUDIO</p>
+      <p className="br-bottom-note">AI Film Studio · AI 影视工作站</p>
     </div>
   )
 }
