@@ -34,6 +34,16 @@ afterEach(() => rmSync(directory, { recursive: true, force: true }));
 const shots = (count = 40): StudioChange[] => Array.from({ length: count }, (_, index) => ({ resource: 'shots', op: 'create', id: `shot-${index}`, position: index, values: { episodeId: 'episode-1', sceneId: 'scene-1', description: `动作 ${index}`, duration: 3 } }));
 
 describe('shared short drama business service', () => {
+  it('allows explicitly original shots and assets in redraw projects without inventing source footage', () => {
+    store.apply('redraw-original-project', [{ resource: 'projects', id: projectId, op: 'update', version: 1, values: { creationMode: 'video-redraw' } }]);
+    const shot: StudioChange = { resource: 'shots', op: 'create', id: 'original-shot', values: { episodeId: 'episode-1', sceneId: 'scene-1', sourceKind: 'original', description: '续写镜头', duration: 3 } };
+    const asset: StudioChange = { resource: 'assets', op: 'create', id: 'original-asset', values: { projectId, name: '新增道具', type: '道具', sourceKind: 'original' } };
+    expect(() => store.apply('missing-source', [{ ...shot, id: 'missing', values: { episodeId: 'episode-1', sceneId: 'scene-1' } }])).toThrow('须提供真实来源');
+    store.apply('original-continuation', [shot, asset]);
+    expect(store.query({ resource: 'shots', ids: ['original-shot'] }).items?.[0]).toMatchObject({ sourceKind: 'original', description: '续写镜头' });
+    expect(store.query({ resource: 'assets', ids: ['original-asset'] }).items?.[0]).toMatchObject({ sourceKind: 'original', name: '新增道具' });
+    expect(() => store.apply('fake-source', [{ ...shot, id: 'conflict', values: { ...shot.values, source: { fileId: 'fake', start: 0, end: 1, frames: [] } } }])).toThrow('原创内容不能填写原片来源');
+  });
   it('extracts project assets once and refuses to overwrite newly added assets or changed episodes', () => {
     const state = store.snapshot(), project = state.projects.find(item => item.id === projectId)!;
     const versions = { 'episodes:episode-1': state.episodes[0]._version as number };

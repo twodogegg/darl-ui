@@ -22,6 +22,7 @@ export default function ArtAssetDrawer({
   projectId,
   episodeIds = [],
   defaultType,
+  original = false,
   onClose,
 }) {
   const { update, notify, generateMedia, reload, data, models, getModel, mediaJobs, mediaDefaults, setModelSelections } = useStore()
@@ -32,6 +33,7 @@ export default function ArtAssetDrawer({
       episodeIds,
       name: '',
       type: defaultType,
+      ...(original ? { sourceKind: 'original' } : {}),
       description: '',
       appearance: '',
       costume: '',

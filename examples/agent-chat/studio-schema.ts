@@ -3,8 +3,8 @@ export const studioFields = {
   projects: 'title summary cover ratio style_catalog_id generationMode adaptation planned durationMin durationMax duration requirements outline sourceScript updated creationMode targetRegion targetLanguage sourceVideo',
   episodes: 'projectId number title cover script scenes duration stage sourceVideo',
   dialogues: 'projectId episodeId idCode sourceText sourceSpeaker sourceStart sourceEnd targetText targetSpeaker tone timingStatus estimatedSeconds plannedSeconds note',
-  assets: 'projectId episodeIds name type role alias description appearance costume voiceDescription visualMode image prompt variants history voiceId references dependencies imageDependencies source',
-  shots: 'episodeId sceneId description scale camera transition dialogue effects duration source assetIds image imageHistory storyboardPrompt clipId',
+  assets: 'projectId episodeIds name type role alias description appearance costume voiceDescription visualMode image prompt variants history voiceId references dependencies imageDependencies source sourceKind',
+  shots: 'episodeId sceneId description scale camera transition dialogue effects duration source sourceKind assetIds image imageHistory storyboardPrompt clipId',
   clips: 'episodeId sceneId title shotIds sourceSignature description duration prompt storyboardPrompt assetIds excludedAssetImageIds references disabledVoiceIds lastGenerationVoiceIds image imageHistory storyboardImage storyboardHistory imageSource blocking blockingImage blockingHistory excludedFrameUrls videos currentVideo model resolution ratio mode firstFrame lastFrame',
   films: 'projectId episodeId title name url',
   history: 'projectId episodeId message time',
@@ -174,6 +174,7 @@ export function studioValueSchema(resource: StudioResource): Record<string, unkn
     if (arrayFields.has(key)) schema = { type: 'array' };
     if (objectFields.has(key)) schema = key === 'source' ? sourceSchema : key === 'sourceVideo' ? videoSourceSchema : { type: 'object' };
     if (key === 'source' && (resource === 'assets' || resource === 'shots')) schema = { ...sourceSchema, description: resource === 'assets' ? '来源区间须在原片时长内；frames 可引用区间内的原片帧，也可引用本集 sourceVideo.segments 中其他时间点的真实帧（fileId、url、time 按记录原样填写）。' : '来源区间须在原片时长内，frames 的时间必须落在该镜头来源区间内。' };
+    if (key === 'sourceKind') schema = { type: 'string', enum: ['original'], description: '原创新增内容填写 original 并省略 source；原片分析内容填写真实 source，不设置此字段。' };
     if (key === 'creationMode') schema = { type: 'string', enum: ['script', 'video-redraw'] };
     if (key === 'adaptation') schema = { type: 'string', enum: ['忠实', '抽核', '借壳'] };
     if (key === 'targetRegion') schema = { type: 'string', enum: ['japan', 'western'] };

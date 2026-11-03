@@ -348,6 +348,21 @@ it('keeps source ranges for traceability while allowing independently adjusted c
   expect(studio.snapshot().clips[0].prompt).toBe('重新安排\n第一段节奏');
 });
 
+it('creates original continuation clips without assigning fictional source times', () => {
+  const projectId = studio.snapshot().projects[0].id;
+  studio.apply('original-clip-setup', [
+    { resource: 'episodes', op: 'create', id: 'episode', values: { projectId, scenes: [{ id: 'scene', location: '路口', setting: '外', time: '夜', content: '' }] } },
+    { resource: 'shots', op: 'create', id: 'original-shot', values: { episodeId: 'episode', sceneId: 'scene', sourceKind: 'original', description: '后续剧情' } },
+  ]);
+  const state = studio.snapshot(), project = state.projects[0], episode = state.episodes[0];
+  const versions = { 'shots:original-shot': state.shots[0]._version };
+  const clip = { sceneId: 'scene', title: '续写', duration: 5, prompt: '后续剧情', assetIds: [], shotIds: ['original-shot'] };
+  expect(() => saveRedrawVideoPrompts(studio, project, episode, versions, { clips: [{ ...clip, globalStart: 0, globalEnd: 5 }] }, '参考生成', 'fake-time')).toThrow('原创片段不能填写原片时间');
+  const result = saveRedrawVideoPrompts(studio, project, episode, versions, { clips: [clip] }, '参考生成', 'original');
+  expect(result.plan[0]).not.toHaveProperty('globalStart');
+  expect(studio.snapshot().clips[0]).toMatchObject({ title: '续写', shotIds: ['original-shot'] });
+});
+
 it('writes a script into existing scenes only when target dialogue is preserved in order', async () => {
   const { saveRedrawScript } = await import('../examples/agent-chat/server/redraw-script');
   const projectId = studio.snapshot().projects[0].id;

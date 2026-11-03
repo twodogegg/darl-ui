@@ -317,6 +317,7 @@ function ArtWorkspace({ context }) {
                     <span>添加{tab}</span>
                   </button>
                 )}
+                {isRedraw && tab !== '全部' && <button className="asset-card asset-card--add" onClick={() => setEditor('new-original')}><span className="add-plus">＋</span><span>添加原创{tab}</span></button>}
               </div>
             </section>
             <div className="next-actions">
@@ -340,13 +341,14 @@ function ArtWorkspace({ context }) {
         {editor === 'new' && context.project.creationMode === 'video-redraw' ? <SupplementAsset context={context} onClose={() => setEditor(null)} /> : editor && (
           <ArtAssetDrawer
             asset={
-              editor === 'new'
+              editor === 'new' || editor === 'new-original'
                 ? null
                 : data.assets.find((a) => a.id === editor.id)
             }
             projectId={projectId}
             episodeIds={episodeId ? [episodeId] : context.episodes.map((item) => item.id)}
             defaultType={tab === '全部' ? '角色' : tab}
+            original={editor === 'new-original'}
             onClose={() => setEditor(null)}
             onDelete={setDeleting}
           />

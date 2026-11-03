@@ -19,6 +19,13 @@ const data = (episode: Record<string, unknown> = {}) => ({
   clips: [{ id: 'c1', episodeId: 'e1', duration: 5, videos: ['/v.mp4'], currentVideo: '/v.mp4' }, { id: 'c2', episodeId: 'e1', duration: 5, videos: [], currentVideo: '' }],
   films: [],
 });
+it('distinguishes original continuation from source footage in the flow', () => {
+  const state = data();
+  state.shots.push({ id: 'original', episodeId: 'e1', duration: 4, dialogue: [], _position: 2, sourceKind: 'original' } as typeof state.shots[number]);
+  const flow = redrawFlow({ data: state, projectId: 'p', episodeId: 'e1' });
+  expect(flow.nodes.find((item: { id: string }) => item.id === 'analyze')?.output).toContain('原片镜头 2 条 · 场次 2 个');
+  expect(flow.nodes.find((item: { id: string }) => item.id === 'shots')?.output).toContain('镜头 3 条（原创 1）· 台词 1 句');
+});
 const jobs = [
   { id: 'j-assets', kind: 'extract-assets', status: 'running', phase: '整理页面字段', sourceFileId: 'f1' },
   { id: 'j-script', kind: 'write-script', status: 'completed', sourceFileId: 'f1' },
@@ -69,9 +76,9 @@ it('does not mark copied source text as an analyzed outline without a job', () =
 it('derives every node status and its input/output summary from real records and jobs', () => {
   const flow = redrawFlow({ data: data(), jobs, mediaJobs, details, projectId: 'p', episodeId: 'e1' });
   // The source video is the analysis input; the latest run decides the status even when an earlier run completed.
-  expect(node(flow, 'analyze')).toMatchObject({ status: 'failed', jobId: 'j-analyze-2', error: '接口超时', failureStage: '原始分析', input: ['原片 12.3 秒 · 1920×1080', '候选切镜 2 段'], output: ['镜头 2 条 · 场次 2 个'] });
+  expect(node(flow, 'analyze')).toMatchObject({ status: 'failed', jobId: 'j-analyze-2', error: '接口超时', failureStage: '原始分析', input: ['原片 12.3 秒 · 1920×1080', '候选切镜 2 段'], output: ['原片镜头 2 条 · 场次 2 个'] });
   expect(node(flow, 'analyze').runs.map((run: { id: string }) => run.id)).toEqual(['j-analyze-2', 'j-analyze']);
-  expect(node(flow, 'shots')).toMatchObject({ status: 'done', output: ['镜头 2 条 · 台词 1 句', '目标时长 5.5 秒'] });
+  expect(node(flow, 'shots')).toMatchObject({ status: 'done', output: ['镜头 2 条（原创 0）· 台词 1 句', '目标时长 5.5 秒'] });
   expect(node(flow, 'write-script')).toMatchObject({ status: 'done', output: ['剧本 3 字', '场次正文 1/2'] });
   expect(node(flow, 'write-script').input).toContain('目标时长未设置');
   expect(node(redrawFlow({ data: data({ duration: 194 }), jobs, mediaJobs, details, projectId: 'p', episodeId: 'e1' }), 'write-script').input).toContain('目标时长 194 秒');

@@ -143,7 +143,7 @@ function ShotList({ shots, side }) {
   if (!shots.length) return <p className="rf-empty">暂无镜头。</p>
   return shots.map((shot, index) => <div key={shot.id} className="rf-shot">
     <strong>{String(index + 1).padStart(2, '0')}</strong>
-    {side === 'source' ? <div><p className="rf-meta">原片 {Number(shot.source?.start ?? 0).toFixed(1)}–{Number(shot.source?.end ?? 0).toFixed(1)} 秒</p><p>{shot.source?.description || '（无原片画面描述）'}</p>{shot.source?.dialogue && <p className="rf-meta">原对白：{shot.source.dialogue}</p>}</div>
+    {side === 'source' ? <div><p className="rf-meta">{shot.source ? `原片 ${Number(shot.source.start).toFixed(1)}–${Number(shot.source.end).toFixed(1)} 秒` : '原创续写 · 无原片时间'}</p><p>{shot.source?.description || '（无原片画面描述）'}</p>{shot.source?.dialogue && <p className="rf-meta">原对白：{shot.source.dialogue}</p>}</div>
       : <div><p className="rf-meta">{[seconds(shot.duration), shot.scale, shot.camera].filter(Boolean).join(' · ')}</p><p>{shot.description || '（无画面描述）'}</p>{shot.dialogue?.map(line => <p key={line.id} className="rf-meta">{line.type === '旁白' ? '旁白' : line.speaker || '角色'}：{line.text}</p>)}</div>}
   </div>)
 }

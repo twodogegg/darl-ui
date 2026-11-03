@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { StudioChange, StudioRecord } from '../studio-schema';
 import { StudioConflict, StudioStore } from './studio';
 
-type ModelClip = { sceneId: string; title: string; globalStart: number; globalEnd: number; duration: number; prompt: string; assetIds: string[]; shotIds: string[] };
+type ModelClip = { sceneId: string; title: string; globalStart?: number; globalEnd?: number; duration: number; prompt: string; assetIds: string[]; shotIds: string[] };
 export function saveRedrawVideoPrompts(studio: StudioStore, project: StudioRecord, episode: StudioRecord, versions: Record<string, number>, raw: unknown, mode: string, jobId: string, supportedDurations?: number[], modelId?: string) {
   const conflicts = (raw as { conflicts?: unknown })?.conflicts;
   if (conflicts !== undefined && !Array.isArray(conflicts)) throw new Error('模型返回的冲突信息无效');
@@ -21,7 +21,7 @@ export function saveRedrawVideoPrompts(studio: StudioStore, project: StudioRecor
   const htmlBreaksAreAsset = assets.some(asset => String(asset.name).toLowerCase() === 'br');
   const cleanPrompt = (prompt: string) => prompt.replace(htmlBreaksAreAsset ? /<br\s+\/?>|<br\/>/gi : /<br\s*\/?>/gi, '\n').trim();
   const visited = new Set<string>(); let lastIndex = -1;
-  const plan: Array<{ clipId: string; globalStart: number; globalEnd: number; duration: number; shotIds: string[] }> = [];
+  const plan: Array<{ clipId: string; globalStart?: number; globalEnd?: number; duration: number; shotIds: string[] }> = [];
   const changes: StudioChange[] = clips.map((clip, index) => {
     const scene = scenes.find(item => item.id === clip?.sceneId);
     if (!scene || typeof clip.title !== 'string' || !clip.title.trim() || typeof clip.prompt !== 'string' || !clip.prompt.trim() || !Number.isInteger(clip.duration) || clip.duration <= 0 || clip.duration > 15 || !Array.isArray(clip.shotIds) || !clip.shotIds.length || new Set(clip.shotIds).size !== clip.shotIds.length || !Array.isArray(clip.assetIds) || clip.assetIds.some(id => !assets.some(asset => asset.id === id))) throw new Error(`第 ${index + 1} 个片段字段或资产无效；片段时长须为 1–15 的整数秒`);
@@ -31,16 +31,21 @@ export function saveRedrawVideoPrompts(studio: StudioStore, project: StudioRecor
       if (at < 0 || at < lastIndex) throw new Error(`第 ${index + 1} 个片段引用的镜头或顺序无效`);
       lastIndex = at; visited.add(id);
     }
-    if (!Number.isFinite(clip.globalStart) || !Number.isFinite(clip.globalEnd) || clip.globalStart < 0 || clip.globalEnd <= clip.globalStart || (index > 0 && Math.abs(clip.globalStart - clips[index - 1].globalEnd) > 0.1)) throw new Error(`第 ${index + 1} 个片段的原视频时间范围无效或不连续`);
+    const linked = clip.shotIds.map(id => shots.find(shot => shot.id === id)!);
+    const original = linked.every(shot => shot.sourceKind === 'original');
+    if (!original && linked.some(shot => shot.sourceKind === 'original')) throw new Error(`第 ${index + 1} 个片段不能混合原片镜头与原创镜头`);
+    if (original && (clip.globalStart != null || clip.globalEnd != null)) throw new Error(`第 ${index + 1} 个原创片段不能填写原片时间`);
+    if (!original && (typeof clip.globalStart !== 'number' || !Number.isFinite(clip.globalStart) || typeof clip.globalEnd !== 'number' || !Number.isFinite(clip.globalEnd) || clip.globalStart < 0 || clip.globalEnd <= clip.globalStart || (index > 0 && clips[index - 1].globalEnd != null && Math.abs(clip.globalStart - clips[index - 1].globalEnd!) > 0.1))) throw new Error(`第 ${index + 1} 个片段的原视频时间范围无效或不连续`);
     const sceneIds = new Set([scene.id, ...clip.shotIds.map(id => String(shots.find(shot => shot.id === id)!.sceneId))]);
     const assetIds = [...new Set([...clip.assetIds, ...scenes.filter(item => sceneIds.has(item.id)).flatMap(item => item.assetId ? [item.assetId] : [])])];
     const clipId = randomUUID();
-    plan.push({ clipId, globalStart: clip.globalStart, globalEnd: clip.globalEnd, duration: clip.duration, shotIds: clip.shotIds });
+    plan.push({ clipId, ...(!original ? { globalStart: clip.globalStart, globalEnd: clip.globalEnd } : {}), duration: clip.duration, shotIds: clip.shotIds });
     return { resource: 'clips', id: clipId, op: 'create', position: index, values: { episodeId: episode.id, sceneId: scene.id, title: clip.title.trim(), duration: clip.duration, prompt: cleanPrompt(clip.prompt), assetIds, shotIds: clip.shotIds, mode, ...(modelId ? { model: modelId } : {}) } };
   });
   if (shots.some(shot => !visited.has(shot.id))) throw new Error('模型生成的片段遗漏了原片镜头，本批未保存');
-  const firstSource = shots[0]?.source as { start?: number } | undefined, lastSource = shots.at(-1)?.source as { end?: number } | undefined;
-  if ((typeof firstSource?.start === 'number' && Math.abs(clips[0].globalStart - firstSource.start) > 0.1) || (typeof lastSource?.end === 'number' && Math.abs(clips.at(-1)!.globalEnd - lastSource.end) > 0.1)) throw new Error('模型生成的片段未覆盖原片分镜首尾，本批未保存');
+  const sourcedShots = shots.filter(shot => shot.sourceKind !== 'original'), sourcedClips = clips.filter(clip => clip.globalStart != null);
+  const firstSource = sourcedShots[0]?.source as { start?: number } | undefined, lastSource = sourcedShots.at(-1)?.source as { end?: number } | undefined;
+  if ((typeof firstSource?.start === 'number' && Math.abs(sourcedClips[0].globalStart! - firstSource.start) > 0.1) || (typeof lastSource?.end === 'number' && Math.abs(sourcedClips.at(-1)!.globalEnd! - lastSource.end) > 0.1)) throw new Error('模型生成的片段未覆盖原片分镜首尾，本批未保存');
   const prompts = clips.map(clip => cleanPrompt(clip.prompt)).join('\n').replace(/\s+/g, ' '); let dialogueCursor = 0;
   for (const [shotIndex, shot] of shots.entries()) for (const line of Array.isArray(shot.dialogue) ? shot.dialogue as Array<{ text?: unknown }> : []) {
     const text = typeof line.text === 'string' ? line.text.trim() : '';

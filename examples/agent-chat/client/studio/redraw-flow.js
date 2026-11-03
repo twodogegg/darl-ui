@@ -55,6 +55,8 @@ export function redrawFlow({ data, jobs = [], mediaJobs = [], details = {}, proj
   if (!project || !episode) return { episode: null, source: {}, nodes: [], edges: [] }
   const source = episodeSource(project, episode, episodes)
   const shots = data.shots.filter(item => item.episodeId === episode.id).sort(byPosition)
+  const originalShots = shots.filter(shot => shot.sourceKind === 'original').length
+  const sourceShots = shots.length - originalShots
   const scenes = episode.scenes || []
   const assets = data.assets.filter(item => item.projectId === projectId)
   const clips = data.clips.filter(item => item.episodeId === episode.id)
@@ -81,8 +83,8 @@ export function redrawFlow({ data, jobs = [], mediaJobs = [], details = {}, proj
   }
   const media = (pending, done, total, started) => pending ? 'running' : total && done === total ? 'done' : started ? 'partial' : 'idle'
   const state = {
-    analyze: { ...agent('analyze', shots.length), input: [source.fileId ? `原片 ${seconds(source.duration)}${source.width ? ` · ${source.width}×${source.height}` : ''}` : '尚未上传原片', `候选切镜 ${(source.segments || []).length} 段`], output: [`镜头 ${shots.length} 条 · 场次 ${scenes.length} 个`] },
-    shots: { status: !shots.length ? 'idle' : Number(episode.stage || 0) >= 4 || scripted || runs('write-script').length ? 'done' : 'waiting', input: ['原片分析写入的镜头', '向原片分析 Agent 反馈并直接应用'], output: [`镜头 ${shots.length} 条 · 台词 ${lines} 句`, `目标时长 ${seconds(shots.reduce((sum, shot) => sum + Number(shot.duration || 0), 0))}`] },
+    analyze: { ...agent('analyze', sourceShots), input: [source.fileId ? `原片 ${seconds(source.duration)}${source.width ? ` · ${source.width}×${source.height}` : ''}` : '尚未上传原片', `候选切镜 ${(source.segments || []).length} 段`], output: [`原片镜头 ${sourceShots} 条 · 场次 ${scenes.length} 个`] },
+    shots: { status: !shots.length ? 'idle' : Number(episode.stage || 0) >= 4 || scripted || runs('write-script').length ? 'done' : 'waiting', input: ['原片分析镜头与原创续写镜头', '向原片分析 Agent 反馈并直接应用'], output: [`镜头 ${shots.length} 条（原创 ${originalShots}）· 台词 ${lines} 句`, `目标时长 ${seconds(shots.reduce((sum, shot) => sum + Number(shot.duration || 0), 0))}`] },
     'write-script': { ...agent('write-script', scripted), input: [`镜头 ${shots.length} 条`, episode.duration == null ? '目标时长未设置' : `目标时长 ${seconds(episode.duration)}`, '上游报告', '向剧本 Agent 反馈并直接应用'], output: [`剧本 ${String(episode.script || '').length} 字`, `场次正文 ${scenes.filter(scene => String(scene.content || '').trim()).length}/${scenes.length}`] },
     'extract-assets': { ...agent('extract-assets', assets.length), ...(assets.length && imageSlots.length && imaged === imageSlots.length && agent('extract-assets', assets.length).status === 'failed' ? { status: 'done', note: '资产图片已齐；最近一次提取失败' } : {}), input: ['原片分析、剧本、镜头与已有资产', episode.duration == null ? '目标时长未设置' : `目标时长 ${seconds(episode.duration)}`], output: [`资产 ${assets.length} 项`, types, '资产设定与生图提示词'] },
     'asset-images': { status: media(imageJobs.some(job => pendingJob(job) && imageSlots.some(slot => slot.asset.id === job.options?.studioTarget?.id)), imaged, imageSlots.length, imaged), input: ['需要形象的资产生图提示词、风格与参考图'], output: [`已出图 ${imaged}/${imageSlots.length}（不含仅声音角色）`] },

@@ -86,7 +86,7 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 查询 `clips` 未指定 `fields` 时默认不返回 `description`；页面视频描述与视频生成使用 `prompt`。仅需读取 `description` 时使用同一工具显式传入 `fields: ["description"]`；可按需求同时选择其他字段。
 
-结果含真实 `id`、`_version`、`total`、`nextCursor`。全站资源不附带项目/剧集筛选。`prompts` 用 `name` 定位，`mode=default` 取 `defaultText`，`mode=replace` 取 `text`。
+结果含真实 `id`、`_version`、`total`、`nextCursor`。指定 `fields` 时 `id` 和 `_version` 仍自动返回；查询字段是 `_version`，不要填写 `version`。更新、删除时才把返回的 `_version` 填入编辑参数 `version`。记录的排序位置字段是 `_position`，不是 `order`；指定 `fields` 时需要显式填写 `_position`，修改排序用编辑参数 `position`。全站资源不附带项目/剧集筛选。`prompts` 用 `name` 定位，`mode=default` 取 `defaultText`，`mode=replace` 取 `text`。
 
 ### 剧本与场次写入
 
@@ -215,7 +215,7 @@ H3 视频模型支持 `minimax-h3-flash`、`minimax-h3-standard`、`h3-nsfw` 和
 1. 读取项目、剧集、来源视频与已有 `shots`、`assets`。项目已选地区和语言即为有效设定：欧美未指定具体国家时采用通用语境，不为此提问。
 2. 查询 `builtin_read_video_redraw`；没有可复用结果时通过 `builtin_edit_video_redraw` 提交 `analyze`，再调用 `builtin_wait_video_redraw`。服务端自动检测候选切点，直接使用文件服务中原片的 COS 地址，交模型校正并保存镜头及资产条目。已有 COS 原片不重复上传，本地原片需先配置 COS，上传并校验后保留同一 fileId；不依赖网关文件接口；失败时报告真实错误，不重复运行独立切镜或转写。
 3. 回读 `shots` 和 `assets`。根据用户要求使用 `builtin_edit_studio` 调整相应镜头，保留其他镜头和用户修改；画面中的资产以 `<完整资产名称>` 或 `<完整资产名称|状态名称>` 存储，页面显示 @ 标签。 场次的 `assetId` 与可选 `variantId` 关联场景及其状态，连续的同地点同时间镜头属于同一场次；场景无法确认时保留待确认。生成视频片段时必须将所属场次的场景资产和状态带入片段引用与提示词。对白角色必须引用真实角色 ID，原片内容保存在 `source`，目标对白保存在 `dialogue`。
-4. 原片来源区间保存在 `shots.source.start/end`，镜头的目标时长是独立的 `shots.duration`；修改目标时长不要改写来源区间。镜头支持 `camera` 运镜，原片分析写入画面可见的运镜，看不出时留空；时长按 0.1 秒编辑。拆分、合并时检查对白分配和已关联片段，证据不足标记待确认；不要覆盖已完成的媒体。保存后按 ID 回读。
+4. 原片来源区间保存在 `shots.source.start/end`，镜头的目标时长是独立的 `shots.duration`；修改目标时长不要改写来源区间。用户要求新增原创剧情时，原创镜头及资产填写 `sourceKind: "original"` 并省略 `source`，不要编造原片来源；原片分析内容仍须保留真实来源。镜头支持 `camera` 运镜，原片分析写入画面可见的运镜，看不出时留空；时长按 0.1 秒编辑。拆分、合并时检查对白分配和已关联片段，证据不足标记待确认；不要覆盖已完成的媒体。保存后按 ID 回读。
 5. 原片分析完成后可使用 `builtin_edit_video_redraw` 的 `write-script` 提交本集剧本任务，传 `projectId`、`episodeId`、最新项目 `version` 和唯一 `requestId`，可提供 `requirements`；使用 `builtin_wait_video_redraw` 等待。任务基于原始分析、当前分镜和项目目标地区及语言编写，并由独立整理模型写入已有场次及整集剧本，要求按顺序保留目标对白；`openItems` 列出待确认内容。已有正文不会被覆盖。
 6. 使用 `builtin_edit_video_redraw` 的 `extract-assets` 提交资产提取，可在 `requirements` 中提供本次补充要求（最多 2000 字），再通过 `builtin_wait_video_redraw` 等待结果。资产执行 Agent 使用配置的文本模型处理分镜、场次、上游报告和已有资产，不重新调用视频理解模型，输出完整资产报告；整理 Agent 将报告转为资产字段，系统核对生图提示词与报告一致后写入。结果含实际 model 与 providerId，直接更新已有资产的非空文字设定、声音描述和生图提示词，保留已有图片；新增缺失资产、必要状态和镜头关联。已有角色的新增镜头关联须在该镜头文字中找到角色名称、别名或 ID，找不到的关联不写入，在结果 `skippedLinks` 中列出角色与镜头，其余结果照常保存；用户确认后可用 studio 工具手动关联。修改记录在全局变更日志中查看和还原。模型漏掉需要补全的状态时任务失败，报告错误并用新的 requestId 重试。原片分析阶段可先留下空提示词，由资产提取阶段补齐。用户要求调整时使用 studio 工具修改已有资产。
 

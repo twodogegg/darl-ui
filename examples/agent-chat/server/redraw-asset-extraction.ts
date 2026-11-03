@@ -100,9 +100,9 @@ export function saveExtractedAssets(studio: StudioStore, project: StudioRecord, 
       if (Object.keys(values).length) changes.push({ resource: 'assets', id, op: 'update', version: prior._version, values });
     }
     else {
-      const shot = shots.find(item => item.id === asset.shotIds[0])!;
+      const shot = shots.find(item => asset.shotIds.includes(item.id) && item.source) || shots.find(item => item.id === asset.shotIds[0])!;
       const source = shot.source as Record<string, unknown> | undefined;
-      changes.push({ resource: 'assets', id, op: 'create', values: { projectId: project.id, episodeIds: [episode.id], name: asset.name.trim(), type: asset.type, description: String(asset.description || ''), appearance: String(asset.appearance || ''), costume: String(asset.costume || ''), voiceDescription: String(asset.voiceDescription || ''), visualMode, prompt: String(asset.prompt || ''), variants, ...(source?.fileId && Number.isFinite(source.start) && Number.isFinite(source.end) ? { source: { fileId: source.fileId, start: source.start, end: source.end, frames: [], name: asset.name.trim(), description: String(asset.description || ''), confirmed: false } } : {}) } });
+      changes.push({ resource: 'assets', id, op: 'create', values: { projectId: project.id, episodeIds: [episode.id], name: asset.name.trim(), type: asset.type, description: String(asset.description || ''), appearance: String(asset.appearance || ''), costume: String(asset.costume || ''), voiceDescription: String(asset.voiceDescription || ''), visualMode, prompt: String(asset.prompt || ''), variants, ...(source?.fileId && Number.isFinite(source.start) && Number.isFinite(source.end) ? { source: { fileId: source.fileId, start: source.start, end: source.end, frames: [], name: asset.name.trim(), description: String(asset.description || ''), confirmed: false } } : shot.sourceKind === 'original' ? { sourceKind: 'original' } : {}) } });
     }
     for (const shotId of shotIds) { const ids = links.get(shotId) || new Set<string>(); ids.add(id); links.set(shotId, ids); }
   }
