@@ -5,13 +5,16 @@ import { join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { defaultModelConfiguration, effectiveCapabilities, enabledBindings, upgradeModelConfiguration, validateModelConfiguration, type ModelConfiguration } from '../../../src/components/settings/model-config';
 import { auth } from '@modelcontextprotocol/sdk/client/auth.js';
-import { applicationCatalog, connectApplication, createMcpOAuthProvider, loadApplications, saveApplications, MCP_OAUTH_CALLBACK_PATH, McpConnectionManager, toolRisk } from './mcp';
-import { generate, listModels, publicProvider, safeError, validateProvider, type StoredProvider } from './models';
+import { applicationCatalog, connectApplication, conversationApplications, createMcpOAuthProvider, loadApplications, saveApplications, MCP_OAUTH_CALLBACK_PATH, McpConnectionManager, ToolConfirmations, toolRisk } from './mcp';
+import { generate, listModels, publicProvider, safeError, toolResultForModel, validateProvider, type ChatMessage, type StoredProvider } from './models';
+import { DEFAULT_APPROVAL_MODE, shouldConfirm, validateApprovalSettings, isLowRiskCommand } from './approval-settings';
 import { AgentFailure, createAgentError } from './errors';
 import { LocalStorage } from './storage';
+import { ChatSessionConflict, ChatSessionStore } from './chat-sessions';
 import { handleWorkspaceProjectRequest } from './projects';
 import { ProjectStore } from './project-store';
 import { createMediaJobsApi } from './media-jobs-api';
+import { mediaTaskResult } from './media-job-store';
 import { createFailureLog } from './failure-log';
 import { FileStore } from './file-storage';
 import { StorageSettings, fileOptions, storageConfigFromEnv, validateStorageConfig } from './storage-config';
@@ -172,6 +175,8 @@ async function readBody(request: IncomingMessage) {
 
 export function createApi(directory: string, env: Record<string, string>, promptFile: string) {
   const storage = new LocalStorage(directory, env.AGENT_CHAT_DB_PATH?.trim() || 'data.sqlite');
+  const chatSessions = new ChatSessionStore(storage);
+  const chatConfirmations = new ToolConfirmations<boolean>();
   const logFailure = createFailureLog(join(directory, 'logs'));
   const fileConfig = validateStorageConfig(storage.getConfig<unknown>('storageConfiguration') || storageConfigFromEnv(env, storage.path));
   const files = new FileStore(storage.path, fileOptions(fileConfig));
@@ -190,6 +195,12 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     storage.getConfig<{ secretId?: string; secretKey?: string }>('storageConfiguration')?.secretId || '',
     storage.getConfig<{ secretId?: string; secretKey?: string }>('storageConfiguration')?.secretKey || '',
   ]);
+  const analysisCredentials = () => {
+    const provider = storage.getConfig<StoredProvider[]>('providers')?.find(item => item.id === env.VIDEO_ANALYSIS_PROVIDER_ID);
+    if (provider?.apiKey) return { baseUrl: provider.baseUrl, apiKey: provider.apiKey, videoUrlFormat: env.VIDEO_ANALYSIS_VIDEO_URL_FORMAT || provider.videoUrlFormat || 'object' };
+    if (env.VIDEO_ANALYSIS_PROVIDER_ID) return undefined;
+    return env.VIDEO_ANALYSIS_BASE_URL && env.VIDEO_ANALYSIS_API_KEY ? { baseUrl: env.VIDEO_ANALYSIS_BASE_URL, apiKey: env.VIDEO_ANALYSIS_API_KEY, videoUrlFormat: env.VIDEO_ANALYSIS_VIDEO_URL_FORMAT || 'object' } : undefined;
+  };
   const videoRedraw: VideoRedraw = new VideoRedraw(studio, {
     debugLog: workflowDebug,
     workflowAgent: kind => loadWorkflowAgents(storage).find(agent => agent.kind === kind)!,
@@ -206,7 +217,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       if (STUDIO_TOOLS.some(tool => tool.name === name)) return executeStudioTool(studio, name, args, { source: 'workflow' });
       return videoRedraw.read(args);
     },
-    analysisCredentials: () => env.VIDEO_ANALYSIS_BASE_URL && env.VIDEO_ANALYSIS_API_KEY ? { baseUrl: env.VIDEO_ANALYSIS_BASE_URL, apiKey: env.VIDEO_ANALYSIS_API_KEY, videoUrlFormat: env.VIDEO_ANALYSIS_VIDEO_URL_FORMAT || 'object' } : undefined,
+    analysisCredentials,
     videoDurations: () => {
       const modelId = validateDefaultMediaSelection(storage.getConfig<unknown>('defaultMediaModels') || defaultMediaSelection).video.modelId;
       const configuration = storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration();
@@ -374,8 +385,122 @@ export function createApi(directory: string, env: Record<string, string>, prompt
       const providers = await load();
       const modelConfiguration = await loadModelConfiguration();
       const path = request.url.split('?')[0];
+      if (path === '/api/approval-settings' && request.method === 'GET') return send(200, storage.getConfig('approvalSettings') || { mode: DEFAULT_APPROVAL_MODE });
+      if (path === '/api/approval-settings' && request.method === 'POST') {
+        const settings = validateApprovalSettings(await readBody(request));
+        storage.setConfig('approvalSettings', settings);
+        return send(200, settings);
+      }
+      const confirmation = path.match(/^\/api\/tool-confirmations\/([\w-]+)$/);
+      if (confirmation && request.method === 'POST') {
+        const body = await readBody(request);
+        if (typeof body.approved !== 'boolean') throw new Error('确认结果无效');
+        chatConfirmations.decide(confirmation[1], body.approved);
+        return send(200, { accepted: true });
+      }
+      if (path === '/api/chat' && request.method === 'POST') {
+        const body = await readBody(request);
+        const sessionId = typeof body.sessionId === 'string' ? body.sessionId.slice(0, 200) : '';
+        if (!sessionId || !Array.isArray(body.messages) || !body.messages.length || body.messages.length > 200 || body.messages.some((m: ChatMessage) => !m || !['user', 'assistant'].includes(m.role) || (typeof m.content !== 'string' && !Array.isArray(m.content)))) throw new Error('对话消息格式无效');
+        const messages: ChatMessage[] = await Promise.all(body.messages.map(async (message: ChatMessage) => {
+          if (typeof message.content === 'string') return message;
+          if (message.content.length > 20) throw new Error('附件数量过多');
+          const content = await Promise.all(message.content.map(async item => {
+            if (item.type === 'text' && typeof item.text === 'string') return item;
+            if (item.type === 'image' && typeof item.fileId === 'string') {
+              const stored = await files.getBytes(item.fileId);
+              if (!stored || stored.bytes.length > 50 * 1024 * 1024 || !/^image\/(png|jpe?g|webp|gif)$/i.test(stored.file.mimeType)) throw new Error('图片附件无效或过大');
+              return { type: 'image' as const, name: item.name, mimeType: stored.file.mimeType, data: stored.bytes.toString('base64'), fileId: item.fileId };
+            }
+            throw new Error('图片附件无效');
+          }));
+          return { role: message.role, content };
+        }));
+        const selected = resolveTextModel(providers, modelConfiguration, body.providerId, body.modelId);
+        if (!selected) throw new Error('请选择已启用的文本模型');
+        secret = selected.provider.apiKey;
+        const approvalMode = validateApprovalSettings(storage.getConfig('approvalSettings') || { mode: DEFAULT_APPROVAL_MODE }).mode;
+        if (body.approvalMode !== undefined && body.approvalMode !== approvalMode) throw new Error('审批模式已改变，请重试');
+        const skillIds = Array.isArray(body.skillIds) ? body.skillIds : [];
+        const skills = skillLibrary.list();
+        if (skillIds.some((id: unknown) => typeof id !== 'string' || !skills.some(skill => skill.id === id))) throw new Error('引用的 Skill 不存在');
+        const configs = await loadApplications(directory);
+        const apps = conversationApplications(configs, Array.isArray(body.applicationIds) ? body.applicationIds : [], messages);
+        const connections = await Promise.all(apps.map(app => connectionManager.get(`local:${sessionId}`, app, signal)));
+        const remote = connections.flatMap((connection, index) => connection.tools.map((tool, toolIndex) => ({ connection, tool, name: `mcp_${index}_${toolIndex}_${tool.name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40)}` })));
+        const local = isLocalOrLanAddress(request.socket.remoteAddress) ? [...RUNTIME_TOOLS, ...STUDIO_TOOLS, ...REDRAW_TOOLS, ...MEDIA_TOOLS.map(tool => ({ ...tool, risk: (tool.name === 'builtin_generate_media' ? 'write' : 'read') as 'write' | 'read', appId: 'builtin:media', appName: '媒体生成' }))] : [];
+        const context = { sessionId, runId: crypto.randomUUID(), skills, signal };
+        const pageContext = body.websiteContext && typeof body.websiteContext === 'object' ? Object.fromEntries(['page', 'projectId', 'episodeId'].flatMap(key => typeof body.websiteContext[key] === 'string' ? [[key, body.websiteContext[key].slice(0, 200)]] : [])) : {};
+        const instructions = [await loadPrompt(), readFileSync(new URL('../prompts/website.md', import.meta.url), 'utf8'), await runtime.instructions(skills, skillIds, runtime.workspace(sessionId)), `<WEBSITE_CONTEXT untrusted="true">${JSON.stringify(pageContext)}</WEBSITE_CONTEXT>`].filter(Boolean).join('\n\n');
+        response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Request-Id': requestId });
+        const emit = (value: unknown) => { if (!signal.aborted) response.write(`${JSON.stringify(value)}\n`); };
+        let completed = false;
+        try {
+          for await (const text of generate(selected.provider, selected.model, messages, instructions, body.effort, signal, {
+            tools: [...local.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters })), ...remote.map(item => ({ name: item.name, description: `应用：${item.connection.app.name}；工具：${item.tool.name}。${item.tool.description || ''}`, parameters: item.tool.inputSchema }))],
+            maxSteps: 32,
+            execute: async (call, toolSignal) => {
+              const args = JSON.parse(call.arguments || '{}');
+              timeout.touch();
+              const builtin = local.find(tool => tool.name === call.name);
+              const mcp = remote.find(item => item.name === call.name);
+              if (!builtin && !mcp) throw new Error('工具不存在');
+              const risk = builtin?.risk || (mcp ? toolRisk(mcp.connection.app, mcp.tool) : 'dangerous');
+              const runtimeTool = RUNTIME_TOOLS.find(tool => tool.name === call.name);
+              const lowRisk = runtimeTool?.approval === 'workspace' || (runtimeTool?.approval === 'command' && isLowRiskCommand(args.command));
+              const info = { id: call.id, appId: builtin?.appId || mcp!.connection.app.id, appName: builtin?.appName || mcp!.connection.app.name, toolName: builtin?.name || mcp!.tool.name, risk };
+              if (shouldConfirm(approvalMode, risk, lowRisk)) {
+                const resume = timeout.pause();
+                const pending = chatConfirmations.wait(call.id, toolSignal || signal);
+                emit({ type: 'tool', call: { ...info, status: 'confirmation', input: args } });
+                let approved: boolean;
+                try { approved = await pending; } finally { resume(); }
+                if (!approved) { emit({ type: 'tool', call: { ...info, status: 'cancelled' } }); return '用户拒绝了操作，不要自动重试。'; }
+              }
+              emit({ type: 'tool', call: { ...info, status: 'running' } });
+              try {
+                const result = runtimeTool ? await runtime.execute(call.name, args, { ...context, signal: toolSignal || signal }) : STUDIO_TOOLS.some(tool => tool.name === call.name) ? executeStudioTool(studio, call.name, args, { source: 'agent' }) : call.name === 'builtin_generate_media' ? JSON.parse(mediaTaskResult(await mediaJobs.submit({ ...args, taskId: args.requestId || crypto.randomUUID() })).body) : call.name === 'builtin_get_media_task' ? (() => { const job = mediaJobs.store.get(String(args.taskId || '')); if (!job) throw new Error('媒体任务不存在'); return JSON.parse(mediaTaskResult(job).body); })() : builtin ? ('waitForCompletion' in builtin && builtin.waitForCompletion ? await videoRedraw.wait(args, toolSignal || signal) : builtin.risk === 'read' ? videoRedraw.read(args) : videoRedraw.edit(args)) : await mcp!.connection.call(mcp!.tool.name, args, toolSignal || signal);
+                const failed = Boolean(result && typeof result === 'object' && 'isError' in result && result.isError);
+                emit({ type: 'tool', call: { ...info, status: failed ? 'error' : 'success', ...(failed ? { error: '工具执行失败，请查看工具结果。' } : {}) } });
+                if (!failed && builtin && builtin.risk === 'write') emit({ type: 'studio-changed' });
+                if (!failed && call.name === 'builtin_create_skill') emit({ type: 'skills-changed' });
+                return toolResultForModel(result as Record<string, unknown>);
+              } catch (error) {
+                const message = safeError(error, secret);
+                emit({ type: 'tool', call: { ...info, status: 'error', error: message } });
+                return JSON.stringify({ error: message });
+              }
+            },
+          }, undefined, () => timeout.touch())) emit({ type: 'text', text });
+          completed = true;
+          emit({ type: 'done' });
+        } catch (error) { emit({ type: 'error', error: safeError(error, secret) }); }
+        finally { runtime.finishRun(context.runId, completed); }
+        response.end();
+        return;
+      }
+      if (path === '/api/sessions' && request.method === 'GET') return send(200, chatSessions.list());
+      if (path.startsWith('/api/sessions/')) {
+        const id = decodeURIComponent(path.slice('/api/sessions/'.length));
+        if (request.method === 'GET') {
+          const saved = chatSessions.get(id);
+          return saved ? send(200, saved) : send(404, { error: '对话不存在或已删除' });
+        }
+        try {
+          const body = await readBody(request);
+          if (request.method === 'PUT') {
+            if (body.session?.id !== id) throw new Error('聊天记录 ID 不一致');
+            return send(200, chatSessions.save(body.session, body.version));
+          }
+          if (request.method === 'PATCH') return send(200, chatSessions.rename(id, body.title, body.version));
+          if (request.method === 'DELETE') { chatSessions.delete(id, body.version); return send(200, { deleted: true }); }
+        } catch (error) {
+          if (error instanceof ChatSessionConflict) return send(409, { error: error.message });
+          throw error;
+        }
+      }
       if (path === '/api/workflow-agents/tools' && request.method === 'GET') return send(200, [...RUNTIME_TOOLS, ...STUDIO_TOOLS, ...REDRAW_TOOLS].filter(tool => tool.risk === 'read' && !('waitForCompletion' in tool)).map(tool => ({ name: tool.name, title: tool.title, risk: tool.risk })));
-      if (path === '/api/workflow-agents/models' && request.method === 'GET') return send(200, workflowModelOptions(modelConfiguration, providers, env.VIDEO_ANALYSIS_BASE_URL));
+      if (path === '/api/workflow-agents/models' && request.method === 'GET') return send(200, workflowModelOptions(modelConfiguration, providers, analysisCredentials()?.baseUrl));
       if (path === '/api/workflow-agents' && request.method === 'GET') return send(200, loadWorkflowAgents(storage));
       if (path === '/api/workflow-agents' && request.method === 'POST') {
         const next = validateWorkflowAgents(await readBody(request));
@@ -387,7 +512,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
         storage.setConfig('workflowAgents', next);
         return send(200, next);
       }
-      if (path === '/api/tools' && request.method === 'GET') return send(200, [...MEDIA_TOOLS.filter(tool => tool.name !== 'builtin_generate_media'), ...RUNTIME_TOOLS, ...STUDIO_TOOLS, ...REDRAW_TOOLS].map((tool) => ({ ...tool, inputSchema: tool.parameters, parameters: undefined })));
+      if (path === '/api/tools' && request.method === 'GET') return send(200, [...MEDIA_TOOLS, ...RUNTIME_TOOLS, ...STUDIO_TOOLS, ...REDRAW_TOOLS].map((tool) => ({ ...tool, inputSchema: tool.parameters, parameters: undefined })));
       // 列表和目录都只返回可复用的快照：目录是列表的元数据投影，ETag 让重复打开复用 304。
       if (path === '/api/skills' && request.method === 'GET') return sendRevalidatedJson(request, response, new URL(request.url, 'http://localhost').searchParams.has('summary') ? skillLibrary.catalog() : skillLibrary.list());
       // 单个 Skill 的完整包体（含指令与资源）；列表与目录只带元数据。
@@ -701,5 +826,5 @@ export function createApi(directory: string, env: Record<string, string>, prompt
     }
   };
   const scopedMiddleware = (request: IncomingMessage, response: ServerResponse, next: () => void) => requestRecordScope.run({ store: requestRecords, requestId: crypto.randomUUID() }, () => middleware(request, response, next));
-  return Object.assign(scopedMiddleware, { dispose: () => { videoRedraw.dispose(); mediaJobs.runner.stop(); requestRecords.close(); return runtime.dispose(); } });
+  return Object.assign(scopedMiddleware, { dispose: () => { videoRedraw.dispose(); mediaJobs.runner.stop(); requestRecords.close(); chatSessions.close(); return runtime.dispose(); } });
 }

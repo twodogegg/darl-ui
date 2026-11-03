@@ -11,6 +11,7 @@ import { WorkflowAgentSettings } from './WorkflowAgentSettings';
 import { StorageSettings } from './StorageSettings';
 import { RequestRecordsPage } from './RequestRecordsPage';
 import { useFishVoice, VoiceSettings } from './VoiceSettings';
+import { ChatAssistant } from './ChatAssistant';
 
 const defaultMediaModels: DefaultModelOption[] = [
   { id: 'gpt-image-2', name: 'GPT Image 2', type: 'image', description: '图片生成模型', capabilities: { resolutions: ['1K', '2K', '4K'], aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'] }, defaults: { resolution: '2K', aspectRatio: '16:9' } },
@@ -105,5 +106,6 @@ export function App() {
            <div className="example-model-settings"><section className="example-default-models"><header><div><span className="example-eyebrow">DEFAULT MEDIA MODELS</span><h2>默认模型</h2><p>为网站设置默认图片和视频模型。</p></div><button className={buttonClass} onClick={() => setDefaultMediaModelsOpen(true)}><Settings2 size={15} />配置默认模型</button></header><div className="example-default-model-grid"><div><span>图片</span><strong>{defaultMediaSelection.image?.modelId || '未设置'} · {defaultMediaSelection.image?.resolution || '—'} · {defaultMediaSelection.image?.aspectRatio || '—'}</strong></div><div><span>视频</span><strong>{defaultMediaSelection.video?.modelId || '未设置'} · {defaultMediaSelection.video?.resolution || '—'} · {defaultMediaSelection.video?.aspectRatio || '—'}</strong></div></div></section><DefaultModelSelector models={defaultMediaModels} kinds={['image', 'video']} value={defaultMediaSelection} onChange={setDefaultMediaSelection} open={defaultMediaModelsOpen} onOpenChange={setDefaultMediaModelsOpen} onComplete={saveDefaultMediaModels} /><PromptOptimizationSettings models={models} /><MediaConcurrencySettings /><ModelManagementCard configuration={modelConfiguration} providers={providers} onSave={async configuration => setModelConfiguration(await api<ModelConfiguration>('model-config', { configuration }))} onProviderSave={async (provider, apiKey) => setProviders(await api<ModelProvider[]>('providers', { provider, apiKey }))} onProviderDelete={async id => setProviders(await api<ModelProvider[]>(`providers/${id}`, undefined, 'DELETE'))} onFetchModels={(provider, apiKey) => api<AgentModelConfig[]>('providers/models', { provider, ...(apiKey ? { apiKey } : {}) })} onTestConnection={async provider => setProviders(await api<ModelProvider[]>(`providers/${provider.id}/test`, {}))} /></div>}
         </SettingsPage></main>}
     </div>
+    <ChatAssistant models={models} skills={skills} applications={applications} onSkillImport={saveSkill} onSkillsChanged={() => { void api<AgentSkill[]>('skills?summary=1').then(setSkills).catch(reason => setError(reason.message)); }} />
   </DarlUIProvider>;
 }

@@ -4,8 +4,9 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 import { dirname, extname, join } from 'node:path';
 import sharp from 'sharp';
 import { DatabaseSync } from 'node:sqlite';
+import { spawn } from 'node:child_process';
 
-export type StorageBackend = 'local' | 'cos';
+export type StorageBackend = 'local' | 'cos' | 'ssh';
 export type StoredFile = {
   id: string;
   sha256: string;
@@ -34,7 +35,55 @@ export type FileStoreOptions = {
   publicBaseUrl?: string;
   secretId?: string;
   secretKey?: string;
+  sshHost?: string;
+  sshRoot?: string;
 };
+
+const SSH_PROGRAM = `import base64,json,os,sys,tempfile
+p=json.loads(base64.b64decode(sys.argv[1])); path=p['path']; op=p['op']
+if op=='put':
+ os.makedirs(os.path.dirname(path),mode=0o700,exist_ok=True)
+ fd,tmp=tempfile.mkstemp(dir=os.path.dirname(path),prefix='.upload-')
+ try:
+  with os.fdopen(fd,'wb') as f:
+   while True:
+    chunk=sys.stdin.buffer.read(1048576)
+    if not chunk: break
+    f.write(chunk)
+  os.replace(tmp,path)
+ finally:
+  if os.path.exists(tmp): os.unlink(tmp)
+elif op=='get':
+ with open(path,'rb') as f:
+  f.seek(p.get('start',0)); remaining=p.get('length',-1)
+  while remaining != 0:
+   data=f.read(min(1048576,remaining) if remaining>0 else 1048576)
+   if not data: break
+   sys.stdout.buffer.write(data)
+   if remaining>0: remaining-=len(data)
+elif op=='delete':
+ try: os.unlink(path)
+ except FileNotFoundError: pass
+`;
+
+function sshFile(options: FileStoreOptions, key: string, op: 'put' | 'get' | 'delete', bytes?: Buffer, start?: number, length?: number): Promise<Buffer> {
+  const host = options.sshHost || 'h3';
+  const root = options.sshRoot || '/workspace/darl-ui-files';
+  if (!/^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/.test(host) || !root.startsWith('/') || root.split('/').includes('..') || key.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('SSH 存储配置无效');
+  const payload = Buffer.from(JSON.stringify({ op, path: `${root.replace(/\/$/, '')}/${key}`, start, length })).toString('base64');
+  const program = Buffer.from(SSH_PROGRAM).toString('base64');
+  return new Promise((resolve, reject) => {
+    const child = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=yes', host, `python3 -c "import base64;exec(base64.b64decode('${program}'))" ${payload}`]);
+    const out: Buffer[] = [], errors: Buffer[] = [];
+    const timeout = setTimeout(() => child.kill(), 120_000);
+    child.stdout.on('data', (chunk: Buffer) => out.push(chunk));
+    child.stderr.on('data', (chunk: Buffer) => errors.push(chunk));
+    child.on('error', error => { clearTimeout(timeout); reject(error); });
+    child.on('close', code => { clearTimeout(timeout); if (code === 0) resolve(Buffer.concat(out)); else reject(new Error(`SSH 存储操作失败：${Buffer.concat(errors).toString().slice(-1000) || '连接中断或超时'}`)); });
+    child.stdin.on('error', () => {});
+    child.stdin.end(bytes);
+  });
+}
 
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const FILE_MIMES = new Set([...IMAGE_MIMES, 'video/mp4', 'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/x-wav', 'audio/ogg', 'audio/opus', 'audio/flac', 'application/pdf', 'text/plain', 'application/zip', 'application/octet-stream']);
@@ -66,6 +115,8 @@ export class FileStore {
   private readonly localRoot: string;
   private cosSecretId?: string;
   private cosSecretKey?: string;
+  private sshHost: string;
+  private sshRoot: string;
 
   constructor(dbPath: string, options: FileStoreOptions = {}) {
     this.db = new DatabaseSync(dbPath);
@@ -90,16 +141,18 @@ export class FileStore {
     this.localRoot = this.root;
     this.cosSecretId = options.secretId;
     this.cosSecretKey = options.secretKey;
-    const wantsCos = (options.mode || '').toLowerCase() === 'cos' || Boolean(options.secretId && options.secretKey && options.bucket);
+    this.sshHost = options.sshHost || 'h3';
+    this.sshRoot = options.sshRoot || '/workspace/darl-ui-files';
+    const wantsCos = options.mode === 'cos' || (!options.mode && Boolean(options.secretId && options.secretKey && options.bucket));
     if (wantsCos && (!options.secretId || !options.secretKey || !this.bucket)) throw new Error('COS 模式需要 COS_SECRET_ID、COS_SECRET_KEY 和 COS_BUCKET');
-    this.mode = wantsCos ? 'cos' : 'local';
+    this.mode = options.mode === 'ssh' ? 'ssh' : wantsCos ? 'cos' : 'local';
     if (this.mode === 'cos') this.cos = new COS({ SecretId: options.secretId, SecretKey: options.secretKey });
-    else mkdirSync(this.root, { recursive: true, mode: 0o700 });
+    else if (this.mode === 'local') mkdirSync(this.root, { recursive: true, mode: 0o700 });
   }
 
   configure(options: FileStoreOptions) {
     const mode = options.mode || 'local';
-    if (mode !== 'local' && mode !== 'cos') throw new Error('存储模式只能是 local 或 cos');
+    if (mode !== 'local' && mode !== 'cos' && mode !== 'ssh') throw new Error('存储模式无效');
     const secretId = options.secretId || this.cosSecretId;
     const secretKey = options.secretKey || this.cosSecretKey;
     if (mode === 'cos' && (!secretId || !secretKey || !options.bucket)) throw new Error('COS 模式需要完整配置 SecretId、SecretKey 和 Bucket');
@@ -110,6 +163,8 @@ export class FileStore {
     this.scheme = options.scheme || 'https';
     this.publicBaseUrl = options.publicBaseUrl?.replace(/\/$/, '') || undefined;
     this.mode = mode;
+    this.sshHost = options.sshHost || 'h3';
+    this.sshRoot = options.sshRoot || '/workspace/darl-ui-files';
     this.cosSecretId = secretId;
     this.cosSecretKey = secretKey;
     this.cos = mode === 'cos' ? new COS({ SecretId: secretId, SecretKey: secretKey }) : undefined;
@@ -181,7 +236,8 @@ export class FileStore {
     return {
       scheme: item.config.scheme || this.scheme, bucket: item.config.bucket || this.bucket,
       region: item.config.region || this.region, publicBaseUrl: item.config.publicBaseUrl || this.publicBaseUrl,
-      secretId: item.config.secretId || this.cosSecretId, secretKey: item.config.secretKey || this.cosSecretKey, root: item.config.root || this.root };
+      secretId: item.config.secretId || this.cosSecretId, secretKey: item.config.secretKey || this.cosSecretKey, root: item.config.root || this.root,
+      sshHost: item.config.sshHost || this.sshHost, sshRoot: item.config.sshRoot || this.sshRoot };
   }
   private localPath(item: StoredFile) { return join(item.config?.root || this.localRoot, item.objectKey); }
 
@@ -196,10 +252,13 @@ export class FileStore {
     const id = randomUUID();
     const objectKey = `${this.prefix}/${sha256}.${extension}`;
     const createdAt = new Date().toISOString();
-    const config = JSON.stringify({ root: this.root, prefix: this.prefix, region: this.region, bucket: this.bucket, scheme: this.scheme, publicBaseUrl: this.publicBaseUrl, secretId: this.cosSecretId, secretKey: this.cosSecretKey } satisfies FileStoreOptions);
+    const config = JSON.stringify({ root: this.root, prefix: this.prefix, region: this.region, bucket: this.bucket, scheme: this.scheme, publicBaseUrl: this.publicBaseUrl, secretId: this.cosSecretId, secretKey: this.cosSecretKey, sshHost: this.sshHost, sshRoot: this.sshRoot } satisfies FileStoreOptions);
     let uploaded = false;
     if (this.mode === 'cos') {
       await new Promise<void>((resolve, reject) => this.cos!.putObject({ Bucket: this.bucket, Region: this.region, Key: objectKey, Body: bytes, ContentType: mimeType }, (error) => error ? reject(error) : resolve()));
+      uploaded = true;
+    } else if (this.mode === 'ssh') {
+      await sshFile(JSON.parse(config) as FileStoreOptions, objectKey, 'put', bytes);
       uploaded = true;
     } else {
       const path = this.localPath({ id, sha256, name, mimeType, size: bytes.length, extension, backend: 'local', objectKey, createdAt, config: JSON.parse(config) as FileStoreOptions });
@@ -211,7 +270,8 @@ export class FileStore {
     } catch (error) {
       const duplicate = this.byHash(sha256);
       if (duplicate) return duplicate;
-      if (uploaded) await new Promise<void>((resolve) => this.cos!.deleteObject({ Bucket: this.bucket, Region: this.region, Key: objectKey }, () => resolve()));
+      if (uploaded && this.mode === 'cos') await new Promise<void>((resolve) => this.cos!.deleteObject({ Bucket: this.bucket, Region: this.region, Key: objectKey }, () => resolve()));
+      if (uploaded && this.mode === 'ssh') await sshFile(JSON.parse(config) as FileStoreOptions, objectKey, 'delete').catch(() => {});
       throw error;
     }
     return { id, sha256, name: name.slice(0, 240), mimeType, size: bytes.length, extension, backend: this.mode, objectKey, createdAt, config: JSON.parse(config) as FileStoreOptions };
@@ -227,6 +287,7 @@ export class FileStore {
     const file = this.get(id);
     if (!file) return undefined;
     if (file.backend === 'local') return { file, bytes: readFileSync(this.localPath(file)) };
+    if (file.backend === 'ssh') return { file, bytes: await sshFile(this.fileConfig(file), file.objectKey, 'get') };
     const config = this.fileConfig(file);
     const result = await new Promise<{ Body?: Buffer | Uint8Array }>((resolve, reject) => new COS({ SecretId: config.secretId, SecretKey: config.secretKey }).getObject({ Bucket: config.bucket || '', Region: config.region || 'ap-guangzhou', Key: file.objectKey }, (error, data) => error ? reject(error) : resolve(data)));
     return { file, bytes: Buffer.isBuffer(result.Body) ? result.Body : Buffer.from(result.Body || []) };
@@ -236,6 +297,7 @@ export class FileStore {
     const file = this.get(id);
     if (!file) return undefined;
     if (file.backend === 'local') return { file, bytes: readFileSync(this.localPath(file)).subarray(start, end + 1) };
+    if (file.backend === 'ssh') return { file, bytes: await sshFile(this.fileConfig(file), file.objectKey, 'get', undefined, start, end - start + 1) };
     const config = this.fileConfig(file);
     const result = await new Promise<{ Body?: Buffer | Uint8Array; ContentRange?: string; ContentLength?: string }>((resolve, reject) => new COS({ SecretId: config.secretId, SecretKey: config.secretKey }).getObject({
       Bucket: config.bucket || '', Region: config.region || 'ap-guangzhou', Key: file.objectKey, Range: `bytes=${start}-${end}`,
@@ -263,6 +325,7 @@ export class FileStore {
       const config = this.fileConfig(file);
       await new Promise<void>((resolve, reject) => new COS({ SecretId: config.secretId, SecretKey: config.secretKey }).deleteObject({ Bucket: config.bucket || '', Region: config.region || 'ap-guangzhou', Key: file.objectKey }, (error) => error ? reject(error) : resolve()));
     }
+    else if (file.backend === 'ssh') await sshFile(this.fileConfig(file), file.objectKey, 'delete');
     else { try { unlinkSync(this.localPath(file)); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; } }
     return true;
   }
@@ -286,6 +349,15 @@ export class FileStore {
     catch (error) { throw new Error(`COS 探针文件已写入，但删除失败：${error instanceof Error ? error.message : '未知错误'}`); }
   }
 
+  async checkSsh(options: FileStoreOptions) {
+    const key = `${options.prefix || 'darl-ui'}/.connection-check-${randomUUID()}`;
+    const content = Buffer.from('ok');
+    await sshFile(options, key, 'put', content);
+    try {
+      if (!(await sshFile(options, key, 'get')).equals(content)) throw new Error('SSH 探针读取校验失败');
+    } finally { await sshFile(options, key, 'delete'); }
+  }
+
   references(id: string) {
     const rows: unknown[][] = [];
     const original = this.originalUrl(id);
@@ -302,7 +374,7 @@ export class FileStore {
    * assumes the object already exists at the canonical key (rebuild after a lost
    * row); local mode materializes the downloaded bytes on disk.
    */
-  retain(id: string, bytes: Buffer, mimeType: string, name = '') {
+  async retain(id: string, bytes: Buffer, mimeType: string, name = '') {
     const existing = this.get(id);
     if (existing) return existing;
     if (!bytes.length) throw new Error('文件不能为空');
@@ -312,13 +384,14 @@ export class FileStore {
     const safeName = name.slice(0, 240);
     const objectKey = `${this.prefix}/${sha256}.${extension}`;
     const createdAt = new Date().toISOString();
-    const config = JSON.stringify({ root: this.root, prefix: this.prefix, region: this.region, bucket: this.bucket, scheme: this.scheme, publicBaseUrl: this.publicBaseUrl, secretId: this.cosSecretId, secretKey: this.cosSecretKey } satisfies FileStoreOptions);
+    const config = JSON.stringify({ root: this.root, prefix: this.prefix, region: this.region, bucket: this.bucket, scheme: this.scheme, publicBaseUrl: this.publicBaseUrl, secretId: this.cosSecretId, secretKey: this.cosSecretKey, sshHost: this.sshHost, sshRoot: this.sshRoot } satisfies FileStoreOptions);
     const item: StoredFile = { id, sha256, name: safeName, mimeType, size: bytes.length, extension, backend: this.mode, objectKey, createdAt, config: JSON.parse(config) as FileStoreOptions };
     if (this.mode === 'local') {
       const path = this.localPath(item);
       mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
       if (!existsSync(path)) writeFileSync(path, bytes, { flag: 'wx', mode: 0o600 });
     }
+    if (this.mode === 'ssh') await sshFile(item.config, objectKey, 'put', bytes);
     this.db.prepare('INSERT INTO file_assets(id,sha256,name,mime_type,size,extension,backend,object_key,created_at,config_json) VALUES(?,?,?,?,?,?,?,?,?,?)')
       .run(id, sha256, safeName, mimeType, bytes.length, extension, this.mode, objectKey, createdAt, config);
     return this.get(id)!;

@@ -53,16 +53,23 @@ describe('Agent configuration API', () => {
   });
 
 
-  it('removes chat and ordinary Agent endpoints while keeping workflow configuration', async () => {
+  it('persists chat sessions and approval settings alongside workflow configuration', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'darl-no-chat-'));
     const promptFile = join(directory, 'system.md');
     await writeFile(promptFile, '默认提示词');
     try {
       await withApi(directory, promptFile, async request => {
-        for (const path of ['chat', 'agents', 'sessions', 'state', 'approval-settings', 'agent-settings', 'studio-agent-buttons']) {
+        for (const path of ['agents', 'state', 'agent-settings', 'studio-agent-buttons']) {
           expect((await request(path)).status).toBe(404);
           expect((await request(path, {})).status).toBe(404);
         }
+        expect(await (await request('sessions')).json()).toEqual([]);
+        const session = { id: 'test-session', title: '测试', messages: [{ id: 'message', role: 'user', content: '你好' }] };
+        expect((await request('sessions/test-session', { session, version: 0 }, 'PUT')).status).toBe(200);
+        expect((await (await request('sessions/test-session')).json()).session).toEqual(session);
+        expect((await request('sessions/test-session', { session, version: 0 }, 'PUT')).status).toBe(409);
+        expect((await (await request('approval-settings', { mode: 'ask' })).json()).mode).toBe('ask');
+        expect((await (await request('approval-settings')).json()).mode).toBe('ask');
         expect((await request('workflow-agents')).ok).toBe(true);
         expect((await request('skills?summary=1')).ok).toBe(true);
       });

@@ -4,13 +4,13 @@ import { Button } from '../../../src/components/ui/Button';
 import { Field, FieldDescription, FieldLabel, Input, NativeSelect } from '../../../src/components/ui/FormControls';
 
 type StorageConfig = {
-  mode: 'local' | 'cos'; root: string; prefix: string; region: string; bucket: string;
+  mode: 'local' | 'cos' | 'ssh'; root: string; prefix: string; region: string; bucket: string; sshHost: string; sshRoot: string;
   scheme: 'http' | 'https'; publicBaseUrl: string; hasCredentials: boolean;
 };
 type Form = Omit<StorageConfig, 'hasCredentials'> & { secretId: string; secretKey: string };
 const empty: Form = {
   mode: 'local', root: '', prefix: 'darl-ui', region: 'ap-guangzhou', bucket: '',
-  scheme: 'https', publicBaseUrl: '', secretId: '', secretKey: '',
+  scheme: 'https', publicBaseUrl: '', secretId: '', secretKey: '', sshHost: 'h3', sshRoot: '/workspace/darl-ui-files',
 };
 
 async function request<T>(path: string, body?: unknown): Promise<T> {
@@ -53,30 +53,34 @@ export function StorageSettings() {
       if (kind === 'save') apply(await request<StorageConfig>(''));
       setMessage(kind === 'save'
         ? '存储配置已保存。新上传文件会使用当前后端，历史文件仍按原后端读取。'
-        : form.mode === 'local' ? '本地目录可写。' : 'COS 写入与删除探针均成功。');
+        : form.mode === 'local' ? '本地目录可写。' : form.mode === 'ssh' ? 'SSH 写入、读取和删除探针均成功。' : 'COS 写入与删除探针均成功。');
     } catch (reason) { setError(reason instanceof Error ? reason.message : '操作失败'); }
     finally { setBusy(undefined); }
   };
   const hasCosCredentials = form.secretKey ? true : Boolean(saved?.hasCredentials);
-  const canTest = form.mode === 'local' || hasCosCredentials && Boolean(form.bucket);
+  const canTest = form.mode === 'local' || form.mode === 'ssh' && Boolean(form.sshHost && form.sshRoot) || hasCosCredentials && Boolean(form.bucket);
 
   return <section className="example-storage-settings" aria-labelledby="example-storage-settings-title">
     <header>
       <div>
         <span className="example-eyebrow">FILE STORAGE</span>
         <h2 id="example-storage-settings-title">文件存储</h2>
-        <p>本地或腾讯云 COS。配置保存到服务端 SQLite，SecretKey 不会返回浏览器；切换只影响新文件，不迁移历史文件。</p>
+        <p>选择本地磁盘、腾讯云 COS 或 SSH 远程存储。切换只影响新文件，不迁移历史文件。</p>
       </div>
       <span className="example-storage-security"><ShieldCheck size={15} />密钥仅服务端保存</span>
     </header>
     <div className="example-storage-current">
-      <div>{saved?.mode === 'cos' ? <Cloud size={17} /> : <HardDrive size={17} />}<span>当前模式</span><strong>{saved?.mode === 'cos' ? '腾讯云 COS' : '本地磁盘'}</strong></div>
+      <div>{saved?.mode === 'cos' ? <Cloud size={17} /> : <HardDrive size={17} />}<span>当前模式</span><strong>{saved?.mode === 'cos' ? '腾讯云 COS' : saved?.mode === 'ssh' ? 'SSH 远程存储' : '本地磁盘'}</strong></div>
       <div><span>凭证</span><strong>{saved?.hasCredentials ? '已配置' : '未配置'}</strong></div>
-      <div><span>目标</span><strong>{saved?.mode === 'cos' ? saved.bucket || '未设置 Bucket' : saved?.root || '未设置目录'}</strong></div>
+      <div><span>目标</span><strong>{saved?.mode === 'cos' ? saved.bucket || '未设置 Bucket' : saved?.mode === 'ssh' ? `${saved.sshHost}:${saved.sshRoot}` : saved?.root || '未设置目录'}</strong></div>
     </div>
     <form className="example-storage-form" onSubmit={(event) => { event.preventDefault(); void run('save'); }}>
-      <Field><FieldLabel htmlFor="storage-mode">存储模式</FieldLabel><NativeSelect id="storage-mode" value={form.mode} onChange={(event) => update('mode', event.target.value as Form['mode'])}><option value="local">本地磁盘</option><option value="cos">腾讯云 COS</option></NativeSelect><FieldDescription>使用 COS 时本地目录仍作为历史本地文件的读取位置。</FieldDescription></Field>
+      <Field><FieldLabel htmlFor="storage-mode">存储模式</FieldLabel><NativeSelect id="storage-mode" value={form.mode} onChange={(event) => update('mode', event.target.value as Form['mode'])}><option value="local">本地磁盘</option><option value="cos">腾讯云 COS</option><option value="ssh">SSH 远程存储</option></NativeSelect><FieldDescription>历史文件仍从原存储位置读取。</FieldDescription></Field>
       <Field><FieldLabel htmlFor="storage-root">本地存储目录</FieldLabel><Input id="storage-root" value={form.root} onChange={(event) => update('root', event.target.value)} placeholder="/absolute/path/to/files" /><FieldDescription>必须是绝对路径。</FieldDescription></Field>
+      {form.mode === 'ssh' && <>
+        <Field><FieldLabel htmlFor="storage-ssh-host">SSH 主机别名</FieldLabel><Input id="storage-ssh-host" value={form.sshHost} onChange={(event) => update('sshHost', event.target.value)} /><FieldDescription>使用网站服务进程所在环境的 SSH 配置和密钥，需要预先信任主机。</FieldDescription></Field>
+        <Field><FieldLabel htmlFor="storage-ssh-root">远程存储目录</FieldLabel><Input id="storage-ssh-root" value={form.sshRoot} onChange={(event) => update('sshRoot', event.target.value)} /><FieldDescription>文件直接保存在远程目录。实例重建或销毁可能删除文件。</FieldDescription></Field>
+      </>}
       {form.mode === 'cos' && <>
         <div className="example-storage-grid">
           <Field><FieldLabel htmlFor="storage-bucket">Bucket</FieldLabel><Input id="storage-bucket" value={form.bucket} onChange={(event) => update('bucket', event.target.value)} placeholder="example-1250000000" /></Field>

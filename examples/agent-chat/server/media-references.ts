@@ -64,7 +64,7 @@ export async function resolveMediaReferencesInStore(options: Record<string, unkn
     if (!mimeType.startsWith(`${kind}/`)) throw new Error(`参考素材必须是${mediaNames[kind]}`);
     // Metadata rebuild for an object that already exists at the canonical key;
     // keep its backend URL so callers can still fetch it directly.
-    const retained = files.retain(item.fileId, data, mimeType, typeof item.name === 'string' ? item.name : 'reference');
+    const retained = await files.retain(item.fileId, data, mimeType, typeof item.name === 'string' ? item.name : 'reference');
     return { fileId: retained.id, url: files.originalUrl(retained), mimeType: retained.mimeType, name: retained.name };
   });
 }

@@ -169,3 +169,5 @@ body { margin: 0; background: #101113; }
 
 .example-default-model-grid > label { display: grid; gap: 8px; min-width: 0; margin-bottom: 16px; }
 .example-default-model-grid select { width: 100%; min-width: 0; padding: 9px; border: 1px solid var(--darl-border); border-radius: 8px; background: var(--darl-background); color: var(--darl-text); }
+.example-chat-launcher { position: fixed; right: 20px; bottom: 22px; z-index: 40; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 999px; padding: 12px 16px; background: #526f98; color: white; box-shadow: 0 6px 24px #0006; cursor: pointer; }
+.example-chat-error { position: fixed; right: 20px; bottom: 80px; z-index: 41; max-width: min(340px, 90vw); }

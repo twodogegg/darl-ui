@@ -4,6 +4,13 @@
 # 任何失败都不影响提交结果。用 `npm run hooks:install` 启用（设置 core.hooksPath）。
 set -uo pipefail
 
+# H3 receives only the committed tree; deployment errors are recorded separately.
+root="$(git rev-parse --show-toplevel)"
+mkdir -p "$root/.local/logs"
+revision="$(git rev-parse HEAD)"
+(bash "$root/scripts/deploy-h3.sh" "$revision" >> "$root/.local/logs/h3-deploy.log" 2>&1 </dev/null) &
+echo "agent-chat: H3 更新已启动，日志：.local/logs/h3-deploy.log"
+
 read -r label public_host < <(node --input-type=module - <<'JS'
 import { loadEnv } from 'vite';
 const env = loadEnv('production', process.cwd(), '');

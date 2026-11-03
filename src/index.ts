@@ -1,4 +1,8 @@
 import './styles.css';
+export { AgentSidebar } from './components/agent-sidebar/AgentSidebar';
+export { ApprovalModeSelector } from './components/agent-sidebar/ApprovalModeSelector';
+export type { ApprovalModeSelectorProps } from './components/agent-sidebar/ApprovalModeSelector';
+export type { AgentVoice, AgentOutput, AgentApprovalMode, AgentSidebarProps, AgentAttachment, AgentExecutionEvent, AgentExecutionSource, AgentExecutionStatus, AgentImageAttachment, AgentMessage, AgentSession, AgentToolCall, AgentSendRequest, AgentMessageRole, AgentToolStatus } from './components/agent-sidebar/types';
 export { RequestRecords } from './components/request-records/RequestRecords';
 export type { RequestModelType, RequestRecord, RequestRecordStatus, RequestRecordMedia, RequestRecordFilters, RequestRecordPage, RequestRecordRetention, RequestRecordsProps } from './components/request-records/types';
 export { FileUploader } from './components/file-uploader/FileUploader';

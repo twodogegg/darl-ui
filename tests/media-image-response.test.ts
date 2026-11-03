@@ -102,7 +102,7 @@ describe('reference storage', () => {
     });
     try {
       // Seed the metadata row for an object already uploaded to COS: retain() is metadata-only in COS mode, so no network is made.
-      const stored = files.retain('stored-ref', PNG, 'image/png', 'reference.png');
+      const stored = await files.retain('stored-ref', PNG, 'image/png', 'reference.png');
       const options = await persistMediaReferencesInStore({ references: [{ fileId: stored.id, url: files.originalUrl(stored) }] }, files);
       expect(options.references).toEqual([{ fileId: stored.id, url: files.originalUrl(stored), mimeType: 'image/png', name: 'reference.png' }]);
       expect(files.fromUrl(files.originalUrl(stored))?.id).toBe(stored.id);

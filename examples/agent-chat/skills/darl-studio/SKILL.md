@@ -189,7 +189,7 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 | Tool | 参数与返回 |
 | --- | --- |
-| `builtin_generate_media` | 暂时禁用，不可通过 Agent 提交媒体生成任务 |
+| `builtin_generate_media` | `modelId`、`prompt` 和可选 `options`；提交真实媒体任务，返回任务 ID 和状态，受审批模式控制 |
 | `builtin_get_media_task` | `taskId`；返回任务真实状态和结果 |
 
 `modelId` 与生成参数采用当轮 Tool schema。`options` 可含 `resolution`、`aspectRatio`、`duration`、`references`。参考编辑时将指定图片放入 `references`。H3 视频另支持 `referenceVideos`（视频 URL 数组）、`referenceAudios`（音频或音色试听 URL 数组），各最多 3 个且以模型能力为准；音频须搭配图片或视频。支持站内 `/api/files/` 与公网 HTTP(S) URL；已有可访问的 HTTPS/HTTP 素材直接传引用，本地素材由文件服务提供可访问 URL，无法直接访问时才上传到模型供应商。音色引用传真实音频地址，不传音色 ID；是否保持目标声音须试听真实生成结果。
