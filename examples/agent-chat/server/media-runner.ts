@@ -106,10 +106,16 @@ export class MediaJobRunner {
         const id=await submitVideo(job,config.apiKey,(url)=>{
           const match=/^\/api\/files\/([^/?]+)/.exec(url);
           return match?this.fileMedia(decodeURIComponent(match[1])):undefined;
-        });
+        }, () => this.store.get(job.id)?.status === 'running');
+        const current = this.store.get(job.id);
+        if (current?.status !== 'running') {
+          if (current?.status === 'cancelled') { current.remoteTaskId = id; this.store.put(current); }
+          return;
+        }
         job.remoteTaskId=id;job.phase='remote-running';job.nextPollAt=Date.now()+5000;
       }
     }catch(error){
+      if (job.type === 'video' && this.store.get(job.id)?.status !== 'running') return;
       // Only an interrupted submission is genuinely unknown; a failed download is not.
       job.status=job.phase==='submitting'?'uncertain':'failed';
       job.error=(error instanceof Error?error.message:String(error)).slice(0,1200);
@@ -122,7 +128,8 @@ export class MediaJobRunner {
   private async poll(job:MediaJob){
     try{
       const {apiKey}=this.resolve(job);
-      const result=await checkVideo(job,apiKey);
+      const result=await checkVideo(job,apiKey, () => this.store.get(job.id)?.status === 'running');
+      if (this.store.get(job.id)?.status !== 'running') return;
       job.progress=result.progress;
       job.providerResponse=result.provider;
       if(result.state==='failed'){job.status='failed';job.error=result.error;this.onFailure(job,result.error||'远端任务失败',apiKey);}
@@ -130,12 +137,17 @@ export class MediaJobRunner {
         if(!result.media)throw new Error('缺少视频内容');
         job.resultFileIds=[];
         const file = await this.store.saveFile(Buffer.from(result.media), 'video/mp4', `generated-${job.id}.mp4`);
+        if (this.store.get(job.id)?.status !== 'running') {
+          await this.store.removeFiles([{ ...job, resultFileIds: [file.id] }]).catch(() => {});
+          return;
+        }
         job.resultFileIds.push(file.id);
         job.status='completed';job.error=undefined;job.resultForm='url';
       }
       job.phase=job.status==='completed'?'completed':'remote-running';
       job.nextPollAt=job.status==='running'?Date.now()+5000:undefined;
     }catch(error){
+      if (this.store.get(job.id)?.status !== 'running') return;
       // A transient polling/download error never creates another paid video job.
       job.error=(error instanceof Error?error.message:String(error)).slice(0,600);
       job.nextPollAt=Date.now()+15000;

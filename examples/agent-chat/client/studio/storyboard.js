@@ -44,19 +44,21 @@ export function clipMediaReferences(clip, data, { includeFrames = true, selected
   const projectAssets = episode ? data.assets.filter(asset => asset.projectId === episode.projectId) : data.assets
   const mentions = mentionedAssets(selectedOnly && clip.mode === '分镜图' && clip.storyboardPrompt ? clip.storyboardPrompt : clip.prompt, projectAssets).filter(mention => !selectedOnly || (clip.assetIds || []).includes(mention.assetId))
   const assets = projectAssets.filter(asset => (clip.assetIds || []).includes(asset.id) || mentions.some(mention => mention.assetId === asset.id))
+  const visualAssets = assets.filter(asset => !(asset.type === '角色' && (asset.visualMode === 'voice-only' || (clip.excludedAssetImageIds || []).includes(asset.id))))
+  const excludedImages = new Set(assets.filter(asset => !visualAssets.includes(asset)).flatMap(asset => [asset.image, ...(asset.variants || []).map(variant => variant.image)].filter(Boolean).map(referenceKey)))
   const references = Array.isArray(clip.references) ? clip.references.filter(ref => !ref?.h3PromptReference || (!selectedOnly && isH3FormattedPrompt(clip.prompt))) : []
   const excludedFrames = new Set((clip.excludedFrameUrls || []).filter(Boolean))
   const frames = includeFrames ? CLIP_IMAGE_COLUMNS.filter(column => clip[column.key] && !excludedFrames.has(clip[column.key])).map(column => ({ id: `${clip.id}-${column.key}`, name: column.label, kind: 'image', url: clip[column.key] })) : []
   const imageRefs = [
     ...frames,
-    ...assets.filter(asset => asset.image && (!mentions.some(mention => mention.assetId === asset.id && mention.variantId) || mentions.some(mention => mention.assetId === asset.id && !mention.variantId))).map(asset => ({ id: asset.id, name: asset.name, kind: 'image', url: asset.image })),
-    ...mentions.filter(mention => mention.image).map(mention => ({ id: mention.id, name: mention.variantName ? `${mention.name} · ${mention.variantName}` : mention.name, kind: 'image', url: mention.image, protocol: mention.protocol })),
+    ...visualAssets.filter(asset => asset.image && (!mentions.some(mention => mention.assetId === asset.id && mention.variantId) || mentions.some(mention => mention.assetId === asset.id && !mention.variantId))).map(asset => ({ id: asset.id, name: asset.name, kind: 'image', url: asset.image })),
+    ...mentions.filter(mention => mention.image && visualAssets.some(asset => asset.id === mention.assetId)).map(mention => ({ id: mention.id, name: mention.variantName ? `${mention.name} · ${mention.variantName}` : mention.name, kind: 'image', url: mention.image, protocol: mention.protocol })),
   ]
   const seen = new Set(imageRefs.map(referenceKey))
   const additional = []
   for (const [index, raw] of references.entries()) {
     const ref = typeof raw === 'string' ? { url: raw, kind: 'image' } : raw
-    if (!ref?.url || seen.has(referenceKey(ref))) continue
+    if (!ref?.url || seen.has(referenceKey(ref)) || (ref.kind === 'image' && excludedImages.has(referenceKey(ref)))) continue
     seen.add(referenceKey(ref))
     additional.push({ ...ref, id: ref.id || referenceKey(ref), name: ref.name || `${{ image: '图片', video: '视频', audio: '音频' }[ref.kind] || '素材'} ${index + 1}` })
   }
@@ -80,7 +82,8 @@ export function storyboardImageRequest(clip, data) {
 /** 视频制作使用片段当前分镜图或页面所选参考素材。 */
 export function videoImageReferences(clip, references, mode, shots = []) {
   const optimized = (clip?.references || []).filter(ref => ref?.h3PromptReference && ref.kind === 'image' && ref.url)
-  if (isH3FormattedPrompt(clip?.prompt) && optimized.length) return optimized
+  const excludedImages = new Set((references?.assets || []).filter(asset => asset.type === '角色' && (asset.visualMode === 'voice-only' || (clip.excludedAssetImageIds || []).includes(asset.id))).flatMap(asset => [asset.image, ...(asset.variants || []).map(variant => variant.image)].filter(Boolean).map(referenceKey)))
+  if (isH3FormattedPrompt(clip?.prompt) && optimized.length) return optimized.filter(ref => !excludedImages.has(referenceKey(ref)))
   if (mode === '分镜图') return clip?.image ? [{ id: `${clip.id}:storyboard`, name: '分镜图', kind: 'image', url: clip.image }] : []
   return references?.images || []
 }

@@ -6,7 +6,7 @@ import { AssetSourceEvidence } from './VideoRedraw'
 import { useStore } from '../store'
 import { id } from '../data'
 import { download, readMedia } from '../files'
-import { assetImageRequest, assetJob, assetViews, jobLabel, pendingJob } from '../art'
+import { assetImageRequest, assetJob, assetViews, jobLabel, mergeAssetDraft, pendingJob } from '../art'
 import {
   Modal,
   Field,
@@ -119,17 +119,18 @@ export default function ArtAssetDrawer({
   }
   async function persist() {
     if (!form.name.trim()) throw new Error('请输入资产名称')
-    const exists = data.assets.find(item => item.id === form.id)
+    const latestData = await reload()
+    const exists = latestData.assets.find(item => item.id === form.id)
     if (!exists && form._version) throw new Error('资产已被删除，请关闭后重新选择')
-    if (exists && exists._version !== form._version) throw new Error('资产已被其他操作修改，草稿已保留，请核对后重新打开')
     const name = form.name.trim()
-    if (data.assets.some(item => item.id !== form.id && item.projectId === projectId && item.type === form.type && item.name.trim() === name)) throw new Error('同类型同名资产已存在，请使用其他名称')
+    if (latestData.assets.some(item => item.id !== form.id && item.projectId === projectId && item.type === form.type && item.name.trim() === name)) throw new Error('同类型同名资产已存在，请使用其他名称')
     if (exists && exists.name !== name && /[<>|\n]/.test(name)) throw new Error('资产名称不能包含 <、> 或 |')
     if (exists && exists.name !== name && data.assets.some(item => item.id !== form.id && item.projectId === projectId && item.name.trim() === name)) throw new Error('项目中已有同名资产，请使用其他名称以保持引用明确')
     const oldName = exists?.name
-    const candidates = assetMentionCandidates(data.assets.filter(item => item.projectId === projectId))
+    const candidates = assetMentionCandidates(latestData.assets.filter(item => item.projectId === projectId))
     const renameMentions = value => parseAssetMentions(value || '', candidates).map(part => part.candidate?.assetId === form.id ? `<${name}${part.candidate.variantName ? `|${part.candidate.variantName}` : ''}>` : part.protocol || part.text || '').join('')
-    const result = { ...form, name, ...(selected ? { variants: form.variants.map(v => v.id === selected ? { ...v, image } : v) } : { image }) }
+    const draft = { ...form, name, ...(selected ? { variants: form.variants.map(v => v.id === selected ? { ...v, image } : v) } : { image }) }
+    const result = exists && exists._version !== form._version ? mergeAssetDraft(savedForm.current, draft, exists) : draft
     const saved = await update(draft => {
       const index = draft.assets.findIndex(item => item.id === result.id)
       if (index >= 0) draft.assets[index] = result
@@ -162,8 +163,8 @@ export default function ArtAssetDrawer({
     setBusy(true)
     try {
       if (dependencyError) throw new Error(dependencyError)
-      const request = assetImageRequest(form, { variantId: selected, view, customPrompt: current.prompt || '', project: data.projects.find(item => item.id === projectId), ...(editImage ? { editPrompt, image } : {}) })
       const latest = await persist()
+      const request = assetImageRequest(latest, { variantId: selected, view, customPrompt: (selected ? latest.variants.find(item => item.id === selected) : latest)?.prompt || '', project: data.projects.find(item => item.id === projectId), ...(editImage ? { editPrompt, image } : {}) })
       await generateMedia({ ...request, target: { resource: 'assets', id: latest.id, field: 'image', ...(selected ? { variantId: selected } : {}) }, options })
       setEditImage(false)
       setEditPrompt('')
@@ -204,7 +205,7 @@ export default function ArtAssetDrawer({
                 下载{form.type}图
               </button>
               {selected && (
-                <button onClick={() => setVariantForm({ ...variant })}>
+                <button disabled={generating} onClick={() => setVariantForm({ ...variant })}>
                   改名
                 </button>
               )}
@@ -253,7 +254,7 @@ export default function ArtAssetDrawer({
                 <span>{uploading ? '正在上传…' : busy ? '正在提交…' : jobLabel(job)}</span>
               </div>
             )}
-        {stale && <p className="asset-drawer__status" role="alert">资产已更新，当前草稿已保留。请核对后重新打开。</p>}
+        {stale && <p className="asset-drawer__status" role="alert">资产已更新，当前草稿已保留，保存时将检查冲突。</p>}
         {job && !pendingJob(job) && <p className={`asset-drawer__status ${job.error ? 'error' : ''}`} role="status">{jobLabel(job)}{job.error ? `：${job.error}` : job.status === 'completed' ? '，可从历史图片选择并确认保存。' : ''}</p>}
             <div className="asset-drawer__image-actions">
               <button
@@ -286,15 +287,17 @@ export default function ArtAssetDrawer({
             ))}
           </aside>
         </div>
-        <fieldset className="asset-drawer__fields" disabled={generating}><div className="asset-drawer__variants">
+        <div className="asset-drawer__variants">
           <button
             className={`variant ${!selected ? 'active' : ''}`}
+            disabled={busy || uploading}
             onClick={() => {
               setSelected(null)
               setHistoryIndex(null)
             }}
           >
             {form.image ? <img loading="lazy" src={imageUrl(form.image, 160)} alt="主形象" /> : <i />}
+            {pendingJob(assetJob(mediaJobs, form.id)) && <small className="running">生成中</small>}
             <span>
               {form.type === '角色'
                 ? '主形象'
@@ -307,6 +310,7 @@ export default function ArtAssetDrawer({
             <button
               key={v.id}
               className={`variant ${selected === v.id ? 'active' : ''}`}
+              disabled={busy || uploading}
               onClick={() => {
                 setSelected(v.id)
                 setHistoryIndex(null)
@@ -314,7 +318,8 @@ export default function ArtAssetDrawer({
             >
               {v.image ? <img loading="lazy" src={imageUrl(v.image, 160)} alt={v.name} /> : <i />}
               <span>{v.name}</span>
-              <b
+              {pendingJob(assetJob(mediaJobs, form.id, v.id)) && <small className="running">生成中</small>}
+              {!pendingJob(assetJob(mediaJobs, form.id, v.id)) && <b
                 role="button"
                 aria-label={`删除${v.name}`}
                 tabIndex={0}
@@ -330,11 +335,12 @@ export default function ArtAssetDrawer({
                 }}
               >
                 ×
-              </b>
+              </b>}
             </button>
           ))}
           <button
             className="variant add"
+            disabled={busy || uploading}
             onClick={() =>
               setVariantForm({
                 id: id(),
@@ -356,6 +362,8 @@ export default function ArtAssetDrawer({
             </span>
           </button>
         </div>
+        <fieldset className="asset-drawer__fields" disabled={generating}>
+        {form.type === '角色' && <Field label="形象需求"><select aria-label="形象需求" value={form.visualMode || 'visual'} onChange={event => change('visualMode', event.target.value)}><option value="visual">需要形象</option><option value="voice-only">仅声音（无需图片）</option></select></Field>}
         <section className="asset-drawer__generator" aria-label="依赖资产">
           <div className="row"><h4>{form.dependencies?.length ? '融合资产 · 依赖图片' : '依赖资产'}</h4><Button disabled={!dependencyChoices.some(choice => !(form.dependencies || []).some(item => item.assetId === choice.assetId && (item.variantId || '') === (choice.variantId || '')))} onClick={() => {
             const choice = dependencyChoices.find(choice => !(form.dependencies || []).some(item => item.assetId === choice.assetId && (item.variantId || '') === (choice.variantId || '')))

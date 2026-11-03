@@ -31,7 +31,6 @@ export default function Home() {
   const [fileName, setFileName] = useState('')
   const [reading, setReading] = useState(false)
   const [ratio, setRatio] = useState('9:16')
-  const [generationMode, setGenerationMode] = useState('故事版')
   const [adaptation, setAdaptation] = useState('抽核')
   const [planned, setPlanned] = useState('')
   const [durationMin, setDurationMin] = useState(2)
@@ -78,19 +77,18 @@ export default function Home() {
     const name = projectName.trim()
     if (!name) return notify('请填写项目名称')
     if (name.length > 30) return notify('项目名称不能超过 30 个字')
-    if (!styleId) return notify('请选择视觉风格')
     if (planned === '') return notify('请填写计划集数')
     if (!Number.isInteger(Number(planned)) || planned < 1 || planned > 100) return notify('计划集数应为1—100的整数')
     if (![durationMin, durationMax].every(value => Number.isInteger(Number(value)) && value >= 1 && value <= 60) || Number(durationMin) > Number(durationMax)) return notify('请填写有效的单集时长范围')
     setBusy(true)
     let projectId
     try {
-      const result = await studioApi('workspace/projects', { name, description: text.slice(0,2000), aspect_ratio: ratio, style_catalog_id: Number(styleId) })
+      const result = await studioApi('workspace/projects', { name, description: text.slice(0,2000), aspect_ratio: ratio, style_catalog_id: styleId ? Number(styleId) : null })
       projectId = String(result.data.project_id)
       if (images[0]?.fileId) await studioApi(`workspace/projects/${projectId}/covers/files/${images[0].fileId}/select`, {})
       await reload()
       const saved = await update(draft => {
-        Object.assign(draft.projects.find(item => item.id === projectId), { sourceScript: text, requirements: requirements.trim(), generationMode, adaptation, planned: Number(planned), durationMin: Number(durationMin), durationMax: Number(durationMax), outline: makeOutline({}) })
+        Object.assign(draft.projects.find(item => item.id === projectId), { sourceScript: text, requirements: requirements.trim(), adaptation, planned: Number(planned), durationMin: Number(durationMin), durationMax: Number(durationMax), outline: makeOutline({}) })
       })
       if (!saved) throw new Error('原始素材保存失败')
       const latest = await reload()
@@ -221,7 +219,7 @@ export default function Home() {
               <IconSettings size={16} /> 项目设置
             </p>
             <p className="br-setting-hint">
-              填写项目名称，按需设置视觉风格、生成模式、改编幅度、画幅、集数和时长。
+              填写项目名称，按需设置视觉风格、改编幅度、画幅、集数和时长。未指定风格时，由美术资产 Agent 根据剧本确定。
             </p>
             <div className="br-settings">
               <div className="br-field br-field--wide">
@@ -238,13 +236,6 @@ export default function Home() {
                 />
               </div>
               <div className="br-field">
-                <label htmlFor="home-generation-mode">生成模式</label>
-                <select id="home-generation-mode" value={generationMode} onChange={(e) => setGenerationMode(e.target.value)}>
-                  <option>故事版</option>
-                  <option>全能参考</option>
-                </select>
-              </div>
-              <div className="br-field">
                 <label htmlFor="home-adaptation">改编幅度</label>
                 <select id="home-adaptation" value={adaptation} onChange={(e) => setAdaptation(e.target.value)}>
                   <option value="忠实">忠实</option>
@@ -252,7 +243,11 @@ export default function Home() {
                   <option value="借壳">借壳</option>
                 </select>
               </div>
-              <div className="br-field"><label>视觉风格 *</label><button type="button" className="btn" onClick={() => setStyleOpen(true)}>{styles.find(item => item.id === styleId)?.name || '选择视觉风格'}</button></div>
+              <div className="br-field">
+                <label htmlFor="home-visual-style">视觉风格</label>
+                <button id="home-visual-style" type="button" className="btn" aria-label="选择视觉风格" onClick={() => setStyleOpen(true)}>{styles.find(item => item.id === styleId)?.name || '不指定（美术资产 Agent 确定）'}</button>
+                {styleId && <button type="button" className="btn" onClick={() => setStyleId(null)}>不指定</button>}
+              </div>
               <div className="br-field">
                 <label htmlFor="home-aspect">视频画幅</label>
                 <select

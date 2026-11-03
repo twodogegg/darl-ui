@@ -42,6 +42,11 @@ it('shows script project stages and their actual jobs without adding redraw repo
   expect(flow.nodes.find(item => item.id === 'script-storyboard')).toMatchObject({ jobId: 'script-job', status: 'running', output: ['片段 2 个', '视频提示词 1/2'] });
   expect(flow.edges.some(edge => edge.id === 'script-storyboard->video-generation')).toBe(true);
   expect(flow.edges.some(edge => edge.type === 'report')).toBe(false);
+  expect(flow.nodes.find(item => item.id === 'script-assets')?.input).toContain('已选视觉风格或可用风格目录');
+  expect(flow.nodes.find(item => item.id === 'script-assets')?.output).toContain('视觉风格待美术资产 Agent 确定');
+  Object.assign(current.projects[0], { style_catalog_id: 4 });
+  const styled = scriptFlow({ data: current, projectId: 'p', episodeId: 'e1' });
+  expect(styled.nodes.find(item => item.id === 'script-assets')?.output).toContain('已确定项目视觉风格');
 });
 
 it('shows the project outline task before any episodes exist', () => {
@@ -72,7 +77,7 @@ it('derives every node status and its input/output summary from real records and
   expect(node(redrawFlow({ data: data({ duration: 194 }), jobs, mediaJobs, details, projectId: 'p', episodeId: 'e1' }), 'write-script').input).toContain('目标时长 194 秒');
   expect(node(flow, 'extract-assets')).toMatchObject({ status: 'running', phase: '整理页面字段', output: ['资产 2 项', '角色 1 · 场景 1 · 道具 0', '资产设定与生图提示词'] });
   expect(node(flow, 'extract-assets').input).toContain('目标时长未设置');
-  expect(node(flow, 'asset-images')).toMatchObject({ status: 'running', output: ['已出图 1/3'] });
+  expect(node(flow, 'asset-images')).toMatchObject({ status: 'running', output: ['已出图 1/3（不含仅声音角色）'] });
   // Jobs for a replaced source are ignored; clips written without a job still count as produced.
   expect(node(flow, 'video-prompts')).toMatchObject({ status: 'idle', runs: [], output: ['视频提示词 0/2'] });
   expect(node(flow, 'video-prompts').input).toContain('上游报告、视频模型、生成方式与要求');

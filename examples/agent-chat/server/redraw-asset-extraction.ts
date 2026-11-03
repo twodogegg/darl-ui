@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { StudioChange, StudioRecord } from '../studio-schema';
 import { StudioConflict, StudioStore } from './studio';
 
-type Asset = { key: string; existingId?: string; name: string; type: string; description?: string; appearance?: string; costume?: string; voiceDescription?: string; prompt?: string; variants?: Array<{ name: string; description?: string; prompt?: string }>; shotIds: string[] };
+type Asset = { key: string; existingId?: string; name: string; type: string; description?: string; appearance?: string; costume?: string; voiceDescription?: string; visualMode?: string; prompt?: string; variants?: Array<{ name: string; description?: string; prompt?: string }>; shotIds: string[] };
 export type SkippedLink = { assetId: string; name: string; shotId: string };
 /** Formatters often re-wrap long prompts; line breaks and spacing are not content. */
 const compact = (value: string) => value.replace(/\s+/g, ' ').trim();
@@ -62,6 +62,8 @@ export function saveExtractedAssets(studio: StudioStore, project: StudioRecord, 
     if (asset.shotIds.some(id => !shots.some(shot => shot.id === id))) throw new Error(`资产 ${asset.name} 引用了不存在的本集镜头，请核对 shotIds`);
     keys.add(asset.key);
     const prior = asset.existingId ? existing.find(item => item.id === asset.existingId) : undefined;
+    if (asset.visualMode !== undefined && !['visual', 'voice-only'].includes(asset.visualMode)) throw new Error(`资产 ${asset.name} 的形象需求无效`);
+    const visualMode = asset.type === '角色' ? asset.visualMode || prior?.visualMode || 'visual' : 'visual';
     if (asset.existingId && (!prior || prior.type !== asset.type || seen.has(prior.id))) throw new Error(`已有资产 ID 无效或重复：${asset.existingId}`);
     if (!prior && names.has(`${asset.type}:${asset.name.trim()}`)) throw new Error(`资产 ${asset.name} 已存在，请复用其 ID`);
     const id = prior?.id || randomUUID(); seen.add(id); names.add(`${asset.type}:${asset.name.trim()}`);
@@ -81,10 +83,11 @@ export function saveExtractedAssets(studio: StudioStore, project: StudioRecord, 
       }
     }
     for (const variant of variants) if (!(typeof variant.prompt === 'string' && variant.prompt.trim())) throw new Error(`资产 ${asset.name} 的衍生状态 ${variant.name} 缺少生图提示词，请重试资产提取`);
-    if (!(typeof asset.prompt === 'string' && asset.prompt.trim()) && !(typeof prior?.prompt === 'string' && prior.prompt.trim())) throw new Error(`资产 ${asset.name} 的主形象缺少生图提示词；请核对原始报告，必要时重新提取`);
+    if (visualMode !== 'voice-only' && !(typeof asset.prompt === 'string' && asset.prompt.trim()) && !(typeof prior?.prompt === 'string' && prior.prompt.trim())) throw new Error(`资产 ${asset.name} 的主形象缺少生图提示词；请核对原始报告，必要时重新提取`);
     const shotIds = asset.shotIds.filter(shotId => !skipped.has(`${id}:${shotId}`));
     if (prior) {
       const values: Record<string, unknown> = {};
+      if (asset.visualMode && asset.visualMode !== prior.visualMode) values.visualMode = visualMode;
       const episodeIds = (prior.episodeIds || []) as string[];
       if (!episodeIds.includes(episode.id) && shotIds.length) values.episodeIds = [...episodeIds, episode.id];
       for (const field of ['description', 'appearance', 'costume', 'voiceDescription', 'prompt'] as const) {
@@ -99,14 +102,14 @@ export function saveExtractedAssets(studio: StudioStore, project: StudioRecord, 
     else {
       const shot = shots.find(item => item.id === asset.shotIds[0])!;
       const source = shot.source as Record<string, unknown> | undefined;
-      changes.push({ resource: 'assets', id, op: 'create', values: { projectId: project.id, episodeIds: [episode.id], name: asset.name.trim(), type: asset.type, description: String(asset.description || ''), appearance: String(asset.appearance || ''), costume: String(asset.costume || ''), voiceDescription: String(asset.voiceDescription || ''), prompt: String(asset.prompt || ''), variants, ...(source?.fileId && Number.isFinite(source.start) && Number.isFinite(source.end) ? { source: { fileId: source.fileId, start: source.start, end: source.end, frames: [], name: asset.name.trim(), description: String(asset.description || ''), confirmed: false } } : {}) } });
+      changes.push({ resource: 'assets', id, op: 'create', values: { projectId: project.id, episodeIds: [episode.id], name: asset.name.trim(), type: asset.type, description: String(asset.description || ''), appearance: String(asset.appearance || ''), costume: String(asset.costume || ''), voiceDescription: String(asset.voiceDescription || ''), visualMode, prompt: String(asset.prompt || ''), variants, ...(source?.fileId && Number.isFinite(source.start) && Number.isFinite(source.end) ? { source: { fileId: source.fileId, start: source.start, end: source.end, frames: [], name: asset.name.trim(), description: String(asset.description || ''), confirmed: false } } : {}) } });
     }
     for (const shotId of shotIds) { const ids = links.get(shotId) || new Set<string>(); ids.add(id); links.set(shotId, ids); }
   }
   for (const asset of existing) {
     const relevant = (asset.episodeIds as string[] || []).includes(episode.id) || shots.some(shot => (shot.assetIds as string[] || []).includes(asset.id));
     if (relevant && !seen.has(asset.id) && (asset.variants as Array<{ name: string; prompt?: string }> || []).some(variant => !variant.prompt?.trim())) throw new Error(`资产 ${asset.name} 的衍生状态缺少生图提示词，请重试资产提取`);
-    if (relevant && !seen.has(asset.id) && !(typeof asset.prompt === 'string' && asset.prompt.trim())) throw new Error(`资产 ${asset.name} 的主形象缺少生图提示词；请核对原始报告，必要时重新提取`);
+    if (relevant && !seen.has(asset.id) && !(asset.type === '角色' && asset.visualMode === 'voice-only') && !(typeof asset.prompt === 'string' && asset.prompt.trim())) throw new Error(`资产 ${asset.name} 的主形象缺少生图提示词；请核对原始报告，必要时重新提取`);
   }
   for (const [shotId, ids] of links) { const shot = shots.find(item => item.id === shotId)!; const assetIds = [...new Set([...(shot.assetIds as string[] || []), ...ids])]; if (assetIds.length !== (shot.assetIds as string[] || []).length) changes.push({ resource: 'shots', id: shotId, op: 'update', version: shot._version, values: { assetIds } }); }
   if (changes.length > 500) throw new Error('资产与镜头关联数量超过单次保存限制');

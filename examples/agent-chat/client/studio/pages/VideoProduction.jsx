@@ -275,7 +275,7 @@ export default function VideoProduction() {
 function Production({ context }) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { data, patch, update, reload, ensureWritable, notify, generateMedia, models, getModel, mediaDefaults, mediaJobs } = useStore()
+  const { data, patch, update, reload, ensureWritable, notify, generateMedia, cancelMediaJob, models, getModel, mediaDefaults, mediaJobs } = useStore()
   const { episode, projectId, link } = context
   const [busy, setBusy] = useState(false)
   const [modeSetup, setModeSetup] = useState(null)
@@ -356,6 +356,8 @@ function Production({ context }) {
   const [deleting, setDeleting] = useState(null)
   const [deletingJob, setDeletingJob] = useState(null)
   const [removingJob, setRemovingJob] = useState(false)
+  const [cancellingJob, setCancellingJob] = useState(null)
+  const [cancelBusy, setCancelBusy] = useState(false)
   const [preview, setPreview] = useState(null)
   const [parameters, setParameters] = useState(null)
   const [editOpen, setEditOpen] = useState(false)
@@ -416,7 +418,7 @@ function Production({ context }) {
   const activeJobs = mediaJobs.filter(job => job.options?.studioTarget?.resource === 'clips' && job.options.studioTarget.id === active?.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const historyField = 'videos'
   const historyJobs = activeJobs.filter(job => job.options.studioTarget.field === historyField && (job.status !== 'completed' || job.error))
-  const videoJob = activeJobs.find(job => job.options.studioTarget.field === 'videos')
+  const videoJob = activeJobs.find(job => job.options.studioTarget.field === 'videos' && pendingJob(job))
   const generatingVideo = pendingJob(videoJob)
   const currentVideo = active && ('currentVideo' in active ? active.currentVideo : (active.videos || [])[0])
   const canGenerateVideo = Boolean(active && model && !durationError && active.prompt?.trim() && (!model.capabilities?.resolutions?.length || model.capabilities.resolutions.includes(resolution)) && (!model.capabilities?.aspectRatios?.length || model.capabilities.aspectRatios.includes(ratio)))
@@ -513,6 +515,13 @@ function Production({ context }) {
     } catch (reason) { notify(reason.message) }
     finally { setRemovingJob(false) }
   }
+  async function cancelVideoJob() {
+    if (cancelBusy || !cancellingJob) return
+    setCancelBusy(true)
+    try { await cancelMediaJob(cancellingJob.id); setCancellingJob(null) }
+    catch (reason) { notify(reason.message); await reload().catch(() => {}) }
+    finally { setCancelBusy(false) }
+  }
   async function saveVideo(item, clipId) {
     const saved = await update(draft => {
       const clip = draft.clips.find(clip => clip.id === clipId)
@@ -566,6 +575,8 @@ function Production({ context }) {
     const clipMode = clip.mode === '分镜图' ? '分镜图' : '参考生成'
     const refs = clipMediaReferences(clip, data)
     const images = videoImageReferences(clip, refs, clipMode)
+    const optimizedImages = (clip.references || []).filter(ref => ref?.h3PromptReference && ref.kind === 'image' && ref.url)
+    if (isH3FormattedPrompt(clip.prompt) && optimizedImages.length && optimizedImages.length !== images.length) throw new Error('图片引用已变化，请重新优化 H3 提示词后生成')
     if (!preview && clipMode === '分镜图' && !images.length) throw new Error('请先生成或上传片段分镜图')
     const voices = clipVoices(clip, data)
     const enabledVoices = voices.filter(voice => voice.enabled)
@@ -888,7 +899,8 @@ function Production({ context }) {
           <section className="production-main-preview" aria-label="片段预览">
             <h3>片段预览</h3>
             <div className="production-preview-media">
-              {currentVideo ? <video key={`${active.id}-${currentVideo}`} className="production-video" src={currentVideo} controls playsInline preload="metadata" /> : <div className="production-video-empty">{generatingVideo ? <Processing busy text={jobLabel(videoJob)} /> : '尚未生成视频'}</div>}
+              {currentVideo ? <video key={`${active.id}-${currentVideo}`} className="production-video" src={currentVideo} controls playsInline preload="metadata" /> : <div className="production-video-empty">{generatingVideo ? <Processing busy text={jobLabel(videoJob)} cancel={() => setCancellingJob(videoJob)} /> : '尚未生成视频'}</div>}
+              {currentVideo && generatingVideo && <Processing busy text={jobLabel(videoJob)} cancel={() => setCancellingJob(videoJob)} />}
               <div className="production-media-actions"><Button disabled={busy || sourceVideos(active).length < 2} onClick={() => setCompareOpen(true)}>对比视频</Button><details><summary>更多操作</summary><div className="toolbar"><FileButton key={active.id} kind="video" disabled={busy} onSelect={item => saveVideo(item, active.id)}>上传视频</FileButton>{currentVideo && <><Button onClick={() => download(currentVideo, `${active.title}.mp4`)}>下载视频</Button><Button onClick={() => patch('clips', active.id, { currentVideo: '' })}>移除当前视频</Button></>}<Button disabled={busy || !sourceVideos(active).length} onClick={() => setEditOpen(true)}>剪辑 / 拼接</Button></div></details></div>
             </div>
           </section>
@@ -897,7 +909,7 @@ function Production({ context }) {
               {historyOpen && <>
               <div className="row"><h3>当前片段 · 视频历史</h3><Processing busy={busy && submission?.id === active.id && submission.field === 'videos'} text="正在提交视频任务…" /></div>
               <div className="production-history-items">{historyJobs.map(job => <article key={job.id} className={`production-job production-job--${job.status}`} aria-label={`视频${jobLabel(job)}`}>
-                {pendingJob(job) ? <><Processing busy text={jobLabel(job)} />{typeof job.progress === 'number' && <span role="status">{job.progress}%</span>}</> : <p role="alert">{jobLabel(job)}{job.error && `：${job.error}`}</p>}
+                {pendingJob(job) ? <><Processing busy text={jobLabel(job)} cancel={() => setCancellingJob(job)} />{typeof job.progress === 'number' && <span role="status">{job.progress}%</span>}</> : <p role="alert">{jobLabel(job)}{job.error && `：${job.error}`}</p>}
                 {!pendingJob(job) && <Button danger disabled={removingJob} onClick={() => setDeletingJob(job)}>删除记录</Button>}
               </article>)}{(active.videos || []).map((url, index) => {
                 const name = `视频历史版本${(active.videos || []).length - index}`
@@ -965,6 +977,7 @@ function Production({ context }) {
       {deleting && <Confirm title="删除视频片段" danger onClose={() => setDeleting(null)} onConfirm={() => { update((draft) => { draft.clips = draft.clips.filter((clip) => clip.id !== deleting.id) }); setDeleting(null) }}>删除“{deleting.title}”及其生成历史？已生成的视频文件保留。</Confirm>}
       {removingImage && <Confirm title={`删除${removingImage.column.label}`} danger onClose={() => setRemovingImage(null)} onConfirm={() => removeImage(removingImage.column)}>删除当前{removingImage.column.label}？该图片会从历史版本中一并移除，其他历史版本仍会保留；删除后可通过重新生成或上传恢复。</Confirm>}
       {deletingJob && <Modal title="删除生成记录" onClose={() => { if (!removingJob) setDeletingJob(null) }} footer={<><Button disabled={removingJob} onClick={() => setDeletingJob(null)}>取消</Button><Button danger disabled={removingJob} onClick={deleteJob}>{removingJob ? '正在删除…' : '确认删除'}</Button></>}>删除这条生成记录？{deletingJob.status === 'uncertain' && '上游任务结果未知，删除记录不会取消上游任务或退还费用。'}</Modal>}
+      {cancellingJob && <Modal title="取消视频生成" onClose={() => { if (!cancelBusy) setCancellingJob(null) }} footer={<><Button disabled={cancelBusy} onClick={() => setCancellingJob(null)}>继续生成</Button><Button danger disabled={cancelBusy} onClick={cancelVideoJob}>{cancelBusy ? '正在取消…' : '确认取消'}</Button></>}>取消后，本平台将停止处理此任务的结果。上游可能继续生成并产生费用。</Modal>}
       {preview && <MediaPreview item={preview} onClose={() => setPreview(null)} />}
       {parameters && <VersionParametersModal item={parameters} jobs={mediaJobs} models={models} onClose={() => setParameters(null)} />}
       {editOpen && <VideoEditModal sources={sourceVideos(active)} ratio={ratio} onClose={() => setEditOpen(false)} onSaved={saveComposed} />}

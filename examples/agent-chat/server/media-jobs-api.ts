@@ -58,7 +58,7 @@ function presentJob(job: import('./media-job-store').MediaJob, files: FileStore,
   });
   return resultFiles.length ? { ...safe, resultFiles } : safe;
 }
-export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration, providers:()=>StoredProvider[], files:FileStore, hooks: { target?: (value: unknown, type: string) => Record<string, unknown>; prepare?: (input: { prompt: string; options: Record<string, unknown> }, type: string) => { prompt: string; options: Record<string, unknown> }; completed?: (job: import('./media-job-store').MediaJob) => void; publicBaseUrl?: string; imageDownloadProxy?: string } = {}, records?: RequestRecordStore){
+export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration, providers:()=>StoredProvider[], files:FileStore, hooks: { target?: (value: unknown, type: string) => Record<string, unknown>; targetCurrent?: (target: Record<string, unknown>, type: string) => boolean; prepare?: (input: { prompt: string; options: Record<string, unknown> }, type: string) => { prompt: string; options: Record<string, unknown> }; completed?: (job: import('./media-job-store').MediaJob) => void; publicBaseUrl?: string; imageDownloadProxy?: string } = {}, records?: RequestRecordStore){
   const store=new MediaJobStore(dbPath, files, (job) => {
     const provider = providers().find(item => item.id === job.providerId);
     records?.syncMedia(job, { modelName: config().models.find(item => item.id === job.modelId)?.displayName, providerName: provider?.name, secret: provider?.apiKey });
@@ -122,7 +122,7 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         if (Array.isArray(prepared.options.references) && prepared.options.references.length > maxReferences) throw new Error(`包含依赖图片后，参考图片最多 ${maxReferences} 张`);
         if (typeof prepared.options.aspectRatio === 'string' && capabilities?.aspectRatios && !capabilities.aspectRatios.includes(prepared.options.aspectRatio)) throw new Error('模型不支持默认画幅，请明确选择支持的画幅');
         const options=await persistMediaReferencesInStore(await resolveMediaReferencesInStore(prepared.options, files), files);
-        if (target && JSON.stringify(hooks.target?.(rawOptions.studioTarget, type)) !== JSON.stringify(target)) throw new Error('生成目标或依赖图片已变化，请重试');
+        if (target && (hooks.targetCurrent ? !hooks.targetCurrent(target, type) : JSON.stringify(hooks.target?.(rawOptions.studioTarget, type)) !== JSON.stringify(target))) throw new Error('生成目标或依赖图片已变化，请重试');
         if (target) options.studioTarget = target;
         if (requestId) { options.studioRequestId = requestId; options.studioFingerprint = fingerprint; }
         const raced = existing();
@@ -167,6 +167,17 @@ export function createMediaJobsApi(dbPath:string, config:()=>ModelConfiguration,
         const job = await submit(input);
         void runner.tick();
         reply(res,201,job);return true;
+      }
+      const cancelMatch=path.match(/^\/api\/media-generation\/jobs\/([a-f0-9-]+)\/cancel$/);
+      if(cancelMatch && method==='POST'){
+        const job=store.get(cancelMatch[1]);
+        if(!job){reply(res,404,{error:'任务不存在'});return true;}
+        if(job.type!=='video')throw new Error('当前只支持取消视频生成任务');
+        if(job.status!=='queued'&&job.status!=='running')throw new Error('任务已结束，无法取消');
+        job.status='cancelled';job.phase='cancelled';job.nextPollAt=undefined;job.error=undefined;
+        store.put(job);
+        void runner.tick();
+        reply(res,200,presentJob(job,files));return true;
       }
       const match=path.match(/^\/api\/media-generation\/jobs\/([a-f0-9-]+)(\/file)?$/);
       if(match && !match[2] && method==='DELETE'){

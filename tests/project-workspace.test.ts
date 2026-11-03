@@ -80,7 +80,39 @@ describe('SQLite project workspace', () => {
     expect((await request('projects')).data.data.items).toHaveLength(0);
   });
 
-  it('requires title, selected style and supported aspect ratio', async () => {
+  it('persists an unspecified style and allows selecting or clearing it later', async () => {
+    const created = await request('projects', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '待确定风格', aspect_ratio: '9:16' }),
+    });
+    expect(created.status).toBe(201);
+    const id = created.data.data.project_id;
+    expect(created.data.data.project).toMatchObject({ style_catalog_id: null, style: null });
+    expect(new ProjectStore(dbPath, new FileStore(dbPath)).get(id)?.style_catalog_id).toBeNull();
+    for (const style of [4, null]) {
+      const changed = await request('projects/' + id, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: '待确定风格', aspect_ratio: '9:16', style_catalog_id: style }),
+      });
+      expect(changed.status).toBe(200);
+      expect(changed.data.data.style_catalog_id).toBe(style);
+    }
+  });
+
+  it('migrates the required-style database without losing existing projects', async () => {
+    const id = (await createProject()).data.data.project_id;
+    const original = store.get(id);
+    const table = store.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='workspace_projects'").get() as { sql: string };
+    store.db.exec(table.sql.replace('workspace_projects', 'workspace_projects_legacy').replace('style_catalog_id INTEGER REFERENCES', 'style_catalog_id INTEGER NOT NULL REFERENCES'));
+    store.db.exec('INSERT INTO workspace_projects_legacy SELECT * FROM workspace_projects; DROP TABLE workspace_projects; ALTER TABLE workspace_projects_legacy RENAME TO workspace_projects');
+    const migrated = new ProjectStore(dbPath, new FileStore(dbPath));
+    expect(migrated.get(id)).toEqual(original);
+    const created = migrated.create(ProjectStore.validate({ name: '迁移后未指定风格', aspect_ratio: '9:16', style_catalog_id: null }));
+    expect(migrated.get(created.project_id)?.style_catalog_id).toBeNull();
+    expect(migrated.db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
+  it('requires a title, a valid optional style and supported aspect ratio', async () => {
     const bad = await request('projects', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: '', aspect_ratio: '9:16', style_catalog_id: 4 }),

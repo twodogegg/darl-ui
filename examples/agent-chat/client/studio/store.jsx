@@ -150,7 +150,13 @@ export function StudioProvider({ children, models, onNavigate }) {
     announce('生成任务已入队，页面将同步真实进度')
     return job
   }
-  return <Store.Provider value={{ data, update, patch, notify, log, reload, ensureWritable, recover, models, getModel, mediaJobs, mediaDefaults, onNavigate, generateMedia, modelSelections, setModelSelections }}>
+  const cancelMediaJob = async id => {
+    const job = await studioApi(`media-generation/jobs/${encodeURIComponent(id)}/cancel`, {})
+    const apply = () => { if (mounted.current) setMediaJobs(current => current.map(item => item.id === id ? job : item)) }
+    apply()
+    void reload().catch(() => {}).finally(apply)
+  }
+  return <Store.Provider value={{ data, update, patch, notify, log, reload, ensureWritable, recover, models, getModel, mediaJobs, mediaDefaults, onNavigate, generateMedia, cancelMediaJob, modelSelections, setModelSelections }}>
     {error && <div className="studio-error" role="alert">{error}<button onClick={() => recover().catch(reason => setError(reason.message))}>重新加载</button></div>}
     <div className="studio-save-status" role="status">{loading ? '正在读取工作台…' : pending ? `正在保存 ${pending} 批修改…` : error ? '保存失败' : '已同步'}</div>
     {!loading && children}

@@ -13,18 +13,21 @@ export function validateWorkflowFields(kind: string, value: unknown, existing: S
       if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
       const asset = item as Record<string, unknown>;
       const label = `资产 ${typeof asset.name === 'string' && asset.name.trim() ? asset.name : `第 ${index + 1} 项`}`;
-      const prior = kind === 'extract-assets' ? existing.find(record => record.id === asset.existingId) : undefined;
+      const prior = existing.find(record => record.id === asset.existingId);
       const field = (key: string) => typeof asset[key] === 'string' && asset[key].trim() ? asset[key] : prior?.[key];
+      if (asset.type === '角色' && asset.visualMode === 'voice-only' && prior?.visualMode !== 'voice-only' && (prior?.image || prior?.prompt)) throw new Error(`${label} 已有视觉形象，请保留形象需求；仅在片段中关闭图片引用`);
+      const voiceOnly = asset.type === '角色' && field('visualMode') === 'voice-only';
       requiredText(asset.name, `${label} 的名称 (name)`);
       requiredText(asset.type, `${label} 的类型 (type)`);
-      requiredText(field('prompt'), `${label} 的主体生图提示词 (prompt)`);
+      if (!voiceOnly) requiredText(field('prompt'), `${label} 的主体生图提示词 (prompt)`);
       for (const [key, name] of [['description', '描述'], ['appearance', '外貌或结构']] as const) {
+        if (voiceOnly && key === 'appearance') continue;
         const value = field(key);
         requiredText(value, `${label} 的${name} (${key})`);
         if (/^(待确认|不适用|未知|暂无|未说明)[。.!！]?$/u.test(String(value).trim())) throw new Error(`${label} 的${name} (${key}) 只有待确认标记，请整理报告中已有的具体信息；报告不足时应重新提取`);
       }
       if (asset.type === '角色') {
-        for (const [key, name] of [['costume', '服饰'], ['voiceDescription', '声音描述']] as const) requiredText(field(key), `${label} 的${name} (${key})；不适用或无法确认时请如实说明`);
+        for (const [key, name] of [['costume', '服饰'], ['voiceDescription', '声音描述']] as const) if (!voiceOnly || key !== 'costume') requiredText(field(key), `${label} 的${name} (${key})；不适用或无法确认时请如实说明`);
       }
       if (Array.isArray(asset.variants)) for (const [variantIndex, item] of asset.variants.entries()) {
         if (!item || typeof item !== 'object' || Array.isArray(item)) continue;

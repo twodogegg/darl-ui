@@ -58,7 +58,8 @@ function ArtWorkspace({ context }) {
   const [nextModel, setNextModel] = useState('minimax-h3')
   const [nextMode, setNextMode] = useState('参考生成')
   const [extraction, setExtraction] = useState(() => location.state?.extractionError ? { status: 'failed', error: location.state.extractionError } : null)
-  const [extractionOpen, setExtractionOpen] = useState(false), [extractionRequirements, setExtractionRequirements] = useState('')
+  const [extractionOpen, setExtractionOpen] = useState(false), [extractionRequirements, setExtractionRequirements] = useState(''), [extractionBusy, setExtractionBusy] = useState(false)
+  const hasAssets = data.assets.some(item => item.projectId === projectId)
   const isRedraw = context.project.creationMode === 'video-redraw'
   const extractionEpisode = isRedraw ? episodeId || new URLSearchParams(window.location.search).get('episodeId') || context.episodes[0]?.id : context.episodes[0]?.id
   useEffect(() => {
@@ -79,12 +80,15 @@ function ArtWorkspace({ context }) {
     return () => controller.abort()
   }, [projectId, extractionEpisode, extraction?.refresh, isRedraw])
   async function extractAssets() {
+    if (extractionBusy) return
+    setExtractionBusy(true)
     try {
       const latest = await reload()
       const project = latest.projects.find(item => item.id === projectId)
       const job = await studioApi('video-redraw/action', { action: isRedraw ? 'extract-assets' : 'script-assets', projectId, episodeId: extractionEpisode, requestId: crypto.randomUUID(), version: project._version, requirements: extractionRequirements.trim() })
       setExtraction({ ...job, refresh: Date.now() }); setExtractionOpen(false)
-    } catch (error) { setExtractionOpen(false); setExtraction({ status: 'failed', error: error.message }) }
+    } catch (error) { notify(error.message) }
+    finally { setExtractionBusy(false) }
   }
   async function cancelExtraction() {
     try { await studioApi('video-redraw/action', { action: 'cancel', projectId, episodeId: extractionEpisode, jobId: extraction.id || extraction.jobId }); setExtraction(current => ({ ...current, refresh: Date.now() })) }
@@ -180,9 +184,9 @@ function ArtWorkspace({ context }) {
                 </nav>
               </div>
               <div className="art-toolbar__right">
-                {(isRedraw || !data.assets.some(item => item.projectId === projectId) || extraction) && <><WorkflowRunDetails projectId={projectId} episodeId={extractionEpisode} job={extraction} reload={reload} onStarted={next => setExtraction({ ...next, refresh: Date.now() })} /><span role="status">{['queued', 'running'].includes(extraction?.status) ? '正在提取美术资产…' : extraction?.status === 'failed' || extraction?.status === 'interrupted' || extraction?.status === 'cancelled' ? `资产提取${extraction.status === 'cancelled' ? '已取消' : '失败'}：${extraction.error || '请重试'}` : extraction?.status === 'completed' ? '资产提取完成' : ''}</span>{['queued', 'running'].includes(extraction?.status) && <button className="tool-btn" onClick={cancelExtraction}>取消提取</button>}{(isRedraw || !data.assets.some(item => item.projectId === projectId)) && <button className="tool-btn" disabled={!extractionEpisode || ['queued', 'running'].includes(extraction?.status)} onClick={() => setExtractionOpen(true)}>{extraction ? '重新提取资产' : '提取美术资产'}</button>}</>}
+                <WorkflowRunDetails projectId={projectId} episodeId={extractionEpisode} job={extraction} reload={reload} onStarted={next => setExtraction({ ...next, refresh: Date.now() })} /><span role="status">{['queued', 'running'].includes(extraction?.status) ? '正在提取美术资产…' : extraction?.status === 'failed' || extraction?.status === 'interrupted' || extraction?.status === 'cancelled' ? `资产提取${extraction.status === 'cancelled' ? '已取消' : '失败'}：${extraction.error || '请重试'}` : extraction?.status === 'completed' ? '资产提取完成' : ''}</span>{['queued', 'running'].includes(extraction?.status) && <button className="tool-btn" onClick={cancelExtraction}>取消提取</button>}<button className="tool-btn" disabled={!extractionEpisode || ['queued', 'running'].includes(extraction?.status)} onClick={() => { setExtractionRequirements(''); setExtractionOpen(true) }}>{hasAssets || extraction ? '重新提取资产' : '提取美术资产'}</button>
                 <button className="tool-btn art-style-select" aria-label="选择项目视觉风格" title={selectedStyle?.description} disabled={batchBusy || styleBusy} onClick={() => setStyleOpen(true)}>
-                  {styleBusy ? '正在保存风格…' : `视觉风格：${selectedStyle?.name || '请选择'}`}
+                  {styleBusy ? '正在保存风格…' : `视觉风格：${selectedStyle?.name || '不指定（美术资产 Agent 确定）'}`}
                 </button>
                 <select
                   className="batch-view-select"
@@ -285,7 +289,7 @@ function ArtWorkspace({ context }) {
                       <div className="asset-card__meta">
                         <div className="asset-card__name">
                           {a.type === '角色' && (
-                            <span className="role-tag">{a.role || '角色'}</span>
+                            <span className="role-tag">{a.visualMode === 'voice-only' ? '仅声音' : a.role || '角色'}</span>
                           )}
                           <b>{a.name}</b>
                           {a.alias && <span>（别名：{a.alias}）</span>}
@@ -347,7 +351,7 @@ function ArtWorkspace({ context }) {
             onDelete={setDeleting}
           />
         )}
-        {extractionOpen && <Modal title="提取美术资产" onClose={() => setExtractionOpen(false)} footer={<><Button onClick={() => setExtractionOpen(false)}>取消</Button><Button primary onClick={extractAssets}>开始提取</Button></>}><Field label="补充要求（选填）"><textarea aria-label="资产提取补充要求" maxLength={2000} rows={3} value={extractionRequirements} onChange={event => setExtractionRequirements(event.target.value)} placeholder="例如：重点补充剧本中的关键道具" /></Field><p className="muted">{isRedraw ? 'AI 将更新资产文字和提示词，并保留已有图片。' : 'AI 将根据全项目剧本和大纲提取资产；已有资产时不会覆盖。'}修改可在顶栏“变更日志”中查看和还原。</p></Modal>}
+        {extractionOpen && <Modal title={hasAssets ? "重新提取资产" : "提取美术资产"} onClose={() => { if (!extractionBusy) setExtractionOpen(false) }} footer={<><Button disabled={extractionBusy} onClick={() => setExtractionOpen(false)}>取消</Button><Button primary disabled={extractionBusy} onClick={extractAssets}>{extractionBusy ? "提交中…" : "开始提取"}</Button></>}><Field label="补充要求（选填）"><textarea aria-label="资产提取补充要求" maxLength={2000} rows={3} value={extractionRequirements} onChange={event => setExtractionRequirements(event.target.value)} placeholder="例如：重点补充剧本中的关键道具" /></Field><p className="muted">{isRedraw ? 'AI 将更新资产文字和提示词，并保留已有图片。' : hasAssets ? 'AI 将结合全项目剧本、大纲、当前资产和补充要求更新资产；按要求移除的资产及其镜头、片段关联可在变更日志中还原。' : 'AI 将根据全项目剧本和大纲提取资产。'}修改可在顶栏“变更日志”中查看和还原。</p></Modal>}
         {voice && data.assets.some(a => a.id === voice.id) && (
           <VoiceModal
             asset={data.assets.find((a) => a.id === voice.id)}

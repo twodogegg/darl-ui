@@ -55,6 +55,12 @@ function changeLabel(resource: StudioResource, record: StudioRecord, data: Studi
   return { name: String(record.name || record.title || record.id) };
 }
 const list = (value: unknown) => Array.isArray(value) ? value as Array<Record<string, unknown>> : [];
+// Other variants can finish independently; only changes to this target or its shared inputs block selection.
+function assetMediaSnapshot(asset: StudioRecord, variantId?: unknown) {
+  const { _version, _position, variants, history, imageDependencies, ...shared } = asset;
+  const variant = variantId ? (variants as Array<Record<string, unknown>> || []).find(item => item.id === variantId) : undefined;
+  return createHash('sha256').update(canonical({ shared, ...(variantId ? { variant: variant || null } : {}) })).digest('hex');
+}
 /** Records that would break reference validation if the target were deleted. */
 function references(resource: StudioResource, record: Record<string, unknown>, target: StudioResource, id: string) {
   if (target === 'assets') return ((resource === 'shots' || resource === 'clips') && (record.assetIds as unknown[] || []).includes(id))
@@ -409,12 +415,21 @@ export class StudioStore {
       if (project?.creationMode === 'video-redraw') {
         const assets = state.assets.filter(asset => (item.assetIds as string[]).includes(asset.id));
         if (!assets.length) throw new Error('视频转绘片段须关联原片提取的目标资产');
-        const missing = assets.filter(asset => !asset.image);
+        const missing = assets.filter(asset => !(asset.type === '角色' && (asset.visualMode === 'voice-only' || ((item.excludedAssetImageIds || []) as string[]).includes(asset.id))) && !asset.image);
         if (missing.length) throw new Error(`请先准备目标资产图片：${missing.map(asset => asset.name).join('、')}`);
       }
     }
     if (target.variantId && !(item.variants as Array<{ id: string }> | undefined)?.some(variant => variant.id === target.variantId)) throw new Error('资产形态不存在');
-    return { resource, id: item.id, version: item._version, field: target.field, ...(resource === 'assets' ? { dependencyImages: resolveAssetDependencies(item, state.assets) } : {}), ...(target.variantId ? { variantId: target.variantId } : {}) };
+    return { resource, id: item.id, version: item._version, field: target.field, ...(resource === 'assets' ? { dependencyImages: resolveAssetDependencies(item, state.assets), assetSnapshot: assetMediaSnapshot(item, target.variantId) } : {}), ...(target.variantId ? { variantId: target.variantId } : {}) };
+  }
+  mediaTargetCurrent(target: Record<string, unknown>, type: string) {
+    const resource = studioResource(target.resource), item = this.snapshot()[resource].find(record => record.id === target.id);
+    if (!item) return false;
+    try {
+      const latest = this.mediaTarget({ ...target, version: item._version }, type);
+      if (resource !== 'assets') return canonical(latest) === canonical(target);
+      return canonical({ ...latest, version: target.version }) === canonical(target);
+    } catch { return false; }
   }
   prepareMedia(input: { prompt: string; options: Record<string, unknown> }, type: string) {
     const target = input.options.studioTarget as Record<string, unknown> | undefined;
@@ -458,7 +473,8 @@ export class StudioStore {
       try { dependenciesCurrent = sameDependencyImages(dependencies, resolveAssetDependencies(item, this.snapshot().assets)); }
       catch { dependenciesCurrent = false; }
     }
-    const values: Record<string, unknown> = {}, current = item._version === target.version && dependenciesCurrent;
+    const targetUnchanged = resource === 'assets' && typeof target.assetSnapshot === 'string' ? assetMediaSnapshot(item, target.variantId) === target.assetSnapshot : item._version === target.version;
+    const values: Record<string, unknown> = {}, current = targetUnchanged && dependenciesCurrent;
     const dependencyHistory = (entry: Record<string, unknown>) => ({ ...(entry.imageDependencies as Record<string, unknown> || {}), ...Object.fromEntries(urls.map(url => [url, dependencies])) });
     if (target.variantId) {
       values.variants = (item.variants as Array<Record<string, unknown>>).map(variant => variant.id === target.variantId ? { ...variant, imageDependencies: dependencyHistory(variant), history: [...urls, ...(variant.history as string[] || [])], ...(current ? { image: urls[0] } : {}) } : variant);

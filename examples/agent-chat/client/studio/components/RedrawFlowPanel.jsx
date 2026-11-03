@@ -12,7 +12,7 @@ import { KIND_LABELS } from './ChangeLog'
 import { Tabs } from './ui'
 
 const JOB_STATUS = { queued: '排队中', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断' }
-const CONTEXT_LABELS = { project: '项目设定', feedback: '修改意见', episode: '剧集', requirements: '补充要求', extractionRequirements: '提取要求', duration: '原片时长', candidates: '候选切镜', script: '剧本', scenes: '场次', shots: '镜头', clips: '片段关联', assets: '资产', originalReport: '原任务报告', feedbackHistory: '历史反馈与答复', mode: '生成方式', videoModel: '视频模型时长', sourceAnalysis: '原片分析报告' }
+const CONTEXT_LABELS = { project: '项目设定', availableStyles: '可用视觉风格', feedback: '修改意见', episode: '剧集', requirements: '补充要求', extractionRequirements: '提取要求', duration: '原片时长', candidates: '候选切镜', script: '剧本', scenes: '场次', shots: '镜头', clips: '片段关联', assets: '资产', originalReport: '原任务报告', feedbackHistory: '历史反馈与答复', mode: '生成方式', videoModel: '视频模型时长', sourceAnalysis: '原片分析报告' }
 const RESULT_LABELS = { shots: '镜头', assets: '资产', scenes: '场次', openItems: '待确认事项', created: '新增资产', linkedShots: '关联镜头', skippedLinks: '未写入的角色关联', clips: '片段', plan: '片段规划', readyToApply: '待审核', applied: '已应用', appliedCount: '应用数量' }
 const HIDDEN_CONTEXT = new Set(['projectId', 'episodeId'])
 const formatTime = value => value ? new Date(value).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
@@ -130,11 +130,11 @@ function AgentOutput({ node, flow, detail }) {
 function Records({ node, flow }) {
   if (node.id === 'outline') return <Section title="当前项目大纲"><pre className="rf-pre">{json(flow.project?.outline || {})}</pre></Section>
   if (node.id === 'novel-script') return <Records node={{ id: 'write-script' }} flow={flow} />
-  if (node.id === 'script-assets') return <Records node={{ id: 'extract-assets' }} flow={flow} />
+  if (node.id === 'script-assets') return <><p className="rf-meta">项目视觉风格：{flow.project?.style_catalog_id ? '已确定，可在美术资产页查看或调整' : '未指定，由美术资产 Agent 根据剧本确定'}。</p><Records node={{ id: 'extract-assets' }} flow={flow} /></>
   if (node.id === 'script-storyboard') return <Records node={{ id: 'video-prompts' }} flow={flow} />
   if (node.id === 'analyze') return <ShotList shots={flow.shots} side="target" />
   if (node.id === 'write-script') return <><Text title="剧本" text={flow.episode.script} />{flow.scenes.map((scene, index) => <Text key={scene.id} title={`第 ${index + 1} 场 · ${[scene.setting, scene.location, scene.time].filter(Boolean).join(' ')}`} text={scene.content} />)}</>
-  if (node.id === 'extract-assets') return flow.assets.length ? flow.assets.map(asset => <div key={asset.id} className="rf-item rf-item--plain"><div><strong>{asset.name}</strong><span className="rf-meta"> · {asset.type}{asset.variants?.length ? ` · 衍生形态 ${asset.variants.length}` : ''}</span><Text title="生图提示词" text={asset.prompt || [asset.appearance, asset.costume].filter(Boolean).join('\n')} /></div></div>) : <p className="rf-empty">暂无资产。</p>
+  if (node.id === 'extract-assets') return flow.assets.length ? flow.assets.map(asset => <div key={asset.id} className="rf-item rf-item--plain"><div><strong>{asset.name}</strong><span className="rf-meta"> · {asset.type}{asset.type === '角色' && asset.visualMode === 'voice-only' ? ' · 仅声音' : ''}{asset.variants?.length ? ` · 衍生形态 ${asset.variants.length}` : ''}</span><Text title="生图提示词" text={asset.prompt || [asset.appearance, asset.costume].filter(Boolean).join('\n')} /></div></div>) : <p className="rf-empty">暂无资产。</p>
   if (node.id === 'storyboard-prompts' || node.id === 'video-prompts') return flow.clips.length ? flow.clips.map(clip => <div key={clip.id} className="rf-item rf-item--plain"><div><strong>{clip.title || '未命名片段'}</strong><span className="rf-meta"> · {seconds(clip.duration)} · {clip.mode === '分镜图' ? '分镜图' : '参考生成'}</span>{node.id === 'storyboard-prompts' ? (clip.mode === '分镜图' ? <Text title="分镜提示词" text={clip.storyboardPrompt} /> : <p className="rf-meta">参考生成无需分镜提示词</p>) : <Text title="视频提示词" text={clip.prompt} />}</div></div>) : <p className="rf-empty">暂无片段。</p>
   return null
 }
@@ -199,7 +199,7 @@ function AgentData({ node, flow, tab, details, loadDetail }) {
 }
 
 function ImageData({ flow, tab }) {
-  if (!flow.imageSlots.length) return <p className="rf-empty">暂无资产，转绘资产完成后这里会列出每张资产图。</p>
+  if (!flow.imageSlots.length) return <p className="rf-empty">暂无需要生成的资产图片；仅声音角色不需要图片。</p>
   return flow.imageSlots.map(({ asset, variant, image }) => {
     const job = assetJob(flow.imageJobs, asset.id, variant?.id)
     const name = `${asset.name}${variant ? ` · ${variant.name}` : ''}`

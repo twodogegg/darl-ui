@@ -447,15 +447,21 @@ function videoReferenceGroups(job: MediaJob) {
   return groups;
 }
 
-export async function submitVideo(job: MediaJob, key: string, localMedia?: LocalMediaReader): Promise<string> {
+export async function submitVideo(job: MediaJob, key: string, localMedia?: LocalMediaReader, isActive: () => boolean = () => true): Promise<string> {
   ensureHttp(job.baseUrl);
+  const check = () => { if (!isActive()) throw new Error('任务已取消'); };
   const groups = videoReferenceGroups(job);
   const images = await videoAssetIds(job, key, groups.images, localMedia);
+  check();
   const videos = await videoAssetIds(job, key, groups.videos, localMedia);
+  check();
   const audios = await videoAssetIds(job, key, groups.audios, localMedia);
+  check();
   const frame = async (value: unknown) => value ? (await videoAssetIds(job, key, [value], localMedia))[0] : undefined;
   const firstFrameImage = await frame(job.options.firstFrame);
+  check();
   const lastFrameImage = await frame(job.options.lastFrame);
+  check();
   const result = await createH3Video(job.baseUrl, key, {
     model: job.upstreamModelId,
     prompt: promptFor(job),
@@ -470,10 +476,11 @@ export async function submitVideo(job: MediaJob, key: string, localMedia?: Local
   }, AbortSignal.timeout(300000));
   return result.id;
 }
-export async function checkVideo(job: MediaJob, key: string): Promise<{ state: 'running' | 'failed' | 'completed'; progress?: number; provider?: Record<string, unknown>; error?: string; media?: Buffer }> {
+export async function checkVideo(job: MediaJob, key: string, isActive: () => boolean = () => true): Promise<{ state: 'running' | 'failed' | 'completed'; progress?: number; provider?: Record<string, unknown>; error?: string; media?: Buffer }> {
   if (!job.remoteTaskId) throw new Error('视频远端编号未保存');
   ensureHttp(job.baseUrl);
   const remote = await getH3Video(job.baseUrl, key, job.remoteTaskId, AbortSignal.timeout(30000));
+  if (!isActive()) throw new Error('任务已取消');
   const metadata = { ...(remote.progress !== undefined ? { progress: remote.progress } : {}), provider: { ...remote } };
   if (remote.status === 'failed') return { ...metadata, state: 'failed', error: remote.error || '视频生成失败' };
   if (remote.status === 'completed') return { ...metadata, state: 'completed', media: Buffer.from(await downloadH3Video(job.baseUrl, key, remote, AbortSignal.timeout(300000))) };

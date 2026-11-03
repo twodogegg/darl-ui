@@ -228,7 +228,7 @@ export function createApi(directory: string, env: Record<string, string>, prompt
   const videoEditing = new VideoEditing(files);
   const openCut = new OpenCutProjects(studio, files);
   const publicBaseUrl = env.AGENT_CHAT_PUBLIC_BASE_URL || (env.AGENT_CHAT_PUBLIC_HOST ? `${String(env.AGENT_CHAT_PUBLIC_HOST).startsWith('http') ? env.AGENT_CHAT_PUBLIC_HOST : `https://${env.AGENT_CHAT_PUBLIC_HOST}`}` : undefined);
-  const mediaJobs = createMediaJobsApi(storage.path, () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), () => storage.getConfig<StoredProvider[]>('providers') || [], files, { target: (value, type) => studio.mediaTarget(value, type), prepare: (input, type) => studio.prepareMedia(input, type), completed: job => studio.attachMedia(job), publicBaseUrl, imageDownloadProxy: env.IMAGE_DOWNLOAD_PROXY?.trim() }, requestRecords);
+  const mediaJobs = createMediaJobsApi(storage.path, () => storage.getConfig<ModelConfiguration>('modelConfiguration') || defaultModelConfiguration(), () => storage.getConfig<StoredProvider[]>('providers') || [], files, { target: (value, type) => studio.mediaTarget(value, type), targetCurrent: (target, type) => studio.mediaTargetCurrent(target, type), prepare: (input, type) => studio.prepareMedia(input, type), completed: job => studio.attachMedia(job), publicBaseUrl, imageDownloadProxy: env.IMAGE_DOWNLOAD_PROXY?.trim() }, requestRecords);
   if (!storage.getConfig<boolean>('requestRecordsInitialized')) {
     for (const job of mediaJobs.store.list()) {
       const provider = storage.getConfig<StoredProvider[]>('providers')?.find(item => item.id === job.providerId);

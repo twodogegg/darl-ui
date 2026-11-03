@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { ReferencePicker, MediaPreview, Modal, Field, Button } from './ui'
 import { useStore } from '../store'
 import { clipMediaReferences, clipVoices, referenceKey, updateClipReferences, CLIP_IMAGE_COLUMNS } from '../storyboard'
+import { mentionedAssets } from '../../../asset-mentions'
 
 export default function ClipReferences({ clip, projectId }) {
   const { data, patch } = useStore()
@@ -11,6 +12,7 @@ export default function ClipReferences({ clip, projectId }) {
   const [renaming, setRenaming] = useState(null)
   const [referenceName, setReferenceName] = useState('')
   const { assets, additional, images } = clipMediaReferences(clip, data)
+  const mentions = mentionedAssets(clip.prompt, assets)
   const voices = clipVoices(clip, data)
   const excludedFrameUrls = new Set(clip.excludedFrameUrls || [])
   const frameColumns = CLIP_IMAGE_COLUMNS.filter((column) => clip[column.key])
@@ -42,16 +44,25 @@ export default function ClipReferences({ clip, projectId }) {
           <span className="sb-asset-label">{type}</span>
           {assets
             .filter((a) => a.type === type)
-            .map((a) => (
+            .map((a) => {
+              const mentioned = mentions.filter((item) => item.assetId === a.id)
+              const variants = [...new Map(mentioned.filter((item) => item.variantId).map((item) => [item.id, item])).values()]
+              const appearances = [
+                ...(!variants.length || mentioned.some((item) => !item.variantId) ? [{ name: a.name, image: a.image }] : []),
+                ...variants.map((item) => ({ name: `${item.name} · ${item.variantName}`, image: item.image })),
+              ]
+              return (
               <span className="sb-asset-chip" key={a.id}>
-                <button
+                {appearances.map((appearance) => <button
+                  key={appearance.name}
                   className="sb-chip-open"
-                  disabled={!a.image}
-                  onClick={() => setPreview({ name: a.name, url: a.image })}
+                  disabled={!appearance.image}
+                  onClick={() => setPreview({ name: appearance.name, url: appearance.image })}
                 >
-                  {a.image && <img loading="lazy" className="sb-asset-chip__thumb" src={imageUrl(a.image, 160)} alt="" />}
-                  <span className="sb-asset-chip__name">{a.name}{!a.image && '（未生成图片）'}</span>
-                </button>
+                  {appearance.image && <img loading="lazy" className="sb-asset-chip__thumb" src={imageUrl(appearance.image, 160)} alt="" />}
+                  <span className="sb-asset-chip__name">{appearance.name}{a.type === '角色' && a.visualMode === 'voice-only' ? '（仅声音）' : !appearance.image && '（未生成图片）'}</span>
+                </button>)}
+                {a.type === '角色' && a.visualMode !== 'voice-only' && <label title="关闭后仍可使用角色音色"><input type="checkbox" aria-label={`引用${a.name}图片`} checked={!(clip.excludedAssetImageIds || []).includes(a.id)} onChange={event => patch('clips', clip.id, { excludedAssetImageIds: event.target.checked ? (clip.excludedAssetImageIds || []).filter(id => id !== a.id) : [...new Set([...(clip.excludedAssetImageIds || []), a.id])] })} />图片</label>}
                 <button
                   className="sb-asset-chip__remove"
                   aria-label={`移除关联${a.name}`}
@@ -64,7 +75,7 @@ export default function ClipReferences({ clip, projectId }) {
                   ×
                 </button>
               </span>
-            ))}
+            )})}
           <button className="sb-asset-add" onClick={() => setPicker('assets')}>
             +{type}
           </button>

@@ -5,7 +5,7 @@ export type ProjectInput = {
   name: string;
   description: string | null;
   aspect_ratio: string;
-  style_catalog_id: number;
+  style_catalog_id: number | null;
 };
 
 export type StyleInput = { name: string; prompt: string; image?: Buffer; mimeType?: string };
@@ -207,13 +207,21 @@ export class ProjectStore {
       'CREATE TABLE IF NOT EXISTS workspace_style_files (style_id INTEGER PRIMARY KEY REFERENCES workspace_styles(id), file_id TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);',
       'CREATE TABLE IF NOT EXISTS workspace_projects (',
       'id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, description TEXT,',
-      'aspect_ratio TEXT NOT NULL, style_catalog_id INTEGER NOT NULL REFERENCES workspace_styles(id),',
+      'aspect_ratio TEXT NOT NULL, style_catalog_id INTEGER REFERENCES workspace_styles(id),',
       'cover_file_id TEXT, status TEXT NOT NULL DEFAULT \'active\',',
       'created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);',
       'CREATE INDEX IF NOT EXISTS workspace_projects_status_idx ON workspace_projects(status, id);',
     ].join('\n'));
-    const projectColumns = this.db.prepare('PRAGMA table_info(workspace_projects)').all() as Array<{ name: string }>;
+    const projectColumns = this.db.prepare('PRAGMA table_info(workspace_projects)').all() as Array<{ name: string; notnull: number }>;
     if (!projectColumns.some((column) => column.name === 'cover_file_id')) this.db.exec('ALTER TABLE workspace_projects ADD COLUMN cover_file_id TEXT');
+    if (projectColumns.some(column => column.name === 'style_catalog_id' && column.notnull)) {
+      const table = this.db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workspace_projects'").get() as { sql: string };
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        this.db.exec(table.sql.replace('workspace_projects', 'workspace_projects_nullable').replace(/style_catalog_id INTEGER NOT NULL/i, 'style_catalog_id INTEGER'));
+        this.db.exec('INSERT INTO workspace_projects_nullable SELECT * FROM workspace_projects; DROP TABLE workspace_projects; ALTER TABLE workspace_projects_nullable RENAME TO workspace_projects; CREATE INDEX workspace_projects_status_idx ON workspace_projects(status, id); COMMIT');
+      } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    }
     // 内置风格按版本种子化：默认风格集合变更时提升版本号，先清空旧内置风格再整批写入。
     // 只替换 is_owned = 0 的记录，用户自建风格（is_owned = 1）不受影响。
     this.db.exec("CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)");
@@ -336,7 +344,7 @@ export class ProjectStore {
       .get(Number(row.style_catalog_id)) as { id: number; name: string } | undefined;
     return {
       id: Number(row.id), name: String(row.name), description: row.description ?? null,
-      aspect_ratio: String(row.aspect_ratio), style_catalog_id: Number(row.style_catalog_id),
+      aspect_ratio: String(row.aspect_ratio), style_catalog_id: row.style_catalog_id == null ? null : Number(row.style_catalog_id),
       cover_asset: coverFile && coverUrl && coverThumbnail ? { file_id: coverFile.id, storage_key: coverUrl, thumbnail_url: coverThumbnail, ...(coverPreview ? { preview_url: coverPreview } : {}) } : null,
       style: style || null, episode_count: this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='studio_records'").get() ? Number((this.db.prepare("SELECT COUNT(*) AS count FROM studio_records WHERE resource='episodes' AND json_extract(data,'$.projectId')=?").get(String(row.id)) as { count: number }).count) : 0,
       created_at: row.created_at, updated_at: row.updated_at,
@@ -351,15 +359,15 @@ export class ProjectStore {
     if (item.description != null && (typeof item.description !== 'string' || item.description.length > 2000))
       throw new Error('项目简介不能超过 2000 字');
     if (!ratios.has(String(item.aspect_ratio))) throw new Error('不支持的画面比例');
-    if (!Number.isSafeInteger(item.style_catalog_id) || Number(item.style_catalog_id) <= 0)
+    if (item.style_catalog_id != null && (!Number.isSafeInteger(item.style_catalog_id) || Number(item.style_catalog_id) <= 0))
       throw new Error('请选择有效的视觉风格');
     return { name: item.name.trim(),
       description: typeof item.description === 'string' ? item.description.trim() || null : null,
-      aspect_ratio: String(item.aspect_ratio), style_catalog_id: Number(item.style_catalog_id) };
+      aspect_ratio: String(item.aspect_ratio), style_catalog_id: item.style_catalog_id == null ? null : Number(item.style_catalog_id) };
   }
 
   create(value: ProjectInput) {
-    if (!this.hasStyle(value.style_catalog_id)) throw new Error('视觉风格不存在');
+    if (value.style_catalog_id != null && !this.hasStyle(value.style_catalog_id)) throw new Error('视觉风格不存在');
     const result = this.db.prepare(
       'INSERT INTO workspace_projects (name, description, aspect_ratio, style_catalog_id) VALUES (?, ?, ?, ?)',
     ).run(value.name, value.description, value.aspect_ratio, value.style_catalog_id);
@@ -369,7 +377,7 @@ export class ProjectStore {
 
   update(id: number, value: ProjectInput) {
     if (!this.get(id)) return null;
-    if (!this.hasStyle(value.style_catalog_id)) throw new Error('视觉风格不存在');
+    if (value.style_catalog_id != null && !this.hasStyle(value.style_catalog_id)) throw new Error('视觉风格不存在');
     this.db.prepare(
       "UPDATE workspace_projects SET name = ?, description = ?, aspect_ratio = ?, style_catalog_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'active'",
     ).run(value.name, value.description, value.aspect_ratio, value.style_catalog_id, id);

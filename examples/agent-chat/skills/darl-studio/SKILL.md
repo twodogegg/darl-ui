@@ -30,6 +30,8 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 读取使用 `builtin_read_studio`，创建、修改、删除使用 `builtin_edit_studio`；查询和还原修改记录使用 `builtin_read_studio_changes`、`builtin_restore_studio_changes`（见“变更日志与还原”）。
 
+角色资产 `visualMode` 默认 `visual`；仅当有明确依据表明角色只需声音时设置为 `voice-only`，该角色无需图片及生图提示词。已有视觉形象的角色不要仅因某一片段是画外音而改为 `voice-only`。片段 `excludedAssetImageIds` 列出本片段不引用图片的角色 ID，不影响关联角色或音色；默认引用现有角色图。设置画外音时仍应在片段描述中写明说话人与不入画。
+
 | 分类 | resource | 内容 |
 | --- | --- | --- |
 | 项目与大纲 | `projects` | 项目信息、`sourceScript`（用户提交的原始素材，不是剧集正文）、`requirements`、`outline` |
@@ -43,6 +45,8 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 | 音频与音色 | `audio`、`voices` | 音频和音色记录 |
 | 创作提示词设置 | `prompts` | 各创作环节的全站规则 |
 | 视觉风格 | `styles` | 只读风格目录 |
+
+项目 `style_catalog_id` 可省略或设为 null，表示“不指定”。剧本项目的 `script-assets` 工作流会根据大纲、全部剧本和创作要求，从真实风格目录选择统一风格，与资产同批保存；已有风格保持不变。执行报告给出所选风格与理由，完成后回读项目 `style_catalog_id` 和资产确认结果。生图仍由项目风格统一注入，不把画风写入各资产提示词。首页不选择生成模式，改编幅度仍保留忠实、抽核、借壳。
 
 剧本项目的 `projects.adaptation` 保存改编幅度（`忠实` / `抽核` / `借壳`）；项目 `outline` 另外包含 `props:[{id,name,purpose,involvement}]`，只记录确实影响剧情的关键叙事道具。
 
@@ -86,7 +90,7 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 ### 剧本与场次写入
 
-剧本项目的全项目资产为空时，可用 `builtin_edit_video_redraw` 的 `script-assets` 提交资产提取：传 `projectId`、第一集 `episodeId`、最新项目 `version` 和唯一 `requestId`，可选 `requirements`；通过 `builtin_wait_video_redraw` 等待或 `builtin_read_video_redraw` 查询。该独立工作流读取全项目大纲和剧本，提取角色、场景和关键道具与生图提示词；不需要视频或镜头，不自动生成图片。项目已有资产或提取期间项目、剧集、资产变化时不会覆盖；失败可查看任务详情、重试整理或重新提取。
+剧本项目可用 `builtin_edit_video_redraw` 的 `script-assets` 提交资产提取：传 `projectId`、第一集 `episodeId`、最新项目 `version` 和唯一 `requestId`，可选 `requirements`；通过 `builtin_wait_video_redraw` 等待或 `builtin_read_video_redraw` 查询。该独立工作流读取全项目大纲、剧本和当前资产，提取角色、场景和关键道具与生图提示词；不需要视频或镜头，不自动生成图片。重新提取可通过 requirements 提交修改要求，更新已有资产文字和提示词，保留继续使用的资产图片及关联，按用户明确要求移除资产并清除镜头和片段的资产关联；对白、场次或其他资产仍引用时须先解除关联；未提及的资产保留，移除可在变更日志还原；提取期间项目、剧集或资产变化时不会写入；失败可查看任务详情、重试整理或重新提取。
 
 剧本项目使用 `builtin_edit_video_redraw` 的 `script-storyboard`，传 `projectId`、`episodeId`、最新项目 `version`、唯一 `requestId`，可选 `requirements` 和 `mode`（参考生成或分镜图）；再通过 `builtin_wait_video_redraw` 等待或查询状态。该独立阶段读取大纲、本集剧本和美术资产，按剧情顺序创建本集视频片段及视频提示词，允许回到已有场次；仅分镜图模式生成分镜图提示词，参考生成模式不生成；不读取转绘原片，已有片段不会覆盖。支持任务详情、取消及失败后重试。
 
@@ -194,7 +198,7 @@ H3 视频模型支持 `minimax-h3-flash` 与 `minimax-h3-standard`；视频清�
 
 资产提取后按 describe 分别填写 description（身份/用途）、appearance（外貌/空间/材质）、costume（主服饰）、voiceDescription（有原声依据的声音）、prompt（可执行的资产图指令）；原片证据放 source。不要把一句描述塞进所有字段，或把剧情截图换脸当成角色一致性资产。原片证据不足的内容标记待确认。
 
-自动关联生成结果使用 `options.studioTarget`，字段为 `resource`（`assets` 或 `clips`）、`id`、最新 `version`、`field`，形态另传 `variantId`。图片字段为资产 `image`或片段 `image`、`storyboardImage`、`blockingImage`；视频字段为片段 `videos`。提交后用任务查询 Tool 获取结果。
+自动关联生成结果使用 `options.studioTarget`，字段为 `resource`（`assets` 或 `clips`）、`id`、最新 `version`、`field`，形态另传 `variantId`。图片字段为资产 `image`或片段 `image`、`storyboardImage`、`blockingImage`；视频字段为片段 `videos`。不同形态的图片任务可并行提交；每个任务按目标形态与共享输入判断是否自动选用结果，目标或依赖变化时保留结果历史。提交后用任务查询 Tool 获取结果。
 
 ## 视频转绘：原视频生成分镜
 

@@ -4,4 +4,6 @@
 
 逐项整理主体描述和外貌或结构，以及每个衍生状态的描述。角色的服饰和声音描述按报告填写；明确不适用时写“不适用”，没有依据时写“待确认”，不得编造细节。场景和道具无需填写服饰与声音。
 
-只输出 JSON 对象：{"assets":[{"key":"唯一临时标识","existingId":"已有资产真实 ID，新建留空","name":"资产名","type":"角色|场景|道具","description":"身份、用途及依据","appearance":"外貌或空间、物体结构","costume":"主形象服饰","voiceDescription":"声音描述","prompt":"原文主体生图提示词","variants":[{"name":"状态名称","description":"状态描述","prompt":"原文状态生图提示词"}],"shotIds":["实际出现的真实镜头 ID"]}]}。existingId 和 shotIds 必须来自上下文，不得编造；无法确定关联时如实保留缺失，不要猜测。原始输出中有状态提示词时，即使已有值也逐字输出。已有角色新增镜头关联须有该镜头的明确依据：镜头已关联该角色，或镜头画面、对白、原片描述中出现其名称、别名或 ID；不能仅凭相邻镜头、场次或推测添加。
+角色仅在报告明确说明没有视觉出场、无需形象时填写 visualMode 为 voice-only，appearance、costume、prompt 可留空；有形象需求填写 visual，依据不足时保留已有 visualMode，新建默认 visual。已有角色含图片或生图提示词时保留 visual，本集画外音不改变全项目形象需求。不得因缺少提示词就推断为 voice-only。
+
+只输出 JSON 对象：{"assets":[{"key":"唯一临时标识","existingId":"已有资产真实 ID，新建留空","name":"资产名","type":"角色|场景|道具","description":"身份、用途及依据","appearance":"外貌或空间、物体结构","costume":"主形象服饰","voiceDescription":"声音描述","visualMode":"visual 或 voice-only","prompt":"原文主体生图提示词","variants":[{"name":"状态名称","description":"状态描述","prompt":"原文状态生图提示词"}],"shotIds":["实际出现的真实镜头 ID"]}]}。existingId 和 shotIds 必须来自上下文，不得编造；无法确定关联时如实保留缺失，不要猜测。原始输出中有状态提示词时，即使已有值也逐字输出。已有角色新增镜头关联须有该镜头的明确依据：镜头已关联该角色，或镜头画面、对白、原片描述中出现其名称、别名或 ID；不能仅凭相邻镜头、场次或推测添加。

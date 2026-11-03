@@ -32,19 +32,40 @@ export function assetImageRequest(asset, { variantId = '', view = '', customProm
   }
 }
 
+// Merge independent edits while keeping a conflict visible if the same field changed twice.
+export function mergeAssetDraft(base, draft, latest) {
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+  function merge(old, local, remote, path = '') {
+    if (same(local, old)) return remote
+    if (same(remote, old) || same(local, remote)) return local
+    if (path === 'variants' && [old, local, remote].every(Array.isArray)) {
+      const ids = [...new Set([...local, ...remote].map(item => item.id))]
+      return ids.flatMap(id => {
+        const merged = merge(old.find(item => item.id === id), local.find(item => item.id === id), remote.find(item => item.id === id), `variant:${id}`)
+        return merged === undefined ? [] : [merged]
+      })
+    }
+    if ([old, local, remote].every(value => value && typeof value === 'object' && !Array.isArray(value))) {
+      return Object.fromEntries([...new Set([...Object.keys(old), ...Object.keys(local), ...Object.keys(remote)])].map(key => [key, merge(old[key], local[key], remote[key], path ? `${path}.${key}` : key)]))
+    }
+    throw new Error('资产的相同内容已被其他操作修改，草稿已保留，请核对后重新打开')
+  }
+  return { ...merge({ ...base, _version: undefined, _position: undefined }, { ...draft, _version: undefined, _position: undefined }, { ...latest, _version: undefined, _position: undefined }), _version: latest._version, _position: latest._position }
+}
+
 export const pendingJob = job => job && ['queued', 'running'].includes(job.status)
 export function redrawImageReadiness(allAssets, jobs, projectId) {
-  const assets = allAssets.filter(asset => asset.projectId === projectId)
+  const assets = allAssets.filter(asset => asset.projectId === projectId && !(asset.type === '角色' && asset.visualMode === 'voice-only'))
   const ids = new Set(assets.map(asset => asset.id))
   const missing = assets.reduce((count, asset) => count + (asset.image ? 0 : 1) + (asset.variants || []).filter(variant => !variant.image).length, 0)
   const running = jobs.some(job => job.type === 'image' && pendingJob(job) && job.options?.studioTarget?.resource === 'assets' && ids.has(job.options.studioTarget.id))
-  return { ready: assets.length > 0 && missing === 0 && !running, missing, running }
+  return { ready: allAssets.some(asset => asset.projectId === projectId) && missing === 0 && !running, missing, running }
 }
 export const assetJob = (jobs, id, variantId) => jobs.filter(job => job.options?.studioTarget?.resource === 'assets' && job.options.studioTarget.id === id && (job.options.studioTarget.variantId || null) === (variantId || null)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
 const pendingAssetJob = (jobs, id, variantId) => assetJob(jobs.filter(pendingJob), id, variantId)
 export const jobLabel = job => ({ queued: '排队中', running: '生成中', completed: '生成完成', failed: '生成失败', uncertain: '结果待确认', cancelled: '已取消' }[job?.status] || '')
 
-export const canBatchGenerate = (asset, jobs) => !jobs.some(job => job.options?.studioTarget?.resource === 'assets' && job.options.studioTarget.id === asset.id && job.options.studioTarget.variantId && pendingJob(job))
+export const canBatchGenerate = (asset, jobs) => !(asset.type === '角色' && asset.visualMode === 'voice-only') && !jobs.some(job => job.options?.studioTarget?.resource === 'assets' && job.options.studioTarget.id === asset.id && job.options.studioTarget.variantId && pendingJob(job))
   && ((!asset.image && !pendingAssetJob(jobs, asset.id)) || asset.variants.some(variant => !variant.image))
 
 async function waitForImage(job, readJob, signal) {
