@@ -56,6 +56,26 @@ it('shows script project stages and their actual jobs without adding redraw repo
   expect(styled.nodes.find(item => item.id === 'script-assets')?.output).toContain('已确定项目视觉风格');
 });
 
+it('shows the actual script workflow report handoffs and stale reports', () => {
+  const current = data();
+  Object.assign(current.projects[0], { creationMode: 'script' });
+  const jobs = [
+    { id: 'storyboard', kind: 'script-storyboard', status: 'completed' },
+    { id: 'asset-new', kind: 'script-assets', status: 'completed', createdAt: '2026-11-03T00:00:00Z' },
+    { id: 'script', kind: 'novel-script', status: 'completed', createdAt: '2026-11-01T00:00:00Z' },
+    { id: 'outline', kind: 'novel-outline', status: 'completed', createdAt: '2026-11-01T00:00:00Z' },
+  ];
+  const details = { storyboard: { handoff: [
+    { kind: 'novel-outline', jobId: 'outline', createdAt: '2026-11-01T00:00:00Z' },
+    { kind: 'novel-script', jobId: 'script', createdAt: '2026-11-01T00:00:00Z' },
+    { kind: 'script-assets', jobId: 'asset-old', createdAt: '2026-11-02T00:00:00Z' },
+  ] } };
+  const flow = scriptFlow({ data: current, jobs, details, projectId: 'p', episodeId: 'e1' });
+  expect(flow.edges.filter(edge => edge.type === 'report').map(edge => [edge.source, edge.target, 'stale' in edge.data ? edge.data.stale : undefined])).toEqual([
+    ['outline', 'script-storyboard', false], ['novel-script', 'script-storyboard', false], ['script-assets', 'script-storyboard', true],
+  ]);
+});
+
 it('shows the project outline task before any episodes exist', () => {
   const current = data();
   Object.assign(current.projects[0], { creationMode: 'script', outline: { core: '开端' } });

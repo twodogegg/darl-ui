@@ -36,5 +36,11 @@ export function scriptFlow(input) {
     ['video-generation', 'film', '选用视频'],
   ]
   const edges = links.map(([source, target, label]) => ({ id: `${source}->${target}`, source, target, sourceHandle: source === 'script-assets' && target === 'asset-images' ? 'down' : 'out', targetHandle: source === 'script-assets' && target === 'asset-images' ? 'up' : 'in', type: 'data', data: { label, active: ['done', 'partial', 'waiting'].includes(nodes.find(node => node.id === source)?.status) } }))
+  for (const node of nodes) {
+    for (const ref of input.details?.[node.jobId]?.handoff || []) {
+      const upstream = nodes.find(item => item.jobKind === ref.kind)
+      if (upstream && !edges.some(edge => edge.id === `report:${ref.kind}->${node.id}`)) edges.push({ id: `report:${ref.kind}->${node.id}`, source: upstream.id, target: node.id, sourceHandle: 'report-out', targetHandle: 'report-in', type: 'report', data: { stale: upstream.runs.some(run => (ref.kind !== 'novel-script' || !ref.episodeId || run.episodeId === ref.episodeId) && run.status === 'completed' && run.id !== ref.jobId && run.createdAt > ref.createdAt) } })
+    }
+  }
   return { ...flow, project, nodes, edges }
 }

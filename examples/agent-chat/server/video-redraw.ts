@@ -33,7 +33,7 @@ type DraftAsset = { key: string; type: string; name: string; description: string
 type DraftShot = { segmentId: string; sceneKey: string; description: string; dialogue: string; scale: string; camera: string; transition: string; effects: string; assetKeys: string[]; targetDescription: string; targetDuration?: number; targetDialogue: Array<{ assetKey: string; text: string; description: string }>; notes: string };
 export type RedrawDraft = { assets: DraftAsset[]; shots: DraftShot[] };
 /** handoff lists the upstream reports given to the execution model; formatMode only marks legacy asset tasks. */
-type WorkflowRun = { config: WorkflowAgent; skills: AgentSkill[]; skillResourcesLoaded?: boolean; adjustmentInstructions?: string; steps: WorkflowStep[]; context?: unknown; handoff?: Array<{ kind: string; jobId: string; createdAt: string }>; formatErrors?: string[]; formatMode?: 'asset-tools'; outputs: Array<{ output_type: 'raw' | 'structured'; content: string; incomplete?: boolean }> };
+type WorkflowRun = { config: WorkflowAgent; skills: AgentSkill[]; skillResourcesLoaded?: boolean; adjustmentInstructions?: string; steps: WorkflowStep[]; context?: unknown; handoff?: Array<{ kind: string; jobId: string; createdAt: string; episodeId?: string }>; formatErrors?: string[]; formatMode?: 'asset-tools'; outputs: Array<{ output_type: 'raw' | 'structured'; content: string; incomplete?: boolean }> };
 const workflowSkillSummary = (workflow: WorkflowRun) => workflow.skills.map(skill => ({ id: skill.id, name: skill.name, ...(workflow.skillResourcesLoaded ? { resources: workflowSkillResources(skill).map(file => file.path) } : {}) }));
 type Job = { id: string; projectId: string; episodeId?: string; sourceFileId?: string; kind: 'prepare' | 'breakdown' | 'transcribe' | 'analyze' | 'revise-storyboard' | 'revise-cuts' | 'revise-script' | 'plan-storyboard' | 'write-script' | 'novel-outline' | 'novel-script' | 'script-assets' | 'script-storyboard' | 'extract-assets' | 'video-prompts' | 'export'; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; phase: string; createdAt: string; error?: string; input: Record<string, unknown>; fingerprint: string; workflow?: WorkflowRun;
   versions: Record<string, number>; projectVersion: number; draft: RedrawDraft; segments: SourceSegment[]; transcript?: TimedTranscript; result?: Record<string, unknown>; applied?: string[] };
@@ -53,7 +53,7 @@ const text = (value: unknown, label: string) => { if (typeof value !== 'string' 
 const recordKey = (resource: string, id: string) => `${resource}:${id}`;
 const rawOutput = (workflow?: WorkflowRun) => workflow?.outputs.find(output => output.output_type === 'raw' && !output.incomplete)?.content;
 /** Upstream nodes whose full reports are handed to each downstream execution model, in pipeline order. */
-const UPSTREAM: Partial<Record<Job['kind'], Job['kind'][]>> = { 'write-script': ['analyze'], 'extract-assets': ['analyze', 'write-script'], 'plan-storyboard': ['analyze', 'write-script', 'extract-assets'], 'video-prompts': ['analyze', 'write-script', 'extract-assets', 'plan-storyboard'] };
+const UPSTREAM: Partial<Record<Job['kind'], Job['kind'][]>> = { 'write-script': ['analyze'], 'extract-assets': ['analyze', 'write-script'], 'plan-storyboard': ['analyze', 'write-script', 'extract-assets'], 'video-prompts': ['analyze', 'write-script', 'extract-assets', 'plan-storyboard'], 'novel-script': ['novel-outline'], 'script-assets': ['novel-outline', 'novel-script'], 'script-storyboard': ['novel-outline', 'novel-script', 'script-assets'] };
 type RevisionValues = { description?: string; scale?: string; camera?: string; duration?: number; effects?: string; sourceDescription?: string; sourceDialogue?: string; dialogue?: Array<{ id?: string; type: string; assetId?: string; speaker?: string; text: string; description?: string }> };
 type Revision = { changes: Array<{ shotId: string; reason: string; values: RevisionValues }>; notes: string };
 export function validateRevision(value: unknown, shots: StudioRecord[], formal = false): Revision {
@@ -293,7 +293,7 @@ export class VideoRedraw {
     const projectId = String(input.projectId || ''), project = this.project(projectId), episode = this.episode(project, input.episodeId);
     if (input.jobId) {
       const job = this.job(String(input.jobId));
-      if (job.projectId !== projectId || (job.episodeId || this.episode(project).id) !== episode.id) throw new Error('任务不属于当前剧集');
+      if (job.projectId !== projectId || (job.kind !== 'script-assets' && (job.episodeId || this.episode(project).id) !== episode.id)) throw new Error('任务不属于当前剧集');
       if (job.workflow) {
         if (job.sourceFileId !== this.source(project, episode).fileId) throw new Error('原片已更换，该分析结果已过期');
         return { jobId: job.id, kind: job.kind, status: job.status, phase: job.phase, createdAt: job.createdAt, failureStage: workflowFailureStage(job), error: job.error, sourceFileId: job.sourceFileId, requirements: job.input.requirements, ...(['script-storyboard', 'video-prompts'].includes(job.kind) ? { mode: job.input.mode || (job.workflow.context as { mode?: string } | undefined)?.mode } : {}), parentJobId: ['revise-cuts', 'revise-script'].includes(job.kind) ? job.input.jobId : undefined, model: job.workflow.config.model, formatterModel: job.workflow.config.formatterModel, formatMode: job.workflow.formatMode, formatErrors: job.workflow.formatErrors, handoff: job.workflow.handoff, steps: job.workflow.steps, outputs: job.workflow.outputs,
@@ -324,7 +324,7 @@ export class VideoRedraw {
       }
       throw new Error(`任务 ${job.id} 是 ${job.kind}，没有可分页读取的切镜或转写结果`);
     }
-    return { jobs: this.jobs(projectId).filter(job => (job.episodeId || this.episode(project).id) === episode.id).map(full => { const { transcript, workflow, result, ...job } = full; return { ...job, ...(workflow ? { hasWorkflow: true, failureStage: workflowFailureStage(full), ...(['revise-cuts', 'revise-script'].includes(full.kind) ? { applied: result?.applied === true, restored: this.adjustmentRestored(full) } : {}) } : job.kind !== 'analyze' ? { result } : {}), hasTranscript: !!transcript }; }), source: this.source(project, episode) };
+    return { jobs: this.jobs(projectId).filter(job => job.kind === 'script-assets' || (job.episodeId || this.episode(project).id) === episode.id).map(full => { const { transcript, workflow, result, ...job } = full; return { ...job, ...(workflow ? { hasWorkflow: true, failureStage: workflowFailureStage(full), ...(['revise-cuts', 'revise-script'].includes(full.kind) ? { applied: result?.applied === true, restored: this.adjustmentRestored(full) } : {}) } : job.kind !== 'analyze' ? { result } : {}), hasTranscript: !!transcript }; }), source: this.source(project, episode) };
   }
   async edit(input: Record<string, unknown>, origin: ChangeOrigin = { source: 'page' }) {
     const allowed = new Set([...Object.keys(properties), 'action']);
@@ -474,11 +474,18 @@ export class VideoRedraw {
     const jobs = this.jobs(project.id);
     return (UPSTREAM[job.kind] || []).flatMap(kind => {
       const adjustmentKind = kind === 'analyze' ? 'revise-cuts' : kind === 'write-script' ? 'revise-script' : '';
-      const prior = jobs.find(item => (item.kind === kind || (item.kind === adjustmentKind && item.result?.applied === true && !this.adjustmentRestored(item))) && (item.episodeId || this.episode(project).id) === episode.id && item.status === 'completed' && item.sourceFileId === source.fileId && (kind !== 'plan-storyboard' || item.result?.applied === true));
-      const original = (prior?.workflow?.context as { originalReport?: string } | undefined)?.originalReport;
-      const latest = typeof prior?.result?.analysis === 'string' && prior.result.analysis.trim() ? prior.result.analysis : rawOutput(prior?.workflow);
-      const report = original && latest ? `${original}\n\n${latest}` : latest;
-      return prior && report ? [{ kind, jobId: prior.id, createdAt: prior.createdAt, report }] : [];
+      const candidates = jobs.filter(item => (item.kind === kind || (item.kind === adjustmentKind && item.result?.applied === true && !this.adjustmentRestored(item))) && item.status === 'completed' && item.sourceFileId === source.fileId && (kind !== 'plan-storyboard' || item.result?.applied === true) && (['novel-outline', 'script-assets'].includes(kind) || (job.kind === 'script-assets' && kind === 'novel-script') || (item.episodeId || this.episode(project).id) === episode.id));
+      const seen = new Set<string>();
+      return candidates.flatMap(prior => {
+        const key = job.kind === 'script-assets' && kind === 'novel-script' ? String(prior.episodeId || '') : kind;
+        if (seen.has(key)) return [];
+        const original = (prior.workflow?.context as { originalReport?: string } | undefined)?.originalReport;
+        const latest = typeof prior.result?.analysis === 'string' && prior.result.analysis.trim() ? prior.result.analysis : rawOutput(prior.workflow);
+        const report = original && latest && ['revise-cuts', 'revise-script'].includes(prior.kind) ? `${original}\n\n${latest}` : latest;
+        if (!report) return [];
+        seen.add(key);
+        return [{ kind, jobId: prior.id, createdAt: prior.createdAt, ...(prior.episodeId ? { episodeId: prior.episodeId } : {}), report }];
+      });
     });
   }
   /** Use the video-prompt workflow's current configuration and handoff for existing clips. */
@@ -499,8 +506,8 @@ export class VideoRedraw {
       videoModel, script: episode.script, scenes: episode.scenes, shots: state.shots.filter(item => item.episodeId === episodeId).sort((a, b) => Number(a._position || 0) - Number(b._position || 0)),
       assets: state.assets.filter(item => item.projectId === projectId), items, requirements,
     };
-    const job = { projectId, episodeId, kind: 'video-prompts' } as Job;
-    const reports = project.creationMode === 'video-redraw' ? this.upstreamReports(job, project, episode, source) : [];
+    const job = { projectId, episodeId, kind } as Job;
+    const reports = this.upstreamReports(job, project, episode, source);
     const [formal, handoff, adjustment, formatterGuide, formatterContract] = await Promise.all([
       readFile(new URL('../prompts/redraw-formal-video-handoff.md', import.meta.url), 'utf8'),
       readFile(new URL('../prompts/workflow-handoff.md', import.meta.url), 'utf8'),
@@ -509,9 +516,9 @@ export class VideoRedraw {
       readFile(new URL('../prompts/redraw-video-adjustment-formatter.md', import.meta.url), 'utf8'),
     ]);
     const execution = workflowExecution(config, skills, randomUUID(), this.dependencies, [], () => {});
-    const input = { ...context, upstreamReports: reports.map(({ kind, report }) => ({ kind, report })) };
+    const input = { ...context, upstreamReports: reports.map(({ kind, episodeId, report }) => ({ kind, ...(episodeId ? { episodeId } : {}), report })) };
     let raw: string;
-    try { raw = await runTextWorkflow(selected.provider, selected.model, input, [workflowInstructions(config, skills), ...(project.creationMode === 'video-redraw' ? [formal, handoff] : []), adjustment].join('\n\n'), signal, execution); }
+    try { raw = await runTextWorkflow(selected.provider, selected.model, input, [workflowInstructions(config, skills), ...(project.creationMode === 'video-redraw' ? [formal] : []), ...(reports.length ? [handoff] : []), adjustment].join('\n\n'), signal, execution); }
     catch (error) { signal.throwIfAborted(); throw new Error(safeError(error, selected.provider.apiKey)); }
     if (!raw.trim()) throw new Error('视频提示词工作流未返回调整结果');
     let correction: { previous: string; error: string } | undefined;
@@ -544,7 +551,7 @@ export class VideoRedraw {
     job.workflow!.context = context; job.workflow!.handoff = reports.map(({ report: _report, ...ref }) => ref); this.save(job);
     if (!reports.length) return { input: context, instructions };
     const guide = await readFile(new URL('../prompts/workflow-handoff.md', import.meta.url), 'utf8');
-    return { input: { ...context, upstreamReports: reports.map(({ kind, report }) => ({ kind, report })) }, instructions: `${instructions}\n\n${guide}` };
+    return { input: { ...context, upstreamReports: reports.map(({ kind, episodeId, report }) => ({ kind, ...(episodeId ? { episodeId } : {}), report })) }, instructions: `${instructions}\n\n${guide}` };
   }
   private assertWorkflowVersions(job: Job) {
     const state = this.studio.snapshot(), project = state.projects.find(item => item.id === job.projectId), episode = state.episodes.find(item => item.id === job.episodeId);
@@ -696,7 +703,8 @@ export class VideoRedraw {
         job.phase = '根据大纲、剧本和资产编写分镜'; this.save(job);
         const modeInstructions = await readFile(new URL('../prompts/script-storyboard-mode.md', import.meta.url), 'utf8');
         workflow.adjustmentInstructions = modeInstructions; this.save(job);
-        const analysis = await runTextWorkflow(selected.provider, selected.model, context, `${instructions}\n\n${modeInstructions}`, signal, execution, savePartial);
+        const handoff = await this.handoff(job, project, episode, source, context, `${instructions}\n\n${modeInstructions}`);
+        const analysis = await runTextWorkflow(selected.provider, selected.model, handoff.input, handoff.instructions, signal, execution, savePartial);
         if (!analysis.trim()) throw new Error('剧本分镜模型未返回内容');
         signal.throwIfAborted();
         workflow.outputs.push({ output_type: 'raw', content: analysis }); job.result = { analysis, model: selected.model.id, providerId: selected.provider.id }; this.save(job);
@@ -713,7 +721,8 @@ export class VideoRedraw {
         workflow.context = context; this.save(job);
         job.phase = '根据剧本提取美术资产'; this.save(job);
         workflow.adjustmentInstructions = [await readFile(new URL('../prompts/script-assets-style.md', import.meta.url), 'utf8'), ...(context.assets.length ? [await readFile(new URL('../prompts/script-assets-reextraction.md', import.meta.url), 'utf8')] : [])].join('\n\n'); this.save(job);
-        const analysis = await runTextWorkflow(selected.provider, selected.model, context, [instructions, workflow.adjustmentInstructions].filter(Boolean).join('\n\n'), signal, execution, savePartial);
+        const handoff = await this.handoff(job, project, episode, source, context, [instructions, workflow.adjustmentInstructions].filter(Boolean).join('\n\n'));
+        const analysis = await runTextWorkflow(selected.provider, selected.model, handoff.input, handoff.instructions, signal, execution, savePartial);
         if (!analysis.trim()) throw new Error('剧本资产提取接口未返回内容');
         signal.throwIfAborted();
         workflow.outputs.push({ output_type: 'raw', content: analysis }); job.result = { analysis, model: selected.model.id, providerId: selected.provider.id }; this.save(job);
@@ -727,7 +736,8 @@ export class VideoRedraw {
         const context = { projectId: project.id, episodeId: episode.id, project: { sourceScript: project.sourceScript, outline: project.outline, adaptation: project.adaptation, requirements: project.requirements, durationMin: project.durationMin, durationMax: project.durationMax }, episode: { number: episode.number, title: episode.title, duration: episode.duration, scenes: episode.scenes }, episodes: state.episodes.filter(item => item.projectId === project.id).map(item => ({ id: item.id, number: item.number, title: item.title, script: item.id === episode.id ? undefined : item.script })), requirements: job.input.requirements || '' };
         workflow.context = context; this.save(job);
         job.phase = '阅读小说并编写剧本'; this.save(job);
-        const analysis = await runTextWorkflow(selected.provider, selected.model, context, instructions, signal, execution, savePartial);
+        const handoff = await this.handoff(job, project, episode, source, context, instructions);
+        const analysis = await runTextWorkflow(selected.provider, selected.model, handoff.input, handoff.instructions, signal, execution, savePartial);
         if (!analysis.trim()) throw new Error('小说剧本接口未返回内容');
         signal.throwIfAborted();
         workflow.outputs.push({ output_type: 'raw', content: analysis }); job.result = { analysis, model: selected.model.id, providerId: selected.provider.id }; this.save(job);
@@ -924,7 +934,7 @@ const properties = {
 export const REDRAW_TOOLS = [
   { name: 'builtin_wait_video_redraw', title: '等待视频转绘任务', description: '等待指定项目与剧集的剧本分镜、小说剧本、视频分析、镜头和剧本反馈、分镜调整、剧本编写、资产提取、正式分镜或视频提示词任务结束；完成后返回分析结果，失败、中断或取消时返回真实状态和错误。停止等待不会取消后台任务。', risk: 'read' as const, approval: 'workspace' as const, waitForCompletion: true as const, appId: 'builtin:studio', appName: '视频转绘', parameters: { type: 'object', properties: { projectId: properties.projectId, episodeId: properties.episodeId, jobId: properties.jobId }, required: ['projectId', 'jobId'], additionalProperties: false } },
   { name: 'builtin_read_video_redraw', title: '查询视频转绘', description: '剧本项目可查询小说剧本、剧本资产和剧本分镜任务；describe=true 查询工作流能力和限制；否则以 projectId 和 episodeId 查询该集原片、持久化任务、可应用草稿和错误；传 jobId 读取 analyze、write-script、extract-assets、plan-storyboard、video-prompts 的状态、createdAt、failureStage 失败阶段、工具步骤 steps、outputs（raw 为执行 Agent 的完整报告，会交付给下游节点；structured 为整理 Agent 输出的页面字段）、mode（任务运行时的生成方式）、handoff（本次执行收到的上游报告任务）、formatErrors（校验失败后交回整理 Agent 自动修正的错误）和 skippedLinks（因镜头文字缺少角色名而未写入的角色关联），失败任务也可读取已保存输出；或用 cursor、limit 分页读取历史切镜结果或原声转写；detail=turns/words 只读取该任务已有转写。各节点写入的修改记录在全局变更日志中，用变更日志工具查询和还原。省略 episodeId 兼容第一集。查询不触发生成。', risk: 'read' as const, approval: 'workspace' as const, appId: 'builtin:studio', appName: '视频转绘', parameters: { type: 'object', properties: { projectId: properties.projectId, episodeId: properties.episodeId, jobId: properties.jobId, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 500 }, detail: { type: 'string', enum: ['turns', 'words'] }, describe: { type: 'boolean' } }, additionalProperties: false } },
-  { name: 'builtin_edit_video_redraw', title: '操作视频转绘', description: '按 episodeId 操作对应剧集，省略则使用第一集。剧本项目使用 script-storyboard 读取大纲、本集剧本和资产，按剧情顺序生成片段及视频提示词，分镜图模式另生成分镜图提示词，参考生成模式不生成；允许回到已有场次；仅本集没有片段时允许；使用 script-assets 从全部剧本、大纲和已有资产提取或更新全项目资产，可传 requirements 指定修改要求；项目未指定视觉风格时由执行 Agent 从真实风格目录选定，与资产同批保存，已有风格保持不变；保留继续使用的资产图片及关联；按用户明确要求删除的资产记录变更日志，未提及的资产保留；使用 novel-script，根据小说原文、大纲和分集信息生成当前集剧本，独立配置执行及整理 Agent，已有正文不覆盖；analyze、write-script、extract-assets、plan-storyboard、video-prompts 每个节点由各自的执行 Agent 输出完整报告，再由独立整理 Agent 转为页面字段；校验未通过时会把具体错误交回整理 Agent 最多自动修正两次。write-script、extract-assets、plan-storyboard、video-prompts 会把同集上游节点最近完成的完整报告交给执行 Agent，页面记录与报告冲突时以页面记录为准。analyze 复用原片 COS 地址调用视频模型分析画面与声音，本地原片先通过现有 COS 配置上传；revise-storyboard 将原片和现有分镜发给视频分析 Agent 生成待审核建议；revise-cuts 与 revise-script 带 requirements 继续原工作流 Agent，jobId 可指定上一轮完成的任务；结果经校验后直接应用，可在变更日志还原；镜头可增删及修改时间，关联片段按时间同步引用并保留视频；跨多个片段的新镜头和关联图片镜头的删改会被拒绝；plan-storyboard 使用剧本、上游报告、资产与当前镜头生成正式分镜建议，需用 apply-revision 审核后应用；apply-revision 传 jobId，校验版本后应用建议；write-script 编写并整理剧本，保留已有场次与目标对白，已有剧本不覆盖；extract-assets 更新已有资产文字与提示词并新增缺失资产和镜头关联，镜头文字中找不到名字的已有角色关联不写入并在 skippedLinks 中列出；video-prompts 根据已确认分镜与用户 mode、requirements 创建视频片段和提示词，已有片段不覆盖；retry-format 使用失败任务 jobId、最新项目 version 和新的 requestId 从原始报告重新整理；retry-save 使用已保存的整理结果重试校验与保存，不调用模型；完成后用等待工具取得结果；分析失败时报告真实错误，不自动改用其他分析方式；cancel 取消；merge-assets 合并重复资产，export 按 selections 的 clipId 顺序合成已选用视频，保留生成音轨。所有写入都记入全局变更日志，可用变更日志工具还原。提交长任务须 requestId、最新项目 version，返回任务后查询。失败后使用新 requestId 重新提交。', risk: 'write' as const, approval: 'workspace' as const, appId: 'builtin:studio', appName: '视频转绘', parameters: { type: 'object', properties: { projectId: properties.projectId, episodeId: properties.episodeId, jobId: properties.jobId, requestId: properties.requestId, version: properties.version, requirements: properties.requirements, mode: properties.mode, fromId: properties.fromId, toId: properties.toId, fromVersion: properties.fromVersion, toVersion: properties.toVersion, selections: properties.selections, action: { type: 'string', enum: ['analyze', 'revise-storyboard', 'revise-cuts', 'revise-script', 'plan-storyboard', 'apply-revision', 'write-script', 'novel-script', 'script-assets', 'script-storyboard', 'extract-assets', 'video-prompts', 'retry-format', 'retry-save', 'cancel', 'merge-assets', 'export'] } }, required: ['projectId', 'action'], additionalProperties: false } },
+  { name: 'builtin_edit_video_redraw', title: '操作视频转绘', description: '按 episodeId 操作对应剧集，省略则使用第一集。剧本模式交接最近完成的完整上游报告：novel-script 读取项目大纲报告；script-assets 读取大纲及各集剧本报告；script-storyboard 读取大纲、本集剧本及项目资产报告；与当前页面记录冲突时以页面记录为准。剧本项目使用 script-storyboard 读取大纲、本集剧本和资产，按剧情顺序生成片段及视频提示词，分镜图模式另生成分镜图提示词，参考生成模式不生成；允许回到已有场次；仅本集没有片段时允许；使用 script-assets 从全部剧本、大纲和已有资产提取或更新全项目资产，可传 requirements 指定修改要求；项目未指定视觉风格时由执行 Agent 从真实风格目录选定，与资产同批保存，已有风格保持不变；保留继续使用的资产图片及关联；按用户明确要求删除的资产记录变更日志，未提及的资产保留；使用 novel-script，根据小说原文、大纲和分集信息生成当前集剧本，独立配置执行及整理 Agent，已有正文不覆盖；analyze、write-script、extract-assets、plan-storyboard、video-prompts 每个节点由各自的执行 Agent 输出完整报告，再由独立整理 Agent 转为页面字段；校验未通过时会把具体错误交回整理 Agent 最多自动修正两次。write-script、extract-assets、plan-storyboard、video-prompts 会把同集上游节点最近完成的完整报告交给执行 Agent，页面记录与报告冲突时以页面记录为准。analyze 复用原片 COS 地址调用视频模型分析画面与声音，本地原片先通过现有 COS 配置上传；revise-storyboard 将原片和现有分镜发给视频分析 Agent 生成待审核建议；revise-cuts 与 revise-script 带 requirements 继续原工作流 Agent，jobId 可指定上一轮完成的任务；结果经校验后直接应用，可在变更日志还原；镜头可增删及修改时间，关联片段按时间同步引用并保留视频；跨多个片段的新镜头和关联图片镜头的删改会被拒绝；plan-storyboard 使用剧本、上游报告、资产与当前镜头生成正式分镜建议，需用 apply-revision 审核后应用；apply-revision 传 jobId，校验版本后应用建议；write-script 编写并整理剧本，保留已有场次与目标对白，已有剧本不覆盖；extract-assets 更新已有资产文字与提示词并新增缺失资产和镜头关联，镜头文字中找不到名字的已有角色关联不写入并在 skippedLinks 中列出；video-prompts 根据已确认分镜与用户 mode、requirements 创建视频片段和提示词，已有片段不覆盖；retry-format 使用失败任务 jobId、最新项目 version 和新的 requestId 从原始报告重新整理；retry-save 使用已保存的整理结果重试校验与保存，不调用模型；完成后用等待工具取得结果；分析失败时报告真实错误，不自动改用其他分析方式；cancel 取消；merge-assets 合并重复资产，export 按 selections 的 clipId 顺序合成已选用视频，保留生成音轨。所有写入都记入全局变更日志，可用变更日志工具还原。提交长任务须 requestId、最新项目 version，返回任务后查询。失败后使用新 requestId 重新提交。', risk: 'write' as const, approval: 'workspace' as const, appId: 'builtin:studio', appName: '视频转绘', parameters: { type: 'object', properties: { projectId: properties.projectId, episodeId: properties.episodeId, jobId: properties.jobId, requestId: properties.requestId, version: properties.version, requirements: properties.requirements, mode: properties.mode, fromId: properties.fromId, toId: properties.toId, fromVersion: properties.fromVersion, toVersion: properties.toVersion, selections: properties.selections, action: { type: 'string', enum: ['analyze', 'revise-storyboard', 'revise-cuts', 'revise-script', 'plan-storyboard', 'apply-revision', 'write-script', 'novel-script', 'script-assets', 'script-storyboard', 'extract-assets', 'video-prompts', 'retry-format', 'retry-save', 'cancel', 'merge-assets', 'export'] } }, required: ['projectId', 'action'], additionalProperties: false } },
 ] as const;
 
 export async function handleRedrawRequest(req: IncomingMessage, res: ServerResponse, service: VideoRedraw) {

@@ -79,9 +79,9 @@ function FlowCanvas({ context }) {
     ])
     setJobs([...result.jobs, ...(outline.job ? [outline.job] : [])]); setError('')
   }, 3000, reason => setError(`读取工作流任务失败：${reason.message}`)), [projectId, episode.id, context.project.creationMode])
-  const loadDetail = useCallback(async (jobId, signal) => {
-    const outline = jobs.find(job => job.id === jobId && job.kind === 'novel-outline')
-    const value = outline ? (await studioApi(`video-redraw/outline?${new URLSearchParams({ projectId, jobId, input: '1' })}`, undefined, signal)).job : await studioApi(`video-redraw/status?${new URLSearchParams({ projectId, episodeId: episode.id, jobId, input: '1' })}`, undefined, signal)
+  const loadDetail = useCallback(async (jobId, signal, kind, reportEpisodeId) => {
+    const outline = kind === 'novel-outline' || jobs.find(job => job.id === jobId && job.kind === 'novel-outline')
+    const value = outline ? (await studioApi(`video-redraw/outline?${new URLSearchParams({ projectId, jobId, input: '1' })}`, undefined, signal)).job : await studioApi(`video-redraw/status?${new URLSearchParams({ projectId, episodeId: reportEpisodeId || episode.id, jobId, input: '1' })}`, undefined, signal)
     setDetails(current => ({ ...current, [jobId]: value }))
     return value
   }, [projectId, episode.id, jobs])

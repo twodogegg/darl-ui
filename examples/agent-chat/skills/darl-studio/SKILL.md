@@ -92,6 +92,8 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 剧本项目可用 `builtin_edit_video_redraw` 的 `script-assets` 提交资产提取：传 `projectId`、第一集 `episodeId`、最新项目 `version` 和唯一 `requestId`，可选 `requirements`；通过 `builtin_wait_video_redraw` 等待或 `builtin_read_video_redraw` 查询。该独立工作流读取全项目大纲、剧本和当前资产，提取角色、场景和关键道具与生图提示词；不需要视频或镜头，不自动生成图片。重新提取可通过 requirements 提交修改要求，更新已有资产文字和提示词，保留继续使用的资产图片及关联，按用户明确要求移除资产并清除镜头和片段的资产关联；对白、场次或其他资产仍引用时须先解除关联；未提及的资产保留，移除可在变更日志还原；提取期间项目、剧集或资产变化时不会写入；失败可查看任务详情、重试整理或重新提取。
 
+剧本模式工作流传递完整上游交付报告：`novel-script` 读取项目大纲报告，`script-assets` 读取大纲及各集剧本报告，`script-storyboard` 和视频提示词调整读取大纲、本集剧本及项目资产报告。仅交接已完成且有完整输出的任务；报告与当前页面记录冲突时以页面记录为准。任务详情 `handoff` 列出实际收到的报告，历史任务不回填。
+
 剧本项目使用 `builtin_edit_video_redraw` 的 `script-storyboard`，传 `projectId`、`episodeId`、最新项目 `version`、唯一 `requestId`，可选 `requirements` 和 `mode`（参考生成或分镜图）；再通过 `builtin_wait_video_redraw` 等待或查询状态。该独立阶段读取大纲、本集剧本和美术资产，按剧情顺序创建本集视频片段及视频提示词，允许回到已有场次；仅分镜图模式生成分镜图提示词，参考生成模式不生成；不读取转绘原片，已有片段不会覆盖。支持任务详情、取消及失败后重试。
 
 剧本项目可使用工作流工具 `builtin_edit_video_redraw` 的 `novel-script` 操作：传 `projectId`、`episodeId`、最新项目 `version`、唯一 `requestId` 和可选 `requirements`；再使用 `builtin_wait_video_redraw` 等待，或用 `builtin_read_video_redraw` 查询任务。该阶段使用独立的小说转剧本执行模型、整理模型、提示词和 Skills，读取小说原文、大纲、时长区间和分集，不依赖原视频或转绘分析；已有正文不会覆盖。任务失败可使用 `retry-format` 或 `retry-save`，具体状态和错误以任务返回为准。

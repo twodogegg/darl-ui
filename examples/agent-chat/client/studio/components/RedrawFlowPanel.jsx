@@ -50,17 +50,17 @@ function Video({ url, label }) {
   return <video className="rf-video" src={url} poster={`/api/video-editing/thumbnail?${new URLSearchParams({ url, start: '0' })}`} controls playsInline preload="none" aria-label={label} />
 }
 
-function UpstreamReport({ item, latestId, details, loadDetail }) {
+function UpstreamReport({ item, latestId, episodeLabel, details, loadDetail }) {
   const [open, setOpen] = useState(false), [error, setError] = useState('')
   const report = reportOf(details[item.jobId])
   useEffect(() => {
     if (!open || details[item.jobId]) return
     const controller = new AbortController()
-    loadDetail(item.jobId, controller.signal).catch(reason => { if (!controller.signal.aborted) setError(reason.message) })
+    loadDetail(item.jobId, controller.signal, item.kind, item.episodeId).catch(reason => { if (!controller.signal.aborted) setError(reason.message) })
     return () => controller.abort()
   }, [open, !!details[item.jobId]])
   return <details className="rf-fold" onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>{KIND_LABELS[item.kind] || item.kind}<em>{formatTime(item.createdAt)}{latestId && latestId !== item.jobId ? ' · 旧版，上游之后又完成过' : ''}</em></summary>
+    <summary>{KIND_LABELS[item.kind] || item.kind}{episodeLabel ? ` · ${episodeLabel}` : ''}<em>{formatTime(item.createdAt)}{latestId && latestId !== item.jobId ? ' · 旧版，上游之后又完成过' : ''}</em></summary>
     {report ? <Report content={report} /> : <p className="rf-empty">{error || (details[item.jobId] ? '该任务没有完整报告。' : '正在读取…')}</p>}
   </details>
 }
@@ -83,14 +83,14 @@ function CurrentWorkflowSkills({ kind }) {
 function AgentInput({ node, flow, detail, details, loadDetail }) {
   const input = detail.executionInput || {}
   const context = input.context && typeof input.context === 'object' ? Object.entries(input.context).filter(([key]) => !HIDDEN_CONTEXT.has(key)) : []
-  const latestCompleted = kind => flow.nodes.find(item => item.jobKind === kind)?.runs.find(run => run.status === 'completed')?.id
+  const latestCompleted = ref => flow.nodes.find(item => item.jobKind === ref.kind)?.runs.find(run => run.status === 'completed' && (ref.kind !== 'novel-script' || !ref.episodeId || run.episodeId === ref.episodeId))?.id
   const source = flow.source
   return <>
     {node.id === 'script-storyboard' && <CurrentWorkflowSkills kind="script-storyboard" />}
     {node.id === 'analyze' && <Section title="原片视频" hint="视频模型通过原片的 COS 地址读取画面与声音。">{source.fileId ? <><Video url={source.url || `/api/files/${source.fileId}`} label="原片" /><p className="rf-meta">{[source.name, seconds(source.duration), source.width && `${source.width}×${source.height}`, source.fps && `${source.fps} fps`].filter(Boolean).join(' · ')}</p></> : <p className="rf-empty">尚未上传原片。</p>}</Section>}
     <Section title="执行模型"><p className="rf-meta">{detail.model || '—'}{detail.formatterModel ? ` · 整理：${detail.formatterModel}` : ''}</p>{detail.requirements && <p className="rf-meta">补充要求：{detail.requirements}</p>}</Section>
     <Section title={`上游报告（${detail.handoff?.length || 0}）`} hint="执行 Agent 收到的上游节点完整报告；与页面记录冲突时以页面记录为准。">
-      {detail.handoff?.length ? detail.handoff.map(item => <UpstreamReport key={item.jobId} item={item} latestId={latestCompleted(item.kind)} details={details} loadDetail={loadDetail} />) : <p className="rf-empty">本次没有收到上游报告。</p>}
+      {detail.handoff?.length ? detail.handoff.map(item => <UpstreamReport key={item.jobId} item={item} latestId={latestCompleted(item)} episodeLabel={item.kind === 'novel-script' ? flow.data.episodes.find(episode => episode.id === item.episodeId)?.title : ''} details={details} loadDetail={loadDetail} />) : <p className="rf-empty">本次没有收到上游报告。</p>}
     </Section>
     <Section title="页面上下文" hint="执行 Agent 实际收到的页面数据；整理 Agent 也基于同一份上下文整理页面字段。">
       {context.length ? context.map(([key, value]) => <Fold key={key} title={CONTEXT_LABELS[key] || key} note={contextSummary(value)}><pre className="rf-pre">{typeof value === 'string' ? value : json(value)}</pre></Fold>) : <p className="rf-empty">该任务没有保存输入上下文。</p>}
