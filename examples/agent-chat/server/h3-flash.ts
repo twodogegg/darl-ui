@@ -84,6 +84,10 @@ export function buildH3VideoRequest(options: H3VideoOptions): H3VideoRequest {
   if (!resolutions.includes(size)) throw new Error(`${model === 'minimax-h3-standard' ? 'H3 Standard' : 'H3 Flash'} 分辨率只能是 ${resolutions.join(' / ')}`);
   const ratio = options.ratio ?? '16:9';
   if (!H3_RATIOS.includes(ratio)) throw new Error(`H3 画幅只能是 ${H3_RATIOS.join(' / ')}`);
+  if (['h3-nsfw', 'h3-nsfw-opt'].includes(model)) {
+    if (!['16:9', '9:16'].includes(ratio)) throw new Error('当前视频模型只支持 16:9 或 9:16 画幅');
+    if (options.firstFrameImage || options.lastFrameImage) throw new Error('当前视频模型不支持首尾帧，请使用参考图');
+  }
   assertReferences('参考图片', options.referenceImages, H3_MAX_REFERENCE_IMAGES);
   assertReferences('参考视频', options.referenceVideos, H3_MAX_REFERENCE_VIDEOS);
   assertReferences('参考音频', options.referenceAudios, H3_MAX_REFERENCE_AUDIOS);
@@ -116,13 +120,20 @@ async function h3Response(response: Response, apiKey: string) {
 }
 
 /** Upload one image/video/audio asset and keep the opaque `id` for the create call. */
-export async function uploadH3Asset(baseUrl: string, apiKey: string, file: Blob, fileName: string, signal?: AbortSignal): Promise<H3AssetDescriptor> {
+export async function uploadH3Asset(baseUrl: string, apiKey: string, file: Blob, fileName: string, signal?: AbortSignal, useFiles = false): Promise<H3AssetDescriptor> {
   if (file.size > H3_MAX_ASSET_BYTES) throw new Error('H3 素材不能超过 64 MiB');
   const form = new FormData();
   form.append('file', file, fileName);
-  const response = await fetch(apiUrl(baseUrl, '/v1/h3/assets'), { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form, signal });
+  if (useFiles) form.append('purpose', 'vision');
+  const response = await fetch(apiUrl(baseUrl, useFiles ? '/v1/files' : '/v1/h3/assets'), { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form, signal });
   const value = await h3Response(response, apiKey).then((item) => item.json()) as Partial<H3AssetDescriptor>;
   if (typeof value.id !== 'string' || !value.id) throw new Error('H3 素材上传响应缺少 id');
+  if (useFiles) {
+    const result = await fetch(apiUrl(baseUrl, `/v1/files/${encodeURIComponent(value.id)}`), { headers: { Authorization: `Bearer ${apiKey}` }, signal });
+    const data = await h3Response(result, apiKey).then((item) => item.json()) as { url?: unknown };
+    if (typeof data.url !== 'string' || !/^https?:\/\//i.test(data.url)) throw new Error('H3 素材查询未返回可访问地址');
+    return { id: data.url };
+  }
   return {
     id: value.id,
     ...(typeof value.fileName === 'string' ? { fileName: value.fileName } : {}),

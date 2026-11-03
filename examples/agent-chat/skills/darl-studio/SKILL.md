@@ -194,7 +194,7 @@ description: 通过本入剧出网站现有 Tools，分类查询和修改项目�
 
 `modelId` 与生成参数采用当轮 Tool schema。`options` 可含 `resolution`、`aspectRatio`、`duration`、`references`。参考编辑时将指定图片放入 `references`。H3 视频另支持 `referenceVideos`（视频 URL 数组）、`referenceAudios`（音频或音色试听 URL 数组），各最多 3 个且以模型能力为准；音频须搭配图片或视频。支持站内 `/api/files/` 与公网 HTTP(S) URL；已有可访问的 HTTPS/HTTP 素材直接传引用，本地素材由文件服务提供可访问 URL，无法直接访问时才上传到模型供应商。音色引用传真实音频地址，不传音色 ID；是否保持目标声音须试听真实生成结果。
 
-H3 视频模型支持 `minimax-h3-flash` 与 `minimax-h3-standard`；视频清晰度使用 `480P`、`768P`，Flash 另支持 `1080P`，不能继续提交旧值 `480` / `768`。本地参考素材通过新版 `/v1/h3/assets` 上传，宿主将返回的素材 ID 写入新协议，无需 Agent 手工上传或拼接上游字段。
+H3 视频模型支持 `minimax-h3-flash`、`minimax-h3-standard`、`h3-nsfw` 和 `h3-nsfw-opt`；清晰度使用 `480P`、`768P`，其中 Flash 和 NSFW 支持 `1080P`。NSFW 只支持 16:9、9:16 和多参考或文生视频；`h3-nsfw` 保留原提示词，`h3-nsfw-opt` 自动优化。NSFW 的本地参考素材由宿主通过文件接口上传并取得地址，无需 Agent 手工上传或拼接上游字段。
 
 资产提取后按 describe 分别填写 description（身份/用途）、appearance（外貌/空间/材质）、costume（主服饰）、voiceDescription（有原声依据的声音）、prompt（可执行的资产图指令）；原片证据放 source。不要把一句描述塞进所有字段，或把剧情截图换脸当成角色一致性资产。原片证据不足的内容标记待确认。
 

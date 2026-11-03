@@ -8,6 +8,8 @@ const names: Array<{ id: string; title: string }> = [
   { id: 'gpt-image-2.5', title: 'GPT Image 2.5 图片并发' },
   { id: 'gemini-3-pro-image-preview', title: 'Gemini 3 Pro Image Preview 图片并发' },
   { id: 'minimax-h3-flash', title: 'MiniMax H3 Flash 视频并发' },
+  { id: 'h3-nsfw', title: 'H3 NSFW 视频并发' },
+  { id: 'h3-nsfw-opt', title: 'H3 NSFW 提示词优化版视频并发' },
 ];
 
 export function MediaConcurrencySettings() {

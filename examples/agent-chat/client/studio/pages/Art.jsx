@@ -111,7 +111,7 @@ function ArtWorkspace({ context }) {
         if (status.jobs.some(job => job.kind === 'extract-assets' && ['queued', 'running'].includes(job.status))) { notify('资产提取进行中，请等待完成'); return }
       }
       const modelId = mediaDefaults.video?.modelId
-      if (!models.some(model => model.id === modelId && model.type === 'video' && model.enabled !== false && ['minimax-h3-flash', 'minimax-h3-standard'].includes(model.id))) { notify('请先在设置中配置并启用 MiniMax H3 视频模型'); return }
+      if (!models.some(model => model.id === modelId && model.type === 'video' && model.enabled !== false)) { notify('请先在设置中配置并启用视频模型'); return }
       const saved = await update(draft => {
         draft.episodes.filter(item => item.projectId === projectId && (!isRedraw || item.id === episode.id)).forEach(item => { item.stage = Math.max(item.stage, 4) })
       })

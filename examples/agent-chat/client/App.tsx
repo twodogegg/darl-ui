@@ -18,6 +18,8 @@ const defaultMediaModels: DefaultModelOption[] = [
   { id: 'gemini-3-pro-image-preview', name: 'Gemini 3 Pro Image Preview', type: 'image', description: '图片生成模型', capabilities: { resolutions: ['1K', '2K', '4K'], aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'] }, defaults: { resolution: '2K', aspectRatio: '16:9' } },
   { id: 'minimax-h3-flash', name: 'MiniMax H3 Flash', type: 'video', description: '快速视频生成模型', capabilities: { resolutions: ['480P', '768P', '1080P'], aspectRatios: ['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'] }, defaults: { resolution: '480P', aspectRatio: '16:9' } },
   { id: 'minimax-h3-standard', name: 'MiniMax H3 Standard', type: 'video', description: '标准视频生成模型', capabilities: { resolutions: ['480P', '768P'], aspectRatios: ['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'] }, defaults: { resolution: '768P', aspectRatio: '16:9' } },
+  { id: 'h3-nsfw', name: 'H3 NSFW', type: 'video', description: '使用原提示词', capabilities: { resolutions: ['480P', '768P', '1080P'], aspectRatios: ['16:9', '9:16'] }, defaults: { resolution: '480P', aspectRatio: '16:9' } },
+  { id: 'h3-nsfw-opt', name: 'H3 NSFW（提示词优化）', type: 'video', description: '自动优化提示词', capabilities: { resolutions: ['480P', '768P', '1080P'], aspectRatios: ['16:9', '9:16'] }, defaults: { resolution: '480P', aspectRatio: '16:9' } },
 ];
 const initialDefaultMediaSelection: DefaultModelDraft = {
   image: { modelId: 'gpt-image-2', resolution: '2K', aspectRatio: '16:9' },

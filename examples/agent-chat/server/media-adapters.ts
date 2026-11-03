@@ -425,7 +425,7 @@ async function videoAssetIds(job: MediaJob, key: string, rows: unknown[], localM
     const saved = typeof fileId === 'string' ? await localMedia?.(`/api/files/${fileId}`) : undefined;
     if (!saved) throw new Error(`第 ${index + 1} 个参考素材不存在或尚未完成`);
     if (saved.url) { ids.push(saved.url); continue; }
-    const uploaded = await uploadH3Asset(job.baseUrl, key, new Blob([new Uint8Array(saved.bytes)], { type: saved.mime }), `reference-${index + 1}`, AbortSignal.timeout(120000));
+    const uploaded = await uploadH3Asset(job.baseUrl, key, new Blob([new Uint8Array(saved.bytes)], { type: saved.mime }), `reference-${index + 1}`, AbortSignal.timeout(120000), ['h3-nsfw', 'h3-nsfw-opt'].includes(job.upstreamModelId));
     ids.push(uploaded.id);
   }
   return ids;

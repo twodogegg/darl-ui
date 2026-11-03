@@ -4,6 +4,8 @@
 >
 > 适用项目：`@darl/ui` 通用组件库及其宿主示例。第一期以实际接入渠道能力为准，禁止按品牌名臆测。**2026-10-17 更正：旧 RunningHub `task_*` 素材 ID 协议已不作为本期接口依据。当前 H3 Flash 依据新版《MiniMax H3 调用说明》与平台素材文件接口：`POST /v1/files` → `GET /v1/files/{id}` 获取 URL → `POST /v1/videos`；`resolution` 为字符串 `"480"` / `"768"`。用户补充支持文生及首尾帧；首尾帧请求的具体字段尚需接口验证。**
 
+当前宿主可通过现有 H3 协议绑定 `h3-nsfw` 和 `h3-nsfw-opt`：只支持 16:9 / 9:16、文生及多参考；本地素材使用文件接口上传并取得 URL。`h3-nsfw-opt` 在上游自动优化提示词，`h3-nsfw` 保持原提示词。历史 Flash / Standard 配置仍可保留。
+
 ## 1. 目标与边界
 
 让使用者在「模型管理」中新增逻辑模型，选择可复用的能力模板，为同一模型绑定多个 API 供应商，并在绑定层配置上游模型映射、调用协议和少量能力差异。配置保存后由 MediaWorkspace、DefaultModelSelector 和工作流读取。
@@ -12,7 +14,7 @@
 - 只使用宿主已实现且验证过的协议。**协议包括请求构造、上传要求、异步任务、响应解析和错误映射**；不单独创建「响应处理」配置页。
 - 不引入万能 HTTP/JSON Schema 编辑器、任意脚本、seed / CFG / sampler 等通用炼丹参数。
 - 文本只暴露模型选择和支持的思考等级；**不提供关闭思考 / none 选项**。协议内部如何保证符合实际请求规范，由宿主负责。
-- 第一阶段不支持 Seedance、官方 MiniMax H3、本地 H3 或 `runninghub-minimax-h3`。视频统一使用新版 H3 网关协议 `darl-h3-flash-unified`，当前接入 `minimax-h3-flash` 与 `minimax-h3-standard` 两个逻辑模型。
+- 视频使用 `darl-h3-flash-unified` 协议；除 Flash / Standard 外，宿主支持绑定 `h3-nsfw` 与 `h3-nsfw-opt`。不同模型的画幅、首尾帧和素材上传能力以绑定配置和适配器为准。
 
 ## 2. 第一期模型范围
 
