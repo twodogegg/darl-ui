@@ -1,6 +1,6 @@
-# AGENTS.md — darl-ui
+# AGENTS.md — 本入剧出（darl-ui）
 
-本文件适用于整个仓库。开始修改之前，请先读取本文件、README.md、package.json 以及相关组件源码。它是给 Codex 等编码 Agent 的项目规范，不取代用户当次明确要求。
+本文件适用于整个仓库。开始修改之前，请先读取本文件、README.md、package.json 以及相关源码。它是给 Codex 等编码 Agent 的项目规范，不取代用户当次明确要求。
 
 ## 协作规范入口
 
@@ -13,9 +13,9 @@
 
 ## 项目定位
 
-- 仓库：`twodogegg/darl-ui`；包名：`@darl/ui`。
-- 目标：面向多个 React 网站的可复用高级功能组件库，以及与源码同仓库的交互式演示站。
-- 技术：React、TypeScript、Vite；组件库通过独立 CSS 发布，不要求使用方安装 Tailwind。
+- 仓库：`twodogegg/darl-ui`。本仓库只做一个产品：「本入剧出」AI 短剧工作台，包含「剧本创作」和「视频转绘」两种模式，代码在 `examples/agent-chat/`。
+- `src/` 是工作台使用的 UI 组件，不再作为给其他网站复用的组件库维护。包名 `@darl/ui` 只是沿用，保持 `"private": true`，不发布。
+- 技术：React、TypeScript、Vite；数据存在本地 SQLite。
 - **设计基础：shadcn/ui（https://ui.shadcn.com）**。优先参考并复用其官方基础组件、设计约定及可访问性交互模式；缺少的高级业务功能由本项目自行封装。
 - 当前 `src/components/ui/Button.tsx` 是参考 shadcn/ui Button 约定的本地适配，不是通过官方 CLI 原样安装的源码；不得虚称“所有基础组件均为 shadcn/ui 官方原版”。
 - shadcn/ui 为源码分发体系：使用时以官方文档及源代码为准，尊重上游许可，并保留需要的归属/许可信息。
@@ -24,20 +24,18 @@
 
 1. 如非必要，勿增实体。优先修复或扩展已有组件，避免新增服务、数据库、管理后台、复杂配置层或过度抽象。
 2. UI 基础只采用 shadcn/ui 体系；不足之处优先通过 React、TypeScript 与浏览器原生 API 实现。未经用户明确同意，不引入 Uppy、react-dropzone、另一套 UI 组件库或视频播放器框架。
-3. 保持“组件本身负责 UI 和通用交互；宿主网站负责业务数据、鉴权、API 和远程存储”的边界。
-4. 对外 API 简明、类型完备、有合理默认值；尽量维持向后兼容。不要把内部源码路径当成公共 API。
-5. 支持明/暗主题、品牌色和独立组件颜色覆盖。优先语义化 CSS 变量；新增组件样式使用 `darl-` 前缀并避免污染宿主全局样式。
-6. 一个高级组件必须同步提供：源码、`src/index.ts` 公共导出、必要样式、Playground 真实交互演示、README/API 说明和测试。
-7. 不为了演示上传或操作真实用户数据。Playground 默认使用本地文件/模拟行为，不自动发送文件到服务器。
-8. 不擅自发布 npm、部署生产站或修改宿主业务仓库。仓库已有 `"private": true`，只有获得授权才调整发布策略。
+3. 不为组件库形态额外付出成本：新组件按工作台实际需要放置，不必补公共导出、Playground 演示或独立 API 文档；`src/` 的组件接口可以随工作台需要修改，不承诺向后兼容。
+4. 不擅自发布 npm 或部署生产站，只有获得授权才调整发布策略。
 
 ## 当前仓库结构
 
-- `src/components/ui/`：shadcn/ui 风格的底层基础 UI 适配。
-- `src/components/file-uploader/`：FileUploader 实现。
-- `src/theme/`：DarlUIProvider 与主题。
-- `src/index.ts` / `src/styles.css`：组件库公开入口和样式入口。
-- `playground/`：组件演示网站；演示必须真实调用组件库源码。
+- `examples/agent-chat/client/studio/`：工作台页面、组件与样式。
+- `examples/agent-chat/client/`：应用外壳与设置页。
+- `examples/agent-chat/server/`：服务端 API、工作流任务、媒体生成队列和文件存储。
+- `examples/agent-chat/prompts/`、`examples/agent-chat/skills/`：提示词与 Skills 源文件。
+- `src/`：工作台使用的 UI 组件与主题；`src/components/ui/` 是 shadcn/ui 风格的基础组件适配。
+- `playground/`：组件演示站，不是产品的一部分；新组件不需要在这里补演示。
+- `external/opencut-classic/`：内置的 OpenCut 剪辑器，`npm run dev` 会一并启动。
 - `tests/`：Vitest 测试。
 - `docs/`：功能规划和约定；计划中的功能不能写成已实现。
 
@@ -62,8 +60,9 @@ npm run build
 ## 提交要求
 
 - 提交只包括当前任务范围，命名清楚，例如 `feat: add video comparison`、`docs: specify video comparison`。
-- 在 PR 中描述变更范围、演示方式、测试结果、已知限制和是否影响公开 API。
-- 优先通过分支和 PR 评审非紧急改动；不要擅自合并。
+- 在 PR 中描述变更范围、演示方式、测试结果和已知限制。
+- 不要擅自合并分支或 PR。
+
 ## 1. 核心原则
 
 **优先完成真实可运行的功能，不追求完美架构。**
