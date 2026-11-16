@@ -265,6 +265,8 @@ export interface AgentSidebarProps {
   isGenerating?: boolean;
   onStop?: () => void;
   onRegenerate?: (messageId: string) => void;
+  /** Host truncates the conversation at this user message and runs the edited content again. */
+  onEditMessage?: (messageId: string, content: string) => void | Promise<void>;
   /** Host confirms or rejects a pending tool call. The host must enforce the decision. */
   onToolConfirm?: (toolCallId: string, approved: boolean) => void | Promise<void>;
   /** Submit structured answers; null means the user cancelled the question. */

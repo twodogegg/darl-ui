@@ -516,7 +516,7 @@ export function AssetLibrary({
                             disabled={!!asset.uploading} onClick={() => toggleFavorite(asset)}><Star aria-hidden="true" /></Button>}
                           {onRename && <Button variant="ghost" size="icon" aria-label={`重命名${asset.name}`} disabled={!!asset.uploading} onClick={() => beginRename(asset)}><Pencil aria-hidden="true" /></Button>}
                           {onDelete && <Button variant="ghost" size="icon" aria-label={`删除${asset.name}`} disabled={!!asset.uploading}
-                            onClick={() => { if (window.confirm(`确定删除「${asset.name}」？`)) void remove(asset); }}><Trash2 aria-hidden="true" /></Button>}
+                            onClick={() => void remove(asset)}><Trash2 aria-hidden="true" /></Button>}
                         </div>
                       </>}
                       {tagLabels.length > 0 && renamingId !== asset.id && <span className="darl-asset-card-tags">{tagLabels.map((label) => <span key={label}>{label}</span>)}</span>}

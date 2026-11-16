@@ -11,7 +11,7 @@ type Filter = 'all' | 'favorite' | 'mine' | 'builtin';
 type ImportConflict = { preview: AgentSkill; existing: AgentSkill };
 const skillNameKey = (name: string) => name.trim().toLocaleLowerCase();
 
-export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport, onFavoriteChange, onCreateViaChat, createViaChatDisabled = false, loadSkill }: {
+export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport, onFavoriteChange, onCreateViaChat, createViaChatDisabled = false, loadSkill, categories = [] }: {
   open: boolean;
   skills: AgentSkill[];
   onClose: () => void;
@@ -23,11 +23,14 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
   onDelete: (skillId: string) => void | Promise<void>;
   onImport: (skill: AgentSkill) => void | Promise<void>;
   onFavoriteChange: (skillId: string, favorite: boolean) => void | Promise<void>;
+  /** 业务分类标签（如 脚本 / 资产 / 分镜）；提供时在筛选区渲染第二排分类 tab。 */
+  categories?: string[];
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AgentSkill>(newSkillDraft());
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [category, setCategory] = useState('');
   const [resourcePath, setResourcePath] = useState<string | null>(null);
   const [fileMode, setFileMode] = useState<'preview' | 'edit'>('preview');
   const [error, setError] = useState('');
@@ -61,9 +64,10 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
       if (filter === 'favorite' && !skill.favorite) return false;
       if (filter === 'mine' && !mine) return false;
       if (filter === 'builtin' && mine) return false;
+      if (category && (skill.category || '') !== category) return false;
       return !text || [skill.name, skill.slug].some((name) => name?.toLocaleLowerCase().includes(text));
     });
-  }, [filter, query, skills]);
+  }, [filter, query, skills, category]);
 
   useEffect(() => {
     if (!deleteSuccess) return;
@@ -264,11 +268,12 @@ export function SkillManager({ open, skills, onClose, onSave, onDelete, onImport
           <div className="darl-agent-manager-actions"><Button variant="outline" size="sm" onClick={create}><Plus data-icon="inline-start" />新建</Button><Button variant="outline" size="sm" onClick={() => importInput.current?.click()}><Upload data-icon="inline-start" />导入</Button>{onCreateViaChat ? <Button variant="outline" size="sm" className="darl-agent-create-skill" disabled={createViaChatDisabled} onClick={() => { if (dirty && !window.confirm('当前 Skill 有未保存修改，是否放弃并通过对话创建？')) return; void Promise.resolve().then(onCreateViaChat).catch(reason => setError(reason instanceof Error ? reason.message : '无法开始创建 Skill')); }}><Sparkles data-icon="inline-start" />通过对话创建</Button> : <Button variant="outline" size="sm" onClick={() => importFolderInput.current?.click()}><FolderOpen data-icon="inline-start" />文件夹</Button>}<input ref={importInput} type="file" hidden multiple aria-label="导入 Skill 文件" accept=".md,.zip,text/markdown,application/zip" onChange={(event) => { void importFiles(Array.from(event.target.files || [])); event.currentTarget.value = ''; }} /><input ref={(node) => { importFolderInput.current = node; node?.setAttribute('webkitdirectory', ''); }} type="file" hidden multiple aria-label="导入 Skill 文件夹" onChange={(event) => { void importFiles(Array.from(event.target.files || [])); event.currentTarget.value = ''; }} /></div>
           <label className="darl-agent-manager-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 Skill" aria-label="搜索 Skill" /></label>
           <div className="darl-agent-manager-filters" role="tablist" aria-label="Skill 筛选">{([['all', '全部'], ['favorite', '收藏'], ['mine', '我的'], ['builtin', '内置']] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={filter === value} onClick={() => setFilter(value)}>{label}</button>)}</div>
-          <div className="darl-agent-skill-list">{visible.map((skill) => <div key={skill.id} className={`darl-agent-skill-list-row${skill.id === selectedId ? ' is-selected' : ''}`}><button type="button" className="darl-agent-skill-list-main" onClick={() => select(skill)}><span className="darl-agent-skill-list-icon"><Sparkles /></span><span><strong>{skill.name || '未命名 Skill'}</strong><small>{skill.description || '暂无描述'}</small><em>{skill.scope === 'builtin' ? '内置' : '我的'}{skill.version ? ` · v${skill.version}` : ''}</em></span></button><button type="button" className="darl-agent-skill-favorite" aria-label={skill.favorite ? `取消收藏 ${skill.name}` : `收藏 ${skill.name}`} aria-pressed={skill.favorite ? 'true' : 'false'} onClick={() => void toggleFavorite(skill)}><Star fill={skill.favorite ? 'currentColor' : 'none'} /></button>{skill.id === selectedId && <Check className="darl-agent-skill-selected-check" />}</div>)}{!visible.length && <p className="darl-agent-empty">没有匹配的 Skill</p>}</div>
+          {categories.length > 0 && <div className="darl-agent-manager-filters darl-agent-manager-category-filters" role="tablist" aria-label="Skill 分类">{([['', '全部分类'], ...categories.map((label) => [label, label] as const)] as const).map(([value, label]) => <button key={value || 'all'} type="button" role="tab" aria-selected={category === value} onClick={() => setCategory(value)}>{label}</button>)}</div>}
+          <div className="darl-agent-skill-list">{visible.map((skill) => <div key={skill.id} className={`darl-agent-skill-list-row${skill.id === selectedId ? ' is-selected' : ''}`}><button type="button" className="darl-agent-skill-list-main" onClick={() => select(skill)}><span className="darl-agent-skill-list-icon"><Sparkles /></span><span><strong>{skill.name || '未命名 Skill'}</strong><small>{skill.description || '暂无描述'}</small><em>{skill.scope === 'builtin' ? '内置' : '我的'}{skill.category ? ` · ${skill.category}` : ''}{skill.version ? ` · v${skill.version}` : ''}</em></span></button><button type="button" className="darl-agent-skill-favorite" aria-label={skill.favorite ? `取消收藏 ${skill.name}` : `收藏 ${skill.name}`} aria-pressed={skill.favorite ? 'true' : 'false'} onClick={() => void toggleFavorite(skill)}><Star fill={skill.favorite ? 'currentColor' : 'none'} /></button>{skill.id === selectedId && <Check className="darl-agent-skill-selected-check" />}</div>)}{!visible.length && <p className="darl-agent-empty">没有匹配的 Skill</p>}</div>
         </aside>
         <section className="darl-agent-skill-editor">
           <div className="darl-agent-skill-editor-heading"><div><span className="darl-agent-manager-eyebrow">{selectedId ? 'EDIT SKILL' : 'NEW SKILL'}</span><h3>{draft.name || '新建 Skill'}</h3></div><div className="darl-agent-skill-editor-actions">{selected && !isBuiltin && <Button variant="ghost" size="sm" onClick={() => setDeleteOpen(true)}><Trash2 data-icon="inline-start" />删除</Button>}</div></div>
-          <div className="darl-agent-skill-form"><label><span>Skill 原名</span><input value={draft.slug || draft.name || ''} readOnly /></label><label><span>显示名称</span><input value={draft.name || ''} disabled={isBuiltin} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="例如：代码审查" /></label><label><span>描述</span><textarea value={draft.description || ''} disabled={isBuiltin} rows={2} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="说明什么时候使用这个 Skill" /></label><div className="darl-agent-skill-auto-invocation"><Switch aria-label="允许自动调用" checked={draft.allowImplicitInvocation !== false} onChange={(event) => setDraft({ ...draft, allowImplicitInvocation: event.target.checked })}>允许自动调用</Switch><small>关闭后，只有在聊天中手动 @ 引用时才会使用。</small></div></div>
+          <div className="darl-agent-skill-form"><label><span>Skill 原名</span><input value={draft.slug || draft.name || ''} readOnly /></label><label><span>显示名称</span><input value={draft.name || ''} disabled={isBuiltin} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="例如：代码审查" /></label><label><span>描述</span><textarea value={draft.description || ''} disabled={isBuiltin} rows={2} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="说明什么时候使用这个 Skill" /></label>{categories.length > 0 && <label><span>分类</span><select value={draft.category || ''} disabled={isBuiltin} onChange={(event) => setDraft({ ...draft, category: event.target.value })}><option value="">未分类</option>{categories.map((label) => <option key={label} value={label}>{label}</option>)}</select></label>}<div className="darl-agent-skill-auto-invocation"><Switch aria-label="允许自动调用" checked={draft.allowImplicitInvocation !== false} onChange={(event) => setDraft({ ...draft, allowImplicitInvocation: event.target.checked })}>允许自动调用</Switch><small>关闭后，只有在聊天中手动 @ 引用时才会使用。</small></div></div>
           <div className="darl-agent-skill-files">
             <aside><div className="darl-agent-skill-files-heading"><strong>文件 <span>{resources.length + 1}</span></strong><Button variant="ghost" size="sm" disabled={isBuiltin || bodyUnavailable} onClick={() => { let index = resources.length + 1; while (resources.some((resource) => resource.path === `references/resource-${index}.md`)) index += 1; const path = `references/resource-${index}.md`; setDraft({ ...draft, resources: [...resources, { path, content: '' }] }); setResourcePath(path); setFileMode('edit'); }}><Plus data-icon="inline-start" />资源</Button></div>
               <SkillFileTree key={draft.id} paths={['SKILL.md', ...resources.map((resource) => resource.path)]} selectedPath={filePath} onSelect={selectFile} />

@@ -496,8 +496,8 @@ describe('MediaWorkspace', () => {
     render(<MediaWorkspace models={models} tasks={tasks} styles={styles} onCreateStyle={onCreateStyle} onGenerate={onGenerate}/>);
     fireEvent.click(screen.getByRole('button', { name: '选择风格' }));
     fireEvent.mouseDown(screen.getByRole('tab', { name: '我的风格' }));
-    expect(screen.getByRole('button', { name: '预览我的短剧感' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '预览电影感' })).toBeNull();
+    expect(screen.getByRole('button', { name: '选择我的短剧感' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '选择电影感' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '创建风格' }));
     fireEvent.change(screen.getByLabelText(/风格名称/), { target: { value: '新风格' } });
     fireEvent.change(screen.getByLabelText(/风格描述词/), { target: { value: '冷色霓虹' } });
@@ -505,8 +505,7 @@ describe('MediaWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建风格' }));
     await waitFor(() => expect(onCreateStyle).toHaveBeenCalledWith({ name: '新风格', description: '冷色霓虹' }));
     fireEvent.mouseDown(screen.getByRole('tab', { name: '风格广场' }));
-    fireEvent.click(screen.getByRole('button', { name: '预览电影感' }));
-    fireEvent.click(screen.getByRole('button', { name: '确认选择' }));
+    fireEvent.click(screen.getByRole('button', { name: '选择电影感' }));
     prompt(); submit();
     await waitFor(() => expect(onGenerate).toHaveBeenCalledWith(expect.objectContaining({ style: styles[0] })));
   });

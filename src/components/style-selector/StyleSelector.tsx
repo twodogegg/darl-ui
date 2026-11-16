@@ -31,11 +31,14 @@ export interface StyleLoadMoreRequest extends StyleFilter {
 }
 export interface StyleSelectorProps {
   styles: StyleOption[];
+  /** Category tabs in display order, shown even when empty; defaults to the categories of market styles. */
+  categories?: string[];
   /** When provided, the selector is rendered as a modal dialog. */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   value?: string | null;
   defaultValue?: string | null;
+  /** Called as soon as a card is clicked; the selector then requests closing through onOpenChange. */
   onChange?: (style: StyleOption | null) => void;
   onFavoriteChange?: (style: StyleOption, favorite: boolean) => void;
   /** Resolve after saving; reject to keep the draft and display an error. */
@@ -72,7 +75,7 @@ function Thumbnail({ src, className = '' }: { src?: string; className?: string }
 }
 
 /** shadcn-style Button, Radix Tabs/ToggleGroup, and isolated CSS for Tailwind-free hosts. */
-export function StyleSelector({ styles, value, defaultValue = null, onChange, onFavoriteChange, onCreate,
+export function StyleSelector({ styles, categories, value, defaultValue = null, onChange, onFavoriteChange, onCreate,
   onUpdate, onEdit, editingStyle,
   defaultCollection = 'market', className = '', accentColor, open, onOpenChange,
   pageSize = 20, hasMore = false, onLoadMore, onFilterChange }: StyleSelectorProps) {
@@ -81,7 +84,6 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
   const [category, setCategory] = useState('');
   const [query, setQuery] = useState('');
   const [internalValue, setInternalValue] = useState<string | null>(defaultValue);
-  const [pendingValue, setPendingValue] = useState<string | null>(value ?? defaultValue);
   const [recent, setRecent] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [step, setStep] = useState<1 | 2>(1);
@@ -107,7 +109,7 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
     if (open !== false) onFilterChange?.({ collection, ...(activeCategory ? { category: activeCategory } : {}), query: query.trim() });
   }, [filterKey, open]);
   const selectedId = value !== undefined ? value : internalValue;
-  const categories = useMemo(() => [...new Set(styles.filter((item) => !item.isOwned).map((item) => item.category).filter((item): item is string => !!item))], [styles]);
+  const categoryOptions = useMemo(() => categories ?? [...new Set(styles.filter((item) => !item.isOwned).map((item) => item.category).filter((item): item is string => !!item))], [categories, styles]);
   const filtered = useMemo(() => {
     const search = query.trim().toLocaleLowerCase();
     const items = styles.filter((item) => {
@@ -161,7 +163,6 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
   useEffect(() => () => {
     if (previewUrl?.startsWith('blob:') && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
-  useEffect(() => { if (open !== undefined) setPendingValue(value ?? internalValue); }, [open, value]);
   useEffect(() => {
     if (!editingStyle) return;
     setActiveEditStyle(editingStyle); setCreating(true); setStep(1); setName(editingStyle.name); setDescription(editingStyle.description || '');
@@ -169,8 +170,10 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
   }, [editingStyle]);
 
   const selectStyle = (item: StyleOption) => {
-    setPendingValue(item.id);
+    if (value === undefined) setInternalValue(item.id);
     setRecent((previous) => [item.id, ...previous.filter((key) => key !== item.id)]);
+    onChange?.(item);
+    onOpenChange?.(false);
   };
   const editStyle = (style: StyleOption) => {
     if (onUpdate) {
@@ -178,12 +181,6 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
       setReferenceImage(undefined); setPreviewUrl(style.image); setError('');
     }
     onEdit?.(style);
-  };
-  const confirmSelection = () => {
-    const next = pendingValue ? styles.find((item) => item.id === pendingValue) ?? null : null;
-    if (value === undefined) setInternalValue(next?.id ?? null);
-    onChange?.(next);
-    onOpenChange?.(false);
   };
   const resetCreate = () => {
     setActiveEditStyle(null); setCreating(false); setStep(1); setName(''); setDescription('');
@@ -222,7 +219,7 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
   return <section className={`darl-style-selector ${modal ? 'darl-style-modal' : ''} ${className}`} style={theme}
     role={modal ? 'dialog' : undefined} aria-modal={modal ? true : undefined} aria-label="风格选择器"
     onMouseDown={modal ? (event) => { if (event.target === event.currentTarget) close(); } : undefined}>
-    <div className={modal ? 'darl-style-modal-panel' : undefined}>
+    <div className={`darl-style-frame${modal ? ' darl-style-modal-panel' : ''}`}>
     {creating ? <div className="darl-style-create">
       <header className="darl-style-create-head">
         <Button variant="ghost" disabled={saving} onClick={() => step === 2 ? setStep(1) : resetCreate()}><ArrowLeft aria-hidden="true" />返回</Button>
@@ -260,12 +257,11 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
         <Tabs.List className="darl-style-collections" aria-label="风格集合">{collections.map((item) => <Tabs.Trigger key={item.id} value={item.id}>{item.label}</Tabs.Trigger>)}</Tabs.List>
             <div className="darl-style-actions"><label className="darl-style-search"><Search aria-hidden="true" /><input aria-label="搜索风格名称" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索风格名称" />{query && <Button variant="ghost" size="icon" onClick={() => setQuery('')} aria-label="清除搜索"><X /></Button>}</label>{modal && <Button variant="ghost" size="icon" onClick={close} aria-label="关闭风格选择"><X /></Button>}</div>
       </header>
-      {collection !== 'mine' && <div className="darl-style-filters"><ToggleGroup.Root className="darl-style-category" type="single" value={category || 'all'} onValueChange={(next) => { if (next) setCategory(next === 'all' ? '' : next); }} aria-label="风格分类"><ToggleGroup.Item value="all">全部</ToggleGroup.Item>{categories.map((item) => <ToggleGroup.Item key={item} value={item}>{item}</ToggleGroup.Item>)}</ToggleGroup.Root></div>}
+      {collection !== 'mine' && <div className="darl-style-filters"><ToggleGroup.Root className="darl-style-category" type="single" value={category || 'all'} onValueChange={(next) => { if (next) setCategory(next === 'all' ? '' : next); }} aria-label="风格分类"><ToggleGroup.Item value="all">全部</ToggleGroup.Item>{categoryOptions.map((item) => <ToggleGroup.Item key={item} value={item}>{item}</ToggleGroup.Item>)}</ToggleGroup.Root></div>}
       {collections.map((item) => <Tabs.Content key={item.id} value={item.id} className="darl-style-panel" ref={collection === item.id ? panelRef : undefined}>
-          <div className="darl-style-grid">{collection === 'mine' && onCreate && !query && <article className="darl-style-card darl-style-create-card"><button type="button" className="darl-style-card-select" aria-label="创建风格" onClick={() => setCreating(true)}><span className="darl-style-create-card-icon"><Sparkles /></span><strong>创建风格</strong><small>上传参考图或输入描述</small></button></article>}{filtered.slice(0, visibleCount).map((option) => <article key={option.id} className={`darl-style-card ${selectedId === option.id ? 'is-selected' : ''} ${pendingValue === option.id && pendingValue !== selectedId ? 'is-pending' : ''}`}>
-          <button type="button" className="darl-style-card-select" onClick={() => selectStyle(option)} aria-pressed={pendingValue === option.id} aria-label={`预览${option.name}`}>
-            <span className="darl-style-card-image"><Thumbnail src={option.image} /><span className="darl-style-card-overlay"><strong>{option.name}</strong></span><span className="darl-style-card-check"><Check /></span></span>
-            <span className="darl-style-card-meta">{!option.isOwned && option.category && <span>{option.category}</span>}<span>{option.description}</span></span>
+          <div className="darl-style-grid">{collection === 'mine' && onCreate && !query && <article className="darl-style-card darl-style-create-card"><button type="button" className="darl-style-card-select" aria-label="创建风格" onClick={() => setCreating(true)}><span className="darl-style-create-card-icon"><Sparkles /></span><strong>创建风格</strong><small>上传参考图或输入描述</small></button></article>}{filtered.slice(0, visibleCount).map((option) => <article key={option.id} className={`darl-style-card ${selectedId === option.id ? 'is-selected' : ''}`}>
+          <button type="button" className="darl-style-card-select" onClick={() => selectStyle(option)} aria-pressed={selectedId === option.id} aria-label={`选择${option.name}`}>
+            <span className="darl-style-card-image"><Thumbnail src={option.image} /><span className="darl-style-card-overlay"><strong>{option.name}</strong></span></span>
           </button>
           {option.isOwned && (onEdit || onUpdate) && <Button variant="ghost" size="icon" className="darl-style-edit" onClick={(event) => { event.stopPropagation(); editStyle(option); }} aria-label={`编辑${option.name}`}><Pencil aria-hidden="true" /></Button>}
           {onFavoriteChange && <Button variant="ghost" size="icon" className="darl-style-favorite" aria-pressed={!!option.favorite} onClick={() => onFavoriteChange(option, !option.favorite)} aria-label={`${option.favorite ? '取消收藏' : '收藏'}${option.name}`}><Star aria-hidden="true" /></Button>}
@@ -275,7 +271,6 @@ export function StyleSelector({ styles, value, defaultValue = null, onChange, on
           {loadingMore ? <span role="status">正在加载更多风格…</span> : loadError ? <><span role="alert">{loadError}</span><Button variant="outline" size="sm" onClick={() => void loadNextPage()}>重试加载</Button></> : <Button variant="ghost" size="sm" onClick={() => void loadNextPage()}>加载更多</Button>}
         </div>}
       </Tabs.Content>)}
-      <footer className="darl-style-footer"><div className="darl-style-footer-actions"><Button onClick={confirmSelection} disabled={pendingValue === selectedId}>确认选择</Button></div></footer>
     </Tabs.Root>}
     </div>
   </section>;

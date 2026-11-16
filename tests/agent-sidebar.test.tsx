@@ -718,6 +718,36 @@ describe('AgentSidebar', () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'high' })));
   });
 
+  it('编辑已发送的用户消息：就地改完交给宿主重发，取消与 Escape 不改动历史', async () => {
+    const edit = vi.fn(() => Promise.resolve());
+    const history: AgentSession[] = [{ id: 'edit', title: '编辑', messages: [
+      { id: 'ask', role: 'user', content: '在吗。' },
+      { id: 'answer', role: 'assistant', content: '在的。' },
+    ] }];
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={history} activeSessionId="edit" onEditMessage={edit} />);
+    fireEvent.click(screen.getByRole('button', { name: '编辑消息' }));
+    const editor = screen.getByRole('textbox', { name: '编辑消息' });
+    expect(editor).toHaveValue('在吗。');
+    fireEvent.change(editor, { target: { value: '在吗？' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(edit).toHaveBeenCalledWith('ask', '在吗？'));
+    expect(screen.queryByRole('textbox', { name: '编辑消息' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑消息' }));
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(screen.queryByRole('textbox', { name: '编辑消息' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '编辑消息' }));
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '编辑消息' }), { key: 'Escape' });
+    expect(screen.queryByRole('textbox', { name: '编辑消息' })).toBeNull();
+    expect(edit).toHaveBeenCalledTimes(1);
+  });
+
+  it('没有宿主编辑能力时用户消息仍可复制，但不显示编辑入口', () => {
+    render(<AgentSidebar open onOpenChange={vi.fn()} sessions={[{ id: 'ask-only', title: '复制', messages: [{ id: 'ask', role: 'user', content: '在吗。' }] }]} activeSessionId="ask-only" />);
+    expect(screen.getByRole('button', { name: '复制消息' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '编辑消息' })).toBeNull();
+  });
+
   it('聊天侧栏不再显示 Skill 管理入口', () => {
     render(<AgentSidebar open onOpenChange={vi.fn()} sessions={sessions} skills={skills} />);
     fireEvent.click(screen.getByRole('button', { name: '添加材料或能力' }));

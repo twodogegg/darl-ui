@@ -83,13 +83,9 @@ describe('AssetLibrary', () => {
     await waitFor(() => expect(screen.queryByLabelText('资产名称')).toBeNull());
   });
 
-  it('deletes only after confirmation', async () => {
+  it('deletes through the host callback immediately', async () => {
     const onDelete = vi.fn().mockResolvedValue(undefined);
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     render(<AssetLibrary assets={assets} tags={tags} onDelete={onDelete} />);
-    fireEvent.click(screen.getByRole('button', { name: '删除角色三视图' }));
-    expect(onDelete).not.toHaveBeenCalled();
-    confirm.mockReturnValue(true);
     fireEvent.click(screen.getByRole('button', { name: '删除角色三视图' }));
     await waitFor(() => expect(onDelete).toHaveBeenCalledWith(assets[0]));
   });

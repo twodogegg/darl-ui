@@ -32,8 +32,8 @@ describe('StyleSelector', () => {
     const onFavoriteChange = vi.fn();
     render(<StyleSelector open styles={styles} onFavoriteChange={onFavoriteChange} />);
     fireEvent.click(screen.getByRole('radio', { name: '3D风格' }));
-    expect(screen.getByRole('button', { name: '预览科幻机甲' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '预览电影感' })).toBeNull();
+    expect(screen.getByRole('button', { name: '选择科幻机甲' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '选择电影感' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '收藏科幻机甲' }));
     expect(onFavoriteChange).toHaveBeenCalledWith(styles[1], true);
   });
@@ -41,11 +41,11 @@ describe('StyleSelector', () => {
   it('keeps owned styles out of the market collection', () => {
     const owned = { ...styles[0], id: 'owned', name: '我的风格', isOwned: true };
     const { unmount } = render(<StyleSelector open styles={[styles[0], owned]} />);
-    expect(screen.getByRole('button', { name: '预览电影感' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '预览我的风格' })).toBeNull();
+    expect(screen.getByRole('button', { name: '选择电影感' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '选择我的风格' })).toBeNull();
     unmount();
     render(<StyleSelector open styles={[owned]} defaultCollection="mine" />);
-    expect(screen.getByRole('button', { name: '预览我的风格' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '选择我的风格' })).toBeInTheDocument();
   });
 
   it('exposes edit controls for owned styles and submits updates', async () => {
@@ -78,19 +78,20 @@ describe('StyleSelector', () => {
     await waitFor(() => expect(onCreate).toHaveBeenCalledWith({ name: '新风格', description: '柔和电影光' }));
   });
 
-  it('reveals local pages at the bottom and preserves pending selection until confirmation', () => {
+  it('reveals local pages at the bottom and selects a card immediately', () => {
     const bottom = observeBottom();
     const onChange = vi.fn();
-    render(<StyleSelector open styles={styles} pageSize={1} onChange={onChange} />);
-    fireEvent.click(screen.getByRole('button', { name: '预览电影感' }));
-    expect(screen.queryByRole('button', { name: '预览科幻机甲' })).toBeNull();
+    const onOpenChange = vi.fn();
+    render(<StyleSelector open styles={styles} pageSize={1} onChange={onChange} onOpenChange={onOpenChange} />);
+    expect(screen.queryByRole('button', { name: '选择科幻机甲' })).toBeNull();
     bottom.enter();
-    expect(screen.getByRole('button', { name: '预览科幻机甲' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '选择科幻机甲' })).toBeInTheDocument();
     expect(screen.queryByText('已加载全部风格')).toBeNull();
     expect(screen.queryByRole('button', { name: '加载更多' })).toBeNull();
-    expect(onChange).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '确认选择' }));
+    fireEvent.click(screen.getByRole('button', { name: '选择电影感' }));
     expect(onChange).toHaveBeenCalledWith(styles[0]);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(screen.queryByRole('button', { name: '确认选择' })).toBeNull();
   });
 
   it('deduplicates remote requests, retains the list on failure and retries', async () => {
@@ -103,11 +104,11 @@ describe('StyleSelector', () => {
     expect(screen.getByRole('status')).toHaveTextContent('正在加载');
     await act(async () => reject(new Error('网络中断')));
     expect(screen.getByRole('alert')).toHaveTextContent('网络中断');
-    expect(screen.getByRole('button', { name: '预览电影感' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '选择电影感' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '重试加载' }));
     await waitFor(() => expect(onLoadMore).toHaveBeenCalledTimes(2));
     rerender(<StyleSelector open styles={styles} hasMore={false} onLoadMore={onLoadMore} />);
-    expect(screen.getByRole('button', { name: '预览科幻机甲' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '选择科幻机甲' })).toBeInTheDocument();
     expect(screen.queryByText('已加载全部风格')).toBeNull();
     expect(screen.queryByRole('button', { name: '加载更多' })).toBeNull();
   });

@@ -258,6 +258,11 @@ function formatDuration(milliseconds: number) {
   return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`;
 }
 
+/** 编辑已发送消息时的输入框行数：按内容自适应，太高就滚动。 */
+function editorRows(value: string) {
+  return Math.min(10, Math.max(1, value.split('\n').length));
+}
+
 function hasExecutionActivity(events: AgentExecutionEvent[] | undefined, calls: AgentToolCall[] = []) {
   return calls.length > 0 || Boolean(events?.some((event) => event.source !== 'agent' || event.parentRunId));
 }
@@ -354,7 +359,7 @@ function statusText(status: AgentApplication['status']): string {
   return status === 'connected' ? '已连接' : status === 'needs-auth' ? '需要授权' : '未连接';
 }
 
-export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraftChange, references, onReference, composerHeader, composerFooter, messageHeader, renderMessageActions, voice, open, onOpenChange, sessions, hideEmptySessions = false, activeSessionId, onSessionChange, onSessionRename, onSessionDelete, onNewSession, onSend, onRegenerate, onToolConfirm, onUserInput, approvalMode, onApprovalModeChange, approvalModePending = false, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onSkillCreate, onFileUpload, uploadAttachment, models = [], agents = [], selectedAgentId: controlledAgentId, selectedApplicationIds, selectedSkillIds, onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
+export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraftChange, references, onReference, composerHeader, composerFooter, messageHeader, renderMessageActions, voice, open, onOpenChange, sessions, hideEmptySessions = false, activeSessionId, onSessionChange, onSessionRename, onSessionDelete, onNewSession, onSend, onRegenerate, onEditMessage, onToolConfirm, onUserInput, approvalMode, onApprovalModeChange, approvalModePending = false, isGenerating = false, onStop, applications = [], skills = emptySkills, onSkillUpload, onSkillImport, onSkillCreate, onFileUpload, uploadAttachment, models = [], agents = [], selectedAgentId: controlledAgentId, selectedApplicationIds, selectedSkillIds, onSelectedApplicationIdsChange, onSelectedSkillIdsChange, selectedModelId: controlledModelId, onSelectedModelIdChange, selectedReasoningEffort: controlledEffort, onSelectedReasoningEffortChange, className = '' }: AgentSidebarProps) {
   const [view, setView] = useState<'chat' | 'history'>('chat');
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [handledConfirmations, setHandledConfirmations] = useState<Set<string>>(() => new Set());
@@ -376,6 +381,9 @@ export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraft
   const [deleteTheme, setDeleteTheme] = useState<ImagePreviewTheme>();
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
   const [copyState, setCopyState] = useState('');
+  // 编辑已发送的用户消息：就地改成输入框，提交后由宿主截断历史并重新运行。
+  const [editing, setEditing] = useState<{ id: string; value: string } | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
   const [copyNotice, setCopyNotice] = useState('');
   const [insertion, setInsertion] = useState<{ token: string; key: number } | null>(null);
   const [localSkills, setLocalSkills] = useState<AgentSkill[]>(skills);
@@ -446,7 +454,7 @@ export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraft
   useEffect(() => () => { if (typeof URL.revokeObjectURL === 'function') Object.values(attachmentPreviewUrls.current).forEach((url) => URL.revokeObjectURL(url)); }, []);
   const setDraft = (value: string) => { onDraftChange?.(value); setDrafts((current) => ({ ...current, [draftKey]: value })); onSelectedApplicationIdsChange?.(referenceIds(value, 'app')); onSelectedSkillIdsChange?.(referenceIds(value, 'skill')); };
   const filteredSessions = useMemo(() => sessions.filter((session) => (!hideEmptySessions || (session.messageCount ?? session.messages.length) > 0) && `${session.title} ${session.messages.at(-1)?.content ?? session.messagePreview ?? ''}`.toLowerCase().includes(historyQuery.toLowerCase())), [hideEmptySessions, historyQuery, sessions]);
-  useEffect(() => { setError(''); setPicker(null); }, [activeSession?.id]);
+  useEffect(() => { setError(''); setPicker(null); setEditing(null); }, [activeSession?.id]);
 
   const pendingConfirmation = activeSession?.messages.flatMap(message => message.toolCalls || []).find(call => call.status === 'confirmation' && !handledConfirmations.has(call.id));
   const userInput = pendingConfirmation?.userInput;
@@ -527,6 +535,17 @@ export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraft
   const setModelId = (id: string) => { setLocalModelId(id); onSelectedModelIdChange?.(id); };
   const setEffort = (value: string) => { setLocalEffort(value); onSelectedReasoningEffortChange?.(value); };
   const copy = async (value: string, id: string) => { try { await navigator.clipboard.writeText(value); setCopyState(id); setCopyNotice('已复制'); window.clearTimeout(copyTimer.current); copyTimer.current = window.setTimeout(() => { setCopyState((current) => current === id ? '' : current); setCopyNotice(''); }, 1200); } catch { setError('复制失败，请手动选择文本复制'); } };
+  const beginEdit = (id: string, value: string) => { setError(''); setEditing({ id, value }); };
+  const submitEdit = async () => {
+    const target = editing;
+    const content = target?.value.trim();
+    if (!target || !content || !onEditMessage || editBusy) return;
+    // 先收起输入框：宿主会用编辑后的内容重发，原来这条消息不再存在。
+    setEditing(null); setEditBusy(true); setError('');
+    try { await onEditMessage(target.id, content); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : '编辑后重发失败，请重试'); setEditing(target); }
+    finally { setEditBusy(false); }
+  };
   const submit = async () => {
     const content = draft.trim();
     if ((!content && !files.length) || !activeSession || !onSend || isGenerating || approvalModePending || submitting.current) return;
@@ -625,12 +644,12 @@ export function AgentSidebar({ embedded = false, draft: controlledDraft, onDraft
     </section> : <>
       <section ref={messagesRef} className="darl-agent-messages" aria-live="polite" onScroll={(event) => { const element = event.currentTarget; followOutput.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>{messageHeader}
         {!activeMessages.length && <div className="darl-agent-empty-state"><span className="darl-agent-empty-icon"><Sparkles size={22} /></span><h2>需要我帮你做什么？</h2><p>输入 @ 联系其他 Agent，或引用应用和 Skill。</p></div>}
-        {activeMessages.map((message) => <article key={message.id} className={`darl-agent-message darl-agent-message--${message.role}`}>
+        {activeMessages.map((message) => <article key={message.id} className={`darl-agent-message darl-agent-message--${message.role}${editing?.id === message.id ? ' darl-agent-message--editing' : ''}`}>
           <div className="darl-agent-message-label">{message.role === 'user' ? '你' : 'Agent'}</div>
-          <div className="darl-agent-message-body">{message.role === 'assistant' && <ExecutionTimeline events={message.timeline} calls={message.toolCalls} streaming={message.streaming} error={message.error} onCopyCode={(code) => void copy(code, `${message.id}-code`)} />}{message.streaming && !message.content && !message.outputs?.length && !hasExecutionActivity(message.timeline, message.toolCalls) && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content || speechTranscript(message.outputs)} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : <p><ReferenceText value={message.content} /></p>}{message.error && <AgentErrorCard error={message.error} />}{message.attachments?.map((attachment, index) => { const name = attachmentName(attachment); const fileId = typeof attachment === 'string' ? undefined : attachment.fileId; const url = typeof attachment !== 'string' && attachment.url ? attachment.url : fileId ? `/api/files/${fileId}` : undefined; const isImage = typeof attachment !== 'string' && (!attachment.type || attachment.type.startsWith('image/')); return isImage && url && /^(?:data:image\/|https?:\/\/|\/api\/files\/)/.test(url) ? <figure className="darl-agent-image-attachment" key={`${name}-${index}`}><button type="button" className="darl-agent-image-trigger" onClick={() => openImagePreview({ src: url, alt: name })} title="点击放大预览"><img src={url} alt={name} loading="lazy" /></button></figure> : <span className="darl-agent-chip" key={`${name}-${index}`}><Paperclip size={12} />{fileId ? <a href={attachmentDownloadUrl(attachment, fileId)}>{name}</a> : name}</span>; })}</div>
+          <div className="darl-agent-message-body">{message.role === 'assistant' && <ExecutionTimeline events={message.timeline} calls={message.toolCalls} streaming={message.streaming} error={message.error} onCopyCode={(code) => void copy(code, `${message.id}-code`)} />}{message.streaming && !message.content && !message.outputs?.length && !hasExecutionActivity(message.timeline, message.toolCalls) && <span role="status"><LoaderCircle size={14} className="darl-agent-spin" /> 正在生成…</span>}{message.role === 'assistant' ? <Markdown content={message.content || speechTranscript(message.outputs)} onCopyCode={(code) => void copy(code, `${message.id}-code`)} /> : editing?.id === message.id ? <textarea className="darl-agent-message-editor" aria-label="编辑消息" autoFocus value={editing.value} rows={editorRows(editing.value)} onChange={(event) => setEditing({ id: message.id, value: event.target.value })} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setEditing(null); } else if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submitEdit(); } }} /> : <p><ReferenceText value={message.content} /></p>}{message.error && <AgentErrorCard error={message.error} />}{message.attachments?.map((attachment, index) => { const name = attachmentName(attachment); const fileId = typeof attachment === 'string' ? undefined : attachment.fileId; const url = typeof attachment !== 'string' && attachment.url ? attachment.url : fileId ? `/api/files/${fileId}` : undefined; const isImage = typeof attachment !== 'string' && (!attachment.type || attachment.type.startsWith('image/')); return isImage && url && /^(?:data:image\/|https?:\/\/|\/api\/files\/)/.test(url) ? <figure className="darl-agent-image-attachment" key={`${name}-${index}`}><button type="button" className="darl-agent-image-trigger" onClick={() => openImagePreview({ src: url, alt: name })} title="点击放大预览"><img src={url} alt={name} loading="lazy" /></button></figure> : <span className="darl-agent-chip" key={`${name}-${index}`}><Paperclip size={12} />{fileId ? <a href={attachmentDownloadUrl(attachment, fileId)}>{name}</a> : name}</span>; })}</div>
           {message.role === 'assistant' && message.content && message.outputs?.some((output) => output.output_type === 'speech') && <details className="darl-agent-speech-transcript"><summary>语音内容</summary><p>{speechTranscript(message.outputs)}</p></details>}
           {message.role === 'assistant' && voice && message.outputs?.some((output) => output.output_type === 'speech') && <div className="darl-agent-message-actions"><Button variant="ghost" size="sm" aria-label={speechState.id === message.id && ['buffering', 'playing'].includes(speechState.state) ? '停止语音' : '播放语音'} onClick={() => speechState.id === message.id && ['buffering', 'playing'].includes(speechState.state) ? stopSpeech() : (() => { player.stop(); void player.prepare().catch(() => {}); for (const output of message.outputs || []) if (output.output_type === 'speech') player.enqueue(output.content, voice.voiceId, message.id); })()}><Volume2 size={14} />{speechState.id === message.id && speechState.state === 'buffering' ? '缓冲中 · 停止' : speechState.id === message.id && speechState.state === 'playing' ? '播放中 · 停止' : '播放语音'}</Button></div>}
-          {renderMessageActions?.(message)}{message.role === 'assistant' && !message.streaming && <div className="darl-agent-message-actions"><Button variant="ghost" size="sm" onClick={() => void copy(message.content || speechTranscript(message.outputs), message.id)}><Clipboard size={13} />{copyState === message.id ? '已复制' : '复制'}</Button>{onRegenerate && <Button variant="ghost" size="sm" disabled={isGenerating} onClick={() => onRegenerate(message.id)}><RefreshCw size={13} />重新生成</Button>}</div>}
+          {renderMessageActions?.(message)}{message.role === 'user' && editing?.id === message.id && <div className="darl-agent-message-actions"><Button variant="ghost" size="sm" disabled={!editing.value.trim() || editBusy} onClick={() => void submitEdit()}>{editBusy ? '发送中…' : '发送'}</Button><Button variant="ghost" size="sm" disabled={editBusy} onClick={() => setEditing(null)}>取消</Button></div>}{message.role === 'user' && editing?.id !== message.id && !message.streaming && <div className="darl-agent-message-actions"><Button variant="ghost" size="icon" aria-label="复制消息" title="复制" onClick={() => void copy(message.content, message.id)}>{copyState === message.id ? <Check size={13} /> : <Clipboard size={13} />}</Button>{onEditMessage && <Button variant="ghost" size="icon" aria-label="编辑消息" title="编辑后重发" disabled={isGenerating || editBusy} onClick={() => beginEdit(message.id, message.content)}><Pencil size={13} /></Button>}</div>}{message.role === 'assistant' && !message.streaming && <div className="darl-agent-message-actions"><Button variant="ghost" size="sm" onClick={() => void copy(message.content || speechTranscript(message.outputs), message.id)}><Clipboard size={13} />{copyState === message.id ? '已复制' : '复制'}</Button>{onRegenerate && <Button variant="ghost" size="sm" disabled={isGenerating} onClick={() => onRegenerate(message.id)}><RefreshCw size={13} />重新生成</Button>}</div>}
         </article>)}
         <div className="darl-agent-scroll-controls" aria-label="消息导航"><Button variant="ghost" size="icon" aria-label="滚动到顶部" title="滚动到顶部" onClick={() => scrollMessages('top')}><ArrowUp size={15} /></Button><Button variant="ghost" size="icon" aria-label="滚动到底部" title="滚动到底部" onClick={() => scrollMessages('bottom')}><ArrowDown size={15} /></Button></div>
       </section>
